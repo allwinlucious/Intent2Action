@@ -14,8 +14,8 @@ kinematics, control, gripper, camera, calibration, perception, force
 control, grasp planning) are done by Intrinsic software. The physics run in
 NVIDIA Isaac Sim 5.1. This is the base layer of a larger product built on
 top of it (owner decision D6): every feature in the Goals is built now, and
-the simulation uses a real sensor model (Intel RealSense D455) with its
-noise.
+the simulation uses a real sensor model (Intel RealSense D455:
+resolution and optics; depth without noise, D8).
 
 Work is split into phases (0 to 6); the phase table is under "Detailed
 Implementation Plan".
