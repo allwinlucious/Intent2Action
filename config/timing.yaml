@@ -1,0 +1,8 @@
+control_hz: 250
+substeps: 4            # physics_dt = 1 / (control_hz * substeps)
+free_run_timeout_s: 1.0
+free_run_wait_s: 0.005
+render_period_wall_s: 5.0  # sim_control callers send /camera/request to get renders sooner
+camera_request_renders: 6   # step 5 measures the minimum and updates this
+tf_every_n_cycles: 8
+stamp_match_tolerance_s: 1.0e-6

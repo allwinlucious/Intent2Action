@@ -337,3 +337,36 @@ Probe commands run as
     deviation.
 7.  If a check cannot pass without a change outside this plan, stop and
     record it.
+
+## Addendum A (finish phase 2)
+
+State after the lead's fixes (lights added, `d455_optical` = identity
+child of `Camera_Pseudo_Depth`, wrench expectation (0, 0, 5.75) N,
+periodic render every 5 s with `sim_control` callers sending
+`/camera/request` to get renders): 8–9 of 10 checks pass, but three are
+unstable across runs:
+
+1.  `camera_fresh`: with `camera_request_renders` 3 the image after a
+    0.5 rad joint-1 move differed by mean 1.11 (< 2); with 6 the probe
+    received no frame at all. Find the cause (annotator lag, Camera Helper
+    publishing on which render, the probe taking the first message per
+    topic, synchronous rendering flags actually applied?) and fix it so a
+    requested frame always shows the state at the request. You may change
+    `sim/run_scene.py`, `sim/graphs.py`, `config/timing.yaml` and the
+    probe. Then do step 5 (minimum N, 10/10).
+2.  `reset` / `/sim/epoch`: the Fast DDS probe received no epoch value,
+    not even the one published by the reset it requested. Find why (QoS
+    match? transient-local + Fast DDS across Windows ↔ WSL? the generic
+    publisher's QoS JSON?) and make a Fast DDS subscriber that subscribes
+    before the reset receive it. Also add to `phase2_peer_hwm.py`
+    (CycloneDDS, the real consumer, `ros2_hwm` later) a check that it
+    receives the latched epoch when it starts after Isaac; report it in
+    its JSON as `epoch_seen`. Data-sharing OFF in `fastdds.xml` was tried
+    and did not help; do not keep it unless it is shown to be needed.
+3.  `lockstep` once reported max tracking error 0.29 rad (other runs
+    0.0016 rad, 0 missed). Find the cause (e.g. a command applied at the
+    wrong cycle after a render, or a held command) and fix it.
+
+Run `tests/e2e/phase2_check.py` three times in a row; all ten checks must
+pass in all three runs. Record findings and fixes in `phase_2_notes.md`
+under "Addendum A". Same constraints as above.
