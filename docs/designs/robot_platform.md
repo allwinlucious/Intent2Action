@@ -143,6 +143,7 @@ connect them to Isaac Sim over ROS 2, and put one gRPC API
 | D4 | 2026-10-27 | No executive, skills or behavior trees | The VLM is the sequencer; it should compose the underlying API calls directly |
 | D5 | 2026-10-27 | Use Intrinsic's stack, not Isaac's controllers (Lula, RMPflow, differential IK) | Intrinsic provides planning, ICON control, calibration, perception and force control as services; Isaac's controllers cover motion only |
 | D6 | 2026-10-27 | Build for the finished product: no needed feature deferred; realistic sensors | This is the base of a larger product |
+| D7 | 2026-10-27 | Isaac I/O only through the ROS 2 bridge's own components; script `rclpy` only where the bridge has none (listed in phase 2) | One integration surface in Isaac; nothing custom serving data from the simulator |
 
 ## Open Questions
 
@@ -317,6 +318,13 @@ connect them to Isaac Sim over ROS 2, and put one gRPC API
 Isaac is run by our script `sim/run_scene.py` (Isaac's Python, headless),
 which builds the scene, sets up Isaac's built-in ROS 2 bridge (OmniGraph
 nodes), and owns the simulation loop.
+
+**Owner decision D7 (2026-10-27): all Isaac I/O goes through the bridge's
+own components** (OmniGraph publish/subscribe nodes, Camera Helper,
+`isaacsim.ros2.sim_control`). Nothing else serves data from Isaac. The
+script's own `rclpy` is allowed only where the bridge has no component for
+the job; each such use is listed by name in the phase 2 plan with the
+reason.
 
 | Channel | ROS 2 interface | Producer / consumer in Isaac |
 |---|---|---|
