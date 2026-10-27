@@ -15,6 +15,9 @@ COPY gen /opt/app/gen
 COPY container/services /opt/app/container/services
 COPY container/config /opt/app/container/config
 COPY container/entrypoint.sh /opt/app/container/entrypoint.sh
+COPY robot_model /opt/app/robot_model
+COPY assets/robots /opt/app/assets/robots
 
 ENV LD_LIBRARY_PATH=/opt/intrinsic/lib
+ENV PYTHONPATH=/opt/app:/opt/app/gen
 ENTRYPOINT ["/opt/app/container/entrypoint.sh"]

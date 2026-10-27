@@ -508,15 +508,11 @@ Eye-to-hand: the D455 is fixed in the scene.
 
 1.  Source: Isaac's `lula_franka_gen.urdf` (path in G3). It is a Lula file
     with extra fixed frames (wrist `camera_*` chain, `panda_face_*`,
-    fingertip points); the phase 1 plan lists which frames are kept.
-2.  Convert to SDF; add Intrinsic tags (`intrinsic:ik_solver
-    kinematic_chain`, flange/tool frames, limits including jerk).
-3.  Build a SceneObject with `sdf_scene_object` + `updates.pbtxt` (limits,
-    `home` configuration), following the UR definitions under
-    `intrinsic/` (the phase 1 plan gives the path).
-4.  The loader stages geometry into CAS/geometry, then creates the object
-    with the SDK's `ObjectWorldClient.create_object(geometry_spec=SceneObject)`.
-5.  Check: FK on 20 random configurations, Intrinsic vs. Isaac (G3).
+    fingertip points); phase 1 lists the dropped frames.
+2.  A Python builder (`robot_model/`) creates the SceneObjects `franka`
+    and `franka_hand` from the URDF and uploads meshes with
+    `GeometryService.CreateGeometry`; see phase 1.
+3.  Check: FK on 20 random configurations, Intrinsic vs. Isaac (G3).
 
 ### Languages and code location
 
@@ -644,6 +640,17 @@ Eye-to-hand: the D455 is fixed in the scene.
 *   **Reason for Rejection**: `wait` flag with a 60 s cap gives both,
     using `google.longrunning` operations.
 
+### Alternative N: SDF + Bazel `sdf_scene_object`
+
+*   **Pros**: The path Intrinsic's own robot definitions (UR, KUKA, …)
+    use; the converter validates the result.
+*   **Cons**: Needs a hand-written SDF and a Bazel build, and the
+    resulting `.gzf` must be unpacked, its geometry uploaded to CAS and
+    re-referenced before `CreateObject`, which only Intrinsic's Go tools do.
+*   **Reason for Rejection**: The Python builder uploads meshes with
+    `GeometryService.CreateGeometry` and uses the same URDF Isaac uses, so
+    there is one source of truth (G3).
+
 --------------------------------------------------------------------------------
 
 ## Non-Functional Requirements
@@ -704,7 +711,7 @@ find). Process per phase:
 |---|---|---|---|
 | 0 | Build + container skeleton: ICON, loopback, localcas, zenohd, image; full flag/port inventory | `phases/phase_0.md` | All services start in the container; planner and world answer |
 | 0.5 | ROS 2 interop + latency + firewall check (after `wsl --shutdown` for mirrored networking) | `phases/phase_0_5.md` | Messages flow both ways Docker ↔ Isaac; round trip measured; Hyper-V firewall inbound = block |
-| 1 | Franka in Intrinsic: SDF scene object, loader, ICON with loopback | `phases/phase_1.md` | IK/FK work, G3 check passes, ICON moves the Franka in loopback |
+| 1 | Franka in Intrinsic: SceneObjects from the URDF, loader, ICON with loopback | `phases/phase_1.md` | IK/FK work, G3 check passes, ICON moves the Franka in loopback |
 | 2 | Isaac: `run_scene.py`, scene + catalog, D455, wrench, sim services, timing | `phases/phase_2.md` | From the container: joint states, commands move the arm, RGB + depth arrive, `GetEntities` lists the cube; Q7 answered |
 | 3 | `ros2_hwm` (arm, gripper, F/T, clock, lockstep), `scene_sync`, `robot_service` motion/gripper/scene/safety + `SimService` | `phases/phase_3.md` | CUJ 2, CUJ 4, CUJ 5 and CUJ 7 pass; `Grasp` reports gripping; planner avoids a box |
 | 3b | `camera_sim` | `phases/phase_3b.md` | `GetImage` returns D455 frames; G5 holds |

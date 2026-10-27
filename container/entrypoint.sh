@@ -26,6 +26,7 @@ sleep 5
 run planner      "$BIN/motion_planner_service_assetized_main" --runtime_context_file="$CFG/motion_planner.runtime.pb" \
                    --world_service_address=localhost:18000 --geometry_service_address=localhost:18001 \
                    --zenoh_router="$ZENOH"
+python3 -m robot_model.load_franka || { echo "[loader] failed" >&2; exit 1; }
 run hwm          "$BIN/loopback_hardware_module_main" --module_config_file="$CFG/loopback_hwm.txtpb" --logger_connection_timeout=0s
 run icon         "$BIN/generic_icon_machine_server" --config_pbtxt_file="$CFG/icon.txtpb" --non_realtime \
                    --icon_server_port=18003 --use_runtime_asset_fallback=false --server_name=robot \

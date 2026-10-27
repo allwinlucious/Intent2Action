@@ -17,6 +17,16 @@ sg docker -c "docker build -f container/Dockerfile -t intrinsic-core:dev ."
 container/run.sh
 ```
 
+## Franka loader
+
+`robot_model/` builds the SceneObjects `franka` (arm) and `franka_hand`
+from `assets/robots/franka/lula_franka_gen.urdf` and uploads the meshes
+with `GeometryService.CreateGeometry`. `entrypoint.sh` runs
+`python3 -m robot_model.load_franka` in the foreground after the planner
+starts and before the HWM and ICON, so ICON's main loop sees the robot.
+Loading is delete-then-create, so restarts with the persisted world volume
+work. If the loader fails, the container exits.
+
 ## Ports
 
 | Process | Port | Bind |

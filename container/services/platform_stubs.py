@@ -22,7 +22,8 @@ LOCAL_VERSION = "0.0.0-local"
 
 
 class ResourceRegistry(registry_grpc.ResourceRegistryServicer):
-    # shortcut: no resource instances yet; add the Franka/ICON instance when ICON gets its arm part (phase 1).
+    # shortcut: no resource instances; ICON reads its config file and does not need one.
+    # Add instances if a service starts requiring them.
     instances: dict[str, registry_pb.ResourceInstance] = {}
 
     def ListResourceInstances(self, request, context):
