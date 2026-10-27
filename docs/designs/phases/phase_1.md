@@ -68,7 +68,7 @@ Not in this phase: gripper motion (phase 3), Isaac connection (phases 0.5,
         `entity_names: ["panda_link7"]`).
 *   **Dropped URDF frames:** all `camera_*` (wrist camera; our D455 is fixed
     in the scene), `panda_face_*`, forearm/wrist points, fingertips.
-*   **Limits** (system limits = application limits): position, velocity and
+*   **Limits** (application velocity, acceleration and jerk = 0.95 × system; ICON requires ≥ 5% margin): position, velocity and
     effort from the URDF; acceleration
     `[15, 7.5, 10, 12.5, 15, 20, 20]` rad/s² and jerk
     `[7500, 3750, 5000, 6250, 7500, 10000, 10000]` rad/s³ from Isaac's Lula

@@ -80,7 +80,11 @@ def load(world_channel, geometry_channel, asset_dir: Path) -> None:
     if name in existing:
       world.DeleteObject(
           updates_pb.DeleteObjectRequest(
-              world_id=WORLD_ID, object=_by_name(name), force=True
+              world_id=WORLD_ID,
+              object=_by_name(name),
+              # Keep attached objects (calibration board, held parts) in the
+              # world instead of deleting them with the robot.
+              reparent_child_objects=True,
           ),
           timeout=RPC_TIMEOUT_S,
       )

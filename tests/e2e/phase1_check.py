@@ -51,7 +51,7 @@ MOVE_TIMEOUT_S = 30
 ICON_WAIT_S = 180
 WORLD_ID = "world"
 DEFAULT_Q = [0.0, -1.3, 0.0, -2.87, 0.0, 2.0, 0.75]  # Lula default_q
-READY = [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785]
+READY = list(fso.HOME)
 FK_TOLERANCE = (1e-3, 0.1)  # metres, degrees (G3)
 IK_TOLERANCE = (1e-4, 0.01)
 JOINT_TOLERANCE_RAD = 1e-3
@@ -407,7 +407,7 @@ CHECKS = (
 
 def check_idempotent() -> None:
   """After a restart: ICON comes back and the loader did not duplicate the robot."""
-  _wait_for_icon_port()
+  _wait_for_ports()
   names = [
       o.name
       for o in _world(
@@ -427,7 +427,7 @@ def _describe(error: Exception) -> str:
   return f"{type(error).__name__}: {error}"
 
 
-def _wait_for_icon_port() -> None:
+def _wait_for_ports() -> None:
   # ICON opens last, but the planner can still be starting; wait for all ports.
   deadline = time.monotonic() + ICON_WAIT_S
   for port in (18000, 18001, 18002, ICON_PORT):
@@ -465,7 +465,7 @@ def main() -> int:
     ]
   else:
     with contextlib.suppress(TimeoutError):  # the ICON checks then report it
-      _wait_for_icon_port()
+      _wait_for_ports()
     ok = True
     checks = list(CHECKS)
   results = [_run(name, check) for name, check in checks]

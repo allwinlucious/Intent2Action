@@ -98,3 +98,30 @@ def test_build_arm(urdf):
       if c.name == "home"
   ]
   assert len(home.joint_positions) == 7
+
+
+def test_build_hand(urdf):
+  meshes = [
+      mesh
+      for link in urdf.links.values()
+      for mesh in (link.visual, link.collision)
+      if mesh is not None
+  ]
+  refs = {
+      fso.mesh_key(m.filename): geometry_storage_refs_pb2.GeometryStorageRefs()
+      for m in meshes
+  }
+  hand = fso.build_hand(urdf, refs)
+  shapes = hand.entities[0].link.geometry_component.named_geometries
+  trs = shapes[fso.COLLISION_SET].named_geometries["right_finger"].ref_t_shape.trs
+  # Rz(-pi/4) * ((0, -0.04, 0.0584) open finger) * Rz(pi) mesh origin.
+  c = math.sqrt(0.5) * 0.04
+  assert (trs.translation.x, trs.translation.y, trs.translation.z) == (
+      pytest.approx((-c, -c, 0.0584), abs=1e-9)
+  )
+  yaw = math.remainder(trs.rotation_rpy.y - 3 * math.pi / 4, 2 * math.pi)
+  assert (trs.rotation_rpy.r, trs.rotation_rpy.p, yaw) == pytest.approx(
+      (0.0, 0.0, 0.0), abs=1e-9
+  )
+  (tcp,) = [e for e in hand.entities if e.name == "tcp"]
+  assert tcp.parent_t_this.position.z == pytest.approx(0.1)
