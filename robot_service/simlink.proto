@@ -1,0 +1,46 @@
+// Internal API of scene_sync: everything that needs a ROS 2 service call to
+// Isaac (Fast DDS, same vendor as Isaac). Used by robot_service only.
+syntax = "proto3";
+
+package robot.simlink.v1;
+
+import "google/protobuf/empty.proto";
+import "robot_service/robot_service.proto";
+
+message SpawnRequest {
+  string catalog = 1;
+  string name = 2;
+  robot.v1.Pose pose = 3;
+}
+
+message NameRequest {
+  string name = 1;
+}
+
+message ResetResponse {
+  uint32 epoch = 1;  // the epoch after the reset
+}
+
+message SetAttachedRequest {
+  string name = 1;
+  bool attached = 2;  // attached objects are not pose-updated from /tf
+}
+
+message TruePoseRequest {
+  string frame = 1;
+}
+
+message ClockResponse {
+  double sim_time = 1;  // latest /clock
+}
+
+service SimLink {
+  rpc Spawn(SpawnRequest) returns (google.protobuf.Empty);
+  rpc Delete(NameRequest) returns (google.protobuf.Empty);
+  rpc Reset(google.protobuf.Empty) returns (ResetResponse);
+  rpc AttachBoard(google.protobuf.Empty) returns (google.protobuf.Empty);
+  rpc DetachBoard(google.protobuf.Empty) returns (google.protobuf.Empty);
+  rpc SetAttached(SetAttachedRequest) returns (google.protobuf.Empty);
+  rpc GetTruePose(TruePoseRequest) returns (robot.v1.Pose);
+  rpc GetClock(google.protobuf.Empty) returns (ClockResponse);
+}

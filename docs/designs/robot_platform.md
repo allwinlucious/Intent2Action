@@ -303,7 +303,7 @@ connect them to Isaac Sim over ROS 2, and put one gRPC API
     *   `robot_service`: no direct ROS 2 link to Isaac; Isaac operations go
         through `SimLink`. Its only ROS 2 peer is the grasp planner.
     *   Grasp planner: CycloneDDS (apt `rmw_cyclonedds_cpp`), the same
-        vendor as `robot_service`'s Bazel ROS 2.
+        vendor as `robot_service`'s `rclpy` (CycloneDDS).
     *   Discovery on both sides: unicast to 127.0.0.1, multicast off
         (multicast does not cross Windows ↔ WSL both ways). Configuration in
         `container/dds/` (phase 0.5).
@@ -472,14 +472,14 @@ into Intrinsic; the robot, the camera and the ground are not.
 ### Ground truth and belief
 
 *   Isaac is the only place objects are created. `scene_sync` follows
-    `/tf` (poses, 30 Hz sim time) and `GetEntities` (which objects exist,
-    on change of the `/tf` frame set) and mirrors catalog objects into
-    `sim_world` (geometry from the catalog via CAS).
+    `/tf` (which objects exist and their poses) and mirrors catalog objects
+    into `sim_world` (geometry from the catalog via CAS); details in
+    phase 3 decision 15.
 *   `world` is the belief world the planner uses. `belief_source` is a
     start-up setting (`config/robot_service.yaml`, read by `scene_sync` and
     `robot_service`; changing it means restarting the container):
     *   `GROUND_TRUTH` (default until phase 5): `scene_sync` also mirrors
-        catalog objects into `world` (create with `SyncObject` when new,
+        catalog objects into `world` (create when new,
         update the pose on change, delete when gone), marked
         `ground_truth`. `DetectObjects` then only returns estimates and
         does not write.
@@ -745,7 +745,7 @@ find). Process per phase:
 | 1 | Franka in Intrinsic: SceneObjects from the URDF, loader, ICON with loopback | `phases/phase_1.md` | IK/FK work, G3 check passes, ICON moves the Franka in loopback |
 | 2 | Isaac: `run_scene.py`, scene + catalog, D455, wrench, sim services, timing | `phases/phase_2.md` | From the container: joint states, commands move the arm, RGB + depth arrive, `GetEntities` lists the cube; Q7 answered |
 | 3 | `ros2_hwm` (arm, gripper, F/T, clock, lockstep), `scene_sync`, `robot_service` motion/gripper/scene/safety + `SimService` | `phases/phase_3.md` | CUJ 2, CUJ 4, CUJ 5 and CUJ 7 pass; `Grasp` reports gripping; planner avoids a box |
-| 3b | `camera_sim` | `phases/phase_3b.md` | `GetImage` returns D455 RGB and depth frames through `CameraService` |
+| 3b | `camera_sim` (part of phase 3) | `phases/phase_3.md` | `GetImage` returns D455 RGB and depth frames through `CameraService` |
 | 4 | Calibration via `CalibrationService` | `phases/phase_4.md` | CUJ 3 / G6 |
 | 5 | Perception: Triton, models (train if needed), FoundationPose | `phases/phase_5.md` | G7; belief world filled in `PERCEPTION` mode |
 | 5b | Force/contact | `phases/phase_5b.md` | CUJ 6 / G8 |

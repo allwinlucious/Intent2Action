@@ -1,0 +1,358 @@
+// The robot API. Every RPC is implemented only with Intrinsic APIs (design
+// goal G4). The MCP server generates one tool per RPC of RobotService from
+// this file: RPC comments become tool descriptions, request messages the
+// input schemas. Units: metres, radians, seconds, newtons, kilograms.
+syntax = "proto3";
+
+package robot.v1;
+
+import "google/longrunning/operations.proto";
+import "google/protobuf/empty.proto";
+
+// Position (m) and orientation (unit quaternion) of a frame.
+message Pose {
+  double x = 1;
+  double y = 2;
+  double z = 3;
+  double qx = 4;
+  double qy = 5;
+  double qz = 6;
+  double qw = 7;
+}
+
+// Seven arm joint positions (rad), joint 1 first.
+message Joints {
+  repeated double positions = 1;
+}
+
+message Wrench {
+  double fx = 1;
+  double fy = 2;
+  double fz = 3;
+  double tx = 4;
+  double ty = 5;
+  double tz = 6;
+}
+
+enum Motion {
+  MOTION_UNSPECIFIED = 0;  // treated as ANY
+  ANY = 1;                 // any collision-free path
+  LINEAR = 2;              // straight line of the tool in Cartesian space
+}
+
+enum ToolFrame {
+  TOOL_FRAME_UNSPECIFIED = 0;  // treated as TCP
+  TCP = 1;                     // between the fingertips (frame `tcp`)
+  FLANGE = 2;                  // robot flange (frame `flange`)
+}
+
+// Long-running calls: with wait = true the call blocks up to 60 s and
+// returns the Operation (done or still running); with wait = false it
+// returns at once. Poll with google.longrunning.Operations.
+// Operation.metadata is OperationInfo; Operation.response is the RPC's
+// documented result message.
+message OperationInfo {
+  string kind = 1;              // e.g. "MoveToPose"
+  double planned_duration_s = 2;
+}
+
+message MoveToPoseRequest {
+  Pose pose = 1;               // target pose of `tool`, in the robot base frame
+  Motion motion = 2;
+  ToolFrame tool = 3;
+  bool wait = 4;
+}
+
+message MoveJointsRequest {
+  Joints joints = 1;
+  bool wait = 2;
+}
+
+message HomeRequest {
+  bool wait = 1;
+}
+
+message Waypoint {
+  oneof target {
+    Pose pose = 1;
+    Joints joints = 2;
+  }
+  Motion motion = 3;
+  // Blending radius at this waypoint (m); 0 = stop exactly.
+  double blend_radius = 4;
+}
+
+message MoveWaypointsRequest {
+  repeated Waypoint waypoints = 1;
+  ToolFrame tool = 2;
+  bool wait = 3;
+}
+
+// Result of every motion call (Operation.response).
+message MotionResult {
+  Joints final_joints = 1;
+  double duration_s = 2;
+}
+
+message PlanOnlyRequest {
+  repeated Waypoint waypoints = 1;
+  ToolFrame tool = 2;
+}
+
+message PlanOnlyResponse {
+  double duration_s = 1;
+  Joints final_joints = 2;
+  // Axis-aligned bounds of the swept volume in the base frame.
+  Pose swept_min = 3;
+  Pose swept_max = 4;
+}
+
+message ComputeIkRequest {
+  Pose pose = 1;
+  ToolFrame tool = 2;
+  Joints seed = 3;  // optional; current joints when empty
+}
+
+message ComputeIkResponse {
+  Joints joints = 1;
+}
+
+message ComputeFkRequest {
+  Joints joints = 1;
+  ToolFrame tool = 2;
+}
+
+message ComputeFkResponse {
+  Pose pose = 1;
+}
+
+message CheckCollisionsRequest {
+  oneof target {
+    Joints joints = 1;
+    Pose pose = 2;
+  }
+  ToolFrame tool = 3;
+}
+
+message CheckCollisionsResponse {
+  bool in_collision = 1;
+  repeated string colliding_pairs = 2;  // "objectA/objectB"
+}
+
+message GetStateResponse {
+  Joints joints = 1;
+  Pose tool_pose = 2;           // TCP in the base frame
+  Wrench wrench = 3;            // at the F/T sensor, tared if TareWrench ran
+  double gripper_width = 4;     // m
+  bool gripping = 5;
+  bool enabled = 6;
+  bool faulted = 7;
+  string fault_reason = 8;
+  double speed_factor = 9;
+}
+
+message MoveToContactRequest {
+  // Unit direction in the base frame.
+  double dx = 1;
+  double dy = 2;
+  double dz = 3;
+  double max_force = 4;  // N
+  double speed = 5;      // m/s
+  bool wait = 6;
+}
+
+message MoveCompliantRequest {
+  Pose pose = 1;          // TCP target
+  double stiffness = 2;   // N/m
+  double max_force = 3;   // N
+  bool wait = 4;
+}
+
+message PlanGraspRequest {
+  string object = 1;
+}
+
+message PlanGraspResponse {
+  Pose grasp = 1;      // TCP pose
+  Pose pregrasp = 2;   // TCP pose
+  Joints grasp_joints = 3;
+}
+
+message SetSpeedRequest {
+  double factor = 1;  // (0, 1]
+}
+
+message JogRequest {
+  int32 joint = 1;     // 1..7
+  double velocity = 2; // rad/s, signed
+  double duration_s = 3;
+}
+
+message GripperRequest {
+  bool wait = 1;
+}
+
+// Operation.response of Grasp and Release.
+message GripperResult {
+  double width = 1;
+  bool gripping = 2;
+}
+
+message IsGrippingResponse {
+  bool gripping = 1;
+  double width = 2;
+}
+
+message ObjectRequest {
+  string name = 1;
+}
+
+message SetPayloadRequest {
+  double mass = 1;  // kg; 0 clears the payload
+  double com_x = 2; // centre of mass in the flange frame (m)
+  double com_y = 3;
+  double com_z = 4;
+}
+
+message WorldObject {
+  string name = 1;
+  string source = 2;  // "ground_truth" or "perceived"
+  Pose pose = 3;      // in the base frame
+  string attached_to = 4;  // "" or the parent frame
+}
+
+message ListObjectsResponse {
+  repeated WorldObject objects = 1;
+}
+
+enum ImageKind {
+  IMAGE_KIND_UNSPECIFIED = 0;  // treated as RGB
+  RGB = 1;
+  DEPTH = 2;
+}
+
+message GetImageRequest {
+  ImageKind kind = 1;
+}
+
+message GetImageResponse {
+  ImageKind kind = 1;
+  int32 width = 2;
+  int32 height = 3;
+  bytes png = 4;            // RGB: 8-bit PNG; DEPTH: 16-bit PNG in mm
+  double sim_time = 5;
+}
+
+message GetPointCloudResponse {
+  // Points in the camera frame `d455_optical` (m), x0 y0 z0 x1 ...
+  repeated float xyz = 1;
+  Pose camera_pose = 2;  // in the base frame (from calibration; identity until calibrated)
+  bool camera_calibrated = 3;
+}
+
+message CalibrateCameraRequest {
+  bool wait = 1;
+}
+
+message CalibrationResult {
+  Pose camera_pose = 1;
+  double reprojection_error_px = 2;
+  int32 poses_used = 3;
+}
+
+message DetectObjectsRequest {
+  repeated string objects = 1;  // catalog names to look for; empty = all
+  bool wait = 2;
+}
+
+message Detection {
+  string object = 1;
+  Pose pose = 2;
+  double score = 3;
+}
+
+message DetectionResult {
+  repeated Detection detections = 1;
+}
+
+service RobotService {
+  // Robot state: joints, tool pose, wrench, gripper, faults, speed.
+  rpc GetState(google.protobuf.Empty) returns (GetStateResponse);
+  // Move the tool to a pose (collision-free; LINEAR for a straight line).
+  rpc MoveToPose(MoveToPoseRequest) returns (google.longrunning.Operation);
+  // Move to joint positions.
+  rpc MoveJoints(MoveJointsRequest) returns (google.longrunning.Operation);
+  // Move to the home configuration.
+  rpc Home(HomeRequest) returns (google.longrunning.Operation);
+  // Move through several waypoints with optional blending.
+  rpc MoveWaypoints(MoveWaypointsRequest) returns (google.longrunning.Operation);
+  // Plan without moving: duration and swept volume.
+  rpc PlanOnly(PlanOnlyRequest) returns (PlanOnlyResponse);
+  // Inverse kinematics for a tool pose.
+  rpc ComputeIk(ComputeIkRequest) returns (ComputeIkResponse);
+  // Forward kinematics: tool pose for joint positions.
+  rpc ComputeFk(ComputeFkRequest) returns (ComputeFkResponse);
+  // Check a configuration or pose for collisions.
+  rpc CheckCollisions(CheckCollisionsRequest) returns (CheckCollisionsResponse);
+  // Wrench at the wrist sensor.
+  rpc GetWrench(google.protobuf.Empty) returns (Wrench);
+  // Zero the wrist sensor (removes the current static load).
+  rpc TareWrench(google.protobuf.Empty) returns (google.protobuf.Empty);
+  // Move along a direction until the force limit is reached.
+  rpc MoveToContact(MoveToContactRequest) returns (google.longrunning.Operation);
+  // Move toward a pose while yielding to contact forces.
+  rpc MoveCompliant(MoveCompliantRequest) returns (google.longrunning.Operation);
+  // Plan a grasp for an object in the world.
+  rpc PlanGrasp(PlanGraspRequest) returns (PlanGraspResponse);
+  // Stop the current motion (not a fault).
+  rpc Stop(google.protobuf.Empty) returns (google.protobuf.Empty);
+  // Scale the speed of following motions.
+  rpc SetSpeed(SetSpeedRequest) returns (google.protobuf.Empty);
+  // Clear robot faults.
+  rpc ClearFaults(google.protobuf.Empty) returns (google.protobuf.Empty);
+  // Jog one joint at a velocity for a duration.
+  rpc Jog(JogRequest) returns (google.protobuf.Empty);
+  // Close the gripper until it stops (on an object or fully closed).
+  rpc Grasp(GripperRequest) returns (google.longrunning.Operation);
+  // Open the gripper.
+  rpc Release(GripperRequest) returns (google.longrunning.Operation);
+  // Whether the gripper holds something.
+  rpc IsGripping(google.protobuf.Empty) returns (IsGrippingResponse);
+  // Treat an object as held by the gripper (planning).
+  rpc AttachObject(ObjectRequest) returns (google.protobuf.Empty);
+  // Release an attached object back into the scene (planning).
+  rpc DetachObject(ObjectRequest) returns (google.protobuf.Empty);
+  // Set the mass of what the robot carries.
+  rpc SetPayload(SetPayloadRequest) returns (google.protobuf.Empty);
+  // Objects in the robot's world model.
+  rpc ListObjects(google.protobuf.Empty) returns (ListObjectsResponse);
+  // Take a camera image.
+  rpc GetImage(GetImageRequest) returns (GetImageResponse);
+  // Take a point cloud from the depth camera.
+  rpc GetPointCloud(google.protobuf.Empty) returns (GetPointCloudResponse);
+  // Calibrate the camera against the robot (board must be attached).
+  rpc CalibrateCamera(CalibrateCameraRequest) returns (google.longrunning.Operation);
+  // Detect objects and update the world model.
+  rpc DetectObjects(DetectObjectsRequest) returns (google.longrunning.Operation);
+}
+
+// Simulation-only operations for developers and tests; not exposed to the
+// VLM.
+message AddObjectRequest {
+  string catalog = 1;
+  string name = 2;
+  Pose pose = 3;  // bottom centre, in the world frame
+}
+
+message GetTruePoseRequest {
+  string frame = 1;  // an object name, "panda_hand" or "Camera_Pseudo_Depth"
+}
+
+service SimService {
+  rpc AddObject(AddObjectRequest) returns (google.protobuf.Empty);
+  rpc RemoveObject(ObjectRequest) returns (google.protobuf.Empty);
+  rpc ResetScene(google.protobuf.Empty) returns (google.protobuf.Empty);
+  rpc GetTruePose(GetTruePoseRequest) returns (Pose);
+  rpc AttachCalibrationBoard(google.protobuf.Empty) returns (google.protobuf.Empty);
+  rpc DetachCalibrationBoard(google.protobuf.Empty) returns (google.protobuf.Empty);
+}
