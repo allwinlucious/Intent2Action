@@ -235,10 +235,15 @@ def main() -> int:
           f"no result: {output[-300:]}",
       )
     else:
+      # No reset has run yet, so the latched epoch is the start-up one.
       results["lockstep"] = (
-          hwm["missed"] == 0 and hwm["max_track_err_rad"] < 0.01,
+          hwm["missed"] == 0
+          and hwm["max_track_err_rad"] < 0.01
+          and hwm["epoch_seen"] == 0,
           f"cycles {hwm['cycles']} missed {hwm['missed']} max tracking error"
-          f" {hwm['max_track_err_rad']:.5f} rad rtf {hwm['rtf']}",
+          f" {hwm['max_track_err_rad']:.5f} rad rtf {hwm['rtf']}; started"
+          f" after {hwm['start_pairs']} replies; latched epoch"
+          f" {hwm['epoch_seen']}",
       )
       advance, resume = hwm["pause_sim_advance_s"], hwm["resume_cycles"]
       results["free_run"] = (

@@ -7,11 +7,17 @@ For each /joint_states + /wrist_wrench pair with the same stamp t (within
 --request-period-s it also publishes /camera/request at that wall period.
 Run in the intrinsic-core:dev image by tests/e2e/phase2_check.py; prints one
 JSON line at the end:
-  {"cycles", "missed", "max_track_err_rad", "rtf", "pause_sim_advance_s", "resume_cycles"}
+  {"cycles", "missed", "max_track_err_rad", "rtf", "pause_sim_advance_s",
+   "resume_cycles", "start_pairs", "epoch_seen"}
+epoch_seen is the latched /sim/epoch it received (None if none);
+start_pairs the replies it sent before Isaac followed them.
 
-τ is the trajectory time: 0 at the first pair, advanced by the stamp step,
-and by one control cycle across the pause, so the command never jumps. The
-first SETTLE_CYCLES after the start and after the resume are left out of the
+τ is the trajectory time: 0 until joint 1 follows the commands (Isaac may
+hold the arm while discovery is still delivering the first replies), then
+advanced by the stamp step, and by one control cycle across the pause, so the
+command never jumps. The cycles, RTF, misses and tracking error count from that
+start: before it, /joint_states may match a cycle before /wrist_wrench does.
+The first SETTLE_CYCLES after the start and after the resume are left out of the
 tracking error, as in the measurement it is based on (phase_2_inventory.md
 §2.3). Lockstep has resumed when a state shows joint 1 reacting to a command
 again (its velocity steps by more than RESUMED_VELOCITY_STEP).
@@ -31,6 +37,7 @@ from rclpy.qos import QoSProfile
 from rclpy.qos import ReliabilityPolicy
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Header
+from std_msgs.msg import UInt32
 import yaml
 
 TIMING_PATH = "/opt/app/config/timing.yaml"
@@ -52,6 +59,12 @@ QOS = QoSProfile(
     depth=1,
     durability=DurabilityPolicy.VOLATILE,
 )
+LATCHED = QoSProfile(
+    reliability=ReliabilityPolicy.RELIABLE,
+    history=HistoryPolicy.KEEP_LAST,
+    depth=1,
+    durability=DurabilityPolicy.TRANSIENT_LOCAL,
+)
 
 
 def _ns(header) -> int:
@@ -72,9 +85,12 @@ def main() -> int:
   node = rclpy.create_node("phase2_peer_hwm")
   command = node.create_publisher(JointState, "/joint_command", QOS)
   request = node.create_publisher(Header, "/camera/request", QOS)
-  states = {}  # stamp ns -> (arrival, message)
+  states = {}  # stamp ns -> (arrival, message, arrived after the start)
   wrenches = {}  # stamp ns -> arrival
   run = {
+      "started": False,
+      "start_pairs": 0,
+      "epoch": None,
       "pairs": 0,
       "missed": 0,
       "tau": 0.0,
@@ -90,11 +106,31 @@ def main() -> int:
       "resume_cycles": None,
   }
 
+  def publish(state: JointState, tau: float) -> float:
+    """Commands the trajectory at τ, stamped as state; returns joint 1's target."""
+    phase = 2 * math.pi * FREQUENCY_HZ * tau
+    position = list(HOME)
+    velocity = [0.0] * 7
+    position[0] += AMPLITUDE_RAD * math.sin(phase)
+    velocity[0] = AMPLITUDE_RAD * 2 * math.pi * FREQUENCY_HZ * math.cos(phase)
+    out = JointState(name=NAMES, position=position, velocity=velocity)
+    out.header.stamp = state.header.stamp
+    command.publish(out)
+    return position[0]
+
   def reply(stamp_ns: int, state: JointState) -> None:
     q1 = state.position[state.name.index("panda_joint1")]
     v1 = state.velocity[state.name.index("panda_joint1")]
     prev = run["prev"]
-    if prev is None:
+    if not run["started"]:
+      # The first replies may not reach Isaac (discovery), and Isaac holding
+      # the arm at home looks like lockstep; so τ stays 0 until joint 1
+      # follows the velocity feed-forward of the τ = 0 command.
+      if prev is None or abs(v1) <= RESUMED_VELOCITY_STEP:
+        run["start_pairs"] += 1
+        run["prev"] = (stamp_ns, publish(state, 0.0), v1)
+        return
+      run["started"] = True
       run["first"] = (stamp_ns, time.monotonic())
     elif run["resumed"]:
       run["tau"] += cycle_s
@@ -113,15 +149,7 @@ def main() -> int:
     ):
       run["resume_cycles"] = run["replies_since_resume"]
 
-    phase = 2 * math.pi * FREQUENCY_HZ * run["tau"]
-    position = list(HOME)
-    velocity = [0.0] * 7
-    position[0] += AMPLITUDE_RAD * math.sin(phase)
-    velocity[0] = AMPLITUDE_RAD * 2 * math.pi * FREQUENCY_HZ * math.cos(phase)
-    out = JointState(name=NAMES, position=position, velocity=velocity)
-    out.header.stamp = state.header.stamp
-    command.publish(out)
-    run["prev"] = (stamp_ns, position[0], v1)
+    run["prev"] = (stamp_ns, publish(state, run["tau"]), v1)
     run["pairs"] += 1
     run["segment_pairs"] += 1
     if run["pause_stamp"] is not None:
@@ -136,13 +164,13 @@ def main() -> int:
       )
       if wrench_ns is None:
         continue
-      _, state = states.pop(state_ns)
+      _, state, _ = states.pop(state_ns)
       del wrenches[wrench_ns]
       reply(state_ns, state)
 
   def on_state(msg: JointState) -> None:
     stamp_ns = _ns(msg.header)
-    states[stamp_ns] = (time.monotonic(), msg)
+    states[stamp_ns] = (time.monotonic(), msg, run["started"])
     try_pair(stamp_ns)
 
   def on_wrench(msg: WrenchStamped) -> None:
@@ -152,12 +180,16 @@ def main() -> int:
 
   node.create_subscription(JointState, "/joint_states", on_state, QOS)
   node.create_subscription(WrenchStamped, "/wrist_wrench", on_wrench, QOS)
+  # Started after Isaac, so this is the latched value (decision 6).
+  node.create_subscription(
+      UInt32, "/sim/epoch", lambda m: run.update(epoch=m.data), LATCHED
+  )
 
   def prune(now: float) -> None:
-    for state_ns, (arrival, _) in list(states.items()):
+    for state_ns, (arrival, _, started) in list(states.items()):
       if now - arrival > MISS_TIMEOUT_S:
         del states[state_ns]
-        run["missed"] += 1
+        run["missed"] += started
     for wrench_ns, arrival in list(wrenches.items()):
       if now - arrival > MISS_TIMEOUT_S:
         del wrenches[wrench_ns]
@@ -202,6 +234,8 @@ def main() -> int:
               "rtf": rtf,
               "pause_sim_advance_s": run["pause_advance_s"],
               "resume_cycles": run["resume_cycles"],
+              "start_pairs": run["start_pairs"],
+              "epoch_seen": run["epoch"],
           }
       ),
       flush=True,

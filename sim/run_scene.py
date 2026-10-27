@@ -37,10 +37,6 @@ simulation_app = SimulationApp(
     }
 )
 
-import carb  # DEBUG
-
-_s = carb.settings.get_settings()  # DEBUG
-print("DEBUG settings", {k: _s.get(k) for k in ("/app/asyncRendering", "/app/asyncRenderingLowLatency", "/omni/replicator/asyncRendering", "/app/hydraEngine/waitIdle")}, flush=True)  # DEBUG
 from isaacsim.core.utils.extensions import enable_extension  # noqa: E402  pylint: disable=g-import-not-at-top
 
 enable_extension("isaacsim.ros2.bridge")
@@ -133,6 +129,12 @@ class Scene:
     self.graphs = graphs_lib.Graphs(
         scene_lib.ROBOT_PRIM, self.camera.get_render_product_path()
     )
+    # The first render activates the Camera Helper writers and their image
+    # gates; from then on images are published only on request (the second
+    # render is the one the closed gate still lets through, see render()).
+    self.sim.render()
+    self.graphs.set_image_publishing(False)
+    self.sim.render()
     self.refresh_tf_targets()
     self.epoch = 0
     self.graphs.publish_epoch(self.epoch)
@@ -219,13 +221,25 @@ def main() -> None:
   log_wall, log_sim, log_cycles = time.perf_counter(), sim.current_time, 0
   log_renders, log_render_s = 0, 0.0
 
-  def render(count: int) -> None:
+  def render(count: int, publish_images: bool) -> None:
+    """count renders; with publish_images, the last one publishes the images.
+
+    The first render after physics steps can still show the previous state,
+    so only the last of a request's renders is published. A closed image
+    gate takes effect one render late, so one more render follows at the
+    same sim time; otherwise the next render would publish an old frame with
+    a new stamp (phase_2_notes.md, Addendum A).
+    """
     nonlocal renders, render_s, last_render
     start = time.perf_counter()
-    for _ in range(count):
+    for i in range(count):
+      graphs.set_image_publishing(publish_images and i == count - 1)
       sim.render()
+    if publish_images:
+      graphs.set_image_publishing(False)
+      sim.render()
+      count += 1
     last_render = time.perf_counter()
-    print(f"DEBUG render x{count} t={sim.current_time:.4f} {1e3 * (last_render - start):.0f} ms", flush=True)  # DEBUG
     renders += count
     render_s += last_render - start
     # sim_control spawns and deletes only inside renders (Inv §5.2).
@@ -287,9 +301,9 @@ def main() -> None:
       request_count, pending_request = count, request_stamp
     if pending_request is not None and t >= pending_request - tolerance_s:
       pending_request = None
-      render(timing["camera_request_renders"])
+      render(timing["camera_request_renders"], publish_images=True)
     elif time.perf_counter() - last_render >= timing["render_period_wall_s"]:
-      render(1)
+      render(1, publish_images=False)
 
     rclpy.spin_once(node, timeout_sec=0)
 

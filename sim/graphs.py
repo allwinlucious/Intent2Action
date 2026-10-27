@@ -8,6 +8,8 @@ import json
 
 import numpy as np
 import omni.graph.core as og
+import omni.syntheticdata
+from omni.syntheticdata import _syntheticdata as sd
 import usdrt.Sdf
 
 KEYS = og.Controller.Keys
@@ -19,6 +21,19 @@ OPTICAL_FRAME = "d455_optical"
 # The bridge already publishes the camera prim's /tf in ROS optical convention
 # (z forward, y down; phase_2_notes.md), so d455_optical is the same frame.
 OPTICAL_ROTATION_IJKR = [0.0, 0.0, 0.0, 1.0]
+# A bridge ROS2Publisher creates its DDS writer on its 2nd evaluation and
+# publishes from its 3rd (phase_2_notes.md, Addendum A).
+PUBLISHER_WARMUP_EVALUATIONS = 2
+# Gates in front of the Camera Helper writers, one per render product; the
+# helper sets their inputs:step itself (OgnROS2CameraHelper.post_attach).
+IMAGE_GATES = [
+    omni.syntheticdata.SyntheticData.convert_sensor_type_to_rendervar(name)
+    + "IsaacSimulationGate"
+    for name in (
+        sd.SensorType.Rgb.name,
+        sd.SensorType.DistanceToImagePlane.name,
+    )
+]
 
 
 def _qos(durability: str = "volatile") -> str:
@@ -196,9 +211,14 @@ class Graphs:
     og.Controller.evaluate_sync(self.camera)
 
     # Subscribers create their output attributes when they first compute
-    # (Inv §6.1); publishers are not evaluated here, as that would publish.
+    # (Inv §6.1). Publishers in graphs evaluated every cycle need no warm-up;
+    # /sim/epoch is evaluated only at start-up and on reset, so it gets one
+    # here (with data 0, the first epoch, should a warm-up publish).
     for graph in (self.command, self.camera_request):
       og.Controller.evaluate_sync(graph)
+    for _ in range(PUBLISHER_WARMUP_EVALUATIONS):
+      og.Controller.evaluate_sync(self.epoch)
+    self._render_product = render_product
 
     self._wrench = {
         name: _attribute(self.state, "Wrench", f"inputs:{name}")
@@ -290,6 +310,13 @@ class Graphs:
 
   def publish_tf(self) -> None:
     og.Controller.evaluate_sync(self.tf)
+
+  def set_image_publishing(self, enabled: bool) -> None:
+    """Whether the next render() publishes /camera/rgb and /camera/depth."""
+    for gate in IMAGE_GATES:
+      omni.syntheticdata.SyntheticData.Get().set_node_attributes(
+          gate, {"inputs:step": int(enabled)}, self._render_product
+      )
 
   def set_tf_targets(
       self, paths: list[str], prims_replaced: bool = False

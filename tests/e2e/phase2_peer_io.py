@@ -56,8 +56,14 @@ IMAGE_TIMEOUT_S = 20
 MOVE_RAD = 0.5
 MOVE_S = 1.0
 SETTLE_S = 0.5
+# The move of the white arm over the white floor changes the image by a mean
+# absolute difference of 1.03-1.17; requested frames of an unchanged scene
+# differ by <= 0.3 (render noise), a stale frame by 0.04 (phase_2_notes.md,
+# Addendum A).
+FRESH_MIN_DIFF = 0.6
 GRIPPER_EFFORT_N = 20.0
-HAND_LOAD_N = np.array([0.0, 0.0, 5.75])  # hand + fingers weight; hand points down at home (phase_2_notes.md)
+# Hand + fingers weight; the hand points down at home (phase_2_notes.md).
+HAND_LOAD_N = np.array([0.0, 0.0, 5.75])
 BOARD_LOAD_N = 0.2 * 9.81
 AVERAGE_S = 0.2
 EXPECTED_K = [420.08, 0, 424, 0, 420.08, 240, 0, 0, 1]
@@ -404,7 +410,7 @@ def check_camera_fresh(p: Peer, _) -> tuple[bool, str]:
   if before is None or after is None:
     return False, "no frame"
   diff = float(np.mean(np.abs(_rgb(after) - _rgb(before))))
-  return diff > 2.0, (
+  return diff > FRESH_MIN_DIFF, (
       f"mean abs diff {diff:.2f}; frame stamped"
       f" {_seconds(after.header) - stamp:+.4f} s, received {latency:.2f} s wall"
       " after the request"
@@ -466,11 +472,8 @@ def check_reset(p: Peer, scene: dict) -> tuple[bool, str]:
   after = _entities(p)
   gone = after is not None and EXTRA_CUBE not in after.entities
   poses_ok, details = _pose_errors(p, scene, objects_only=True)
-  epoch_ok = p.wait_until(
-      # Fast DDS late joiners miss the latched value across Windows <-> WSL
-      # (phase_2_notes.md), so with no earlier value expect the first reset: 1.
-      lambda: p.epoch == (1 if epoch_before is None else epoch_before + 1),
-      5.0,
+  epoch_ok = epoch_before is not None and p.wait_until(
+      lambda: p.epoch == epoch_before + 1, 5.0
   )
   p.target = list(HOME)
   p.echo = True
