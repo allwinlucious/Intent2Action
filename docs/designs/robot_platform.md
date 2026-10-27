@@ -113,7 +113,7 @@ connect them to Isaac Sim over ROS 2, and put one gRPC API
     published models fall short on Isaac images, they are retrained on
     Isaac-rendered data.
 *   **G8.** Force/contact: `MoveToContact` stops with measured force within
-    ±20% of the requested limit; the peg-in-hole insertion of CUJ 5
+    ±20% of the requested limit; the peg-in-hole insertion of CUJ 6
     succeeds in ≥ 9 of 10 trials.
 *   **G9.** Grasp planning: grasps from `PlanGrasp` lift the target object
     in ≥ 9 of 10 trials for each catalog object.
@@ -269,9 +269,9 @@ connect them to Isaac Sim over ROS 2, and put one gRPC API
 
 *   Each Intrinsic service runs as a plain process started by
     `container/entrypoint.sh`. If any process exits, the container exits.
-    A process that hangs is detected by `robot_service`'s health check
-    (each dependency's gRPC health or a trivial call every 5 s); after 3
-    failures `robot_service` reports `UNAVAILABLE` for calls that need it.
+    A process that hangs is caught by gRPC deadlines: every call
+    `robot_service` makes has one, and `DEADLINE_EXCEEDED` is returned to
+    the caller as `UNAVAILABLE`.
 *   Each process that expects a k3s `runtime_config.pb` gets one encoded
     from a checked-in textproto by `container/encode_runtime.sh`.
 *   `platform_stubs.py` serves the platform gRPC services Intrinsic
@@ -342,14 +342,15 @@ nodes), and owns the simulation loop.
     to 5 ms each cycle for a command stamped with the latest published *t*.
     When one arrives, it is back in lockstep. Isaac therefore works without
     the container, and a lost message costs at most 1 s.
-*   **Simulation absent.** ICON faults if not ticked for 20 s. If no state
-    arrives for 200 ms, `ros2_hwm` ticks ICON from a wall-clock timer at
-    the control rate and reports the robot as disabled ("simulation
-    absent"), so ICON rejects motions. When states return, `ros2_hwm`
-    resumes lockstep and reports enabled; `robot_service` notices the
-    change, calls `ClearFaults`, and re-applies payload, tare and speed
-    override (which a full ICON restart resets). Start-up order of Isaac
-    and the container therefore does not matter.
+*   **Simulation paused or absent.** While no state arrives, ICON is not
+    ticked, so it pauses with the simulation. After 20 s without a tick
+    ICON faults (`kNonRealtimeHardCycleTimeout`). Recovery is the same as
+    for any fault: when `ros2_hwm` receives states again, `robot_service`
+    (which watches ICON's status) calls `ClearFaults` and re-applies
+    payload, tare and speed override, because clearing this fault rebuilds
+    ICON's internal state. Start-up order of Isaac and the container
+    therefore does not matter. Phase 3 verifies that the ICON process
+    survives the timeout.
 *   **Reset.** Only `run_scene.py` resets the simulation (`/sim/reset`);
     `sim_control`'s `ResetSimulation` is not used because it stops and
     restarts Isaac's timeline behind `run_scene.py`. A reset starts a new
@@ -383,18 +384,21 @@ or robot disabled, with the reason), `INVALID_ARGUMENT`, `NOT_FOUND`
 `CANCELLED` (stopped), `UNAVAILABLE` (a dependency is down).
 
 **Long-running calls** (motions, `Grasp`/`Release`, `CalibrateCamera`,
-`DetectObjects`) take `wait` (default true). With `wait=true` the call
-blocks for at most 60 s of wall time; if not finished, it returns `OK`
-with `state=RUNNING` and a `task_id`. With `wait=false` it returns the
-`task_id` at once. `WaitTask(task_id, timeout_s)` and `GetTask(task_id)`
-report the task's state; `Stop()` cancels the running motion. Only one
-motion task runs at a time; a second one returns `FAILED_PRECONDITION`.
+`DetectObjects`) use the standard `google.longrunning` pattern that
+Intrinsic's own services use. Each takes `wait` (default true). With
+`wait=true` the call blocks for at most 60 s of wall time and returns the
+finished `Operation`, or the still-running one. With `wait=false` it
+returns the `Operation` at once. `robot_service` also serves
+`google.longrunning.Operations` (`GetOperation`, `WaitOperation`,
+`CancelOperation`); `Stop()` is the same as cancelling the running motion.
+Only one motion runs at a time; a second one returns
+`FAILED_PRECONDITION`.
 Typical durations: a motion 1–10 s, `CalibrateCamera` 2–5 min,
 `DetectObjects` 1–3 s (simulation at real-time factor 1).
 
 | Call | Intrinsic API | Internal path |
 |---|---|---|
-| `GetState` | ICON `GetStatus`, `ObjectWorldService` | joints, gripper width, wrench, faults and enabled state from ICON; tool pose from `ComputeFk` on ICON's joints. (The world service's own `WorldUpdater` also copies ICON's joints into `world` every 30 ms.) |
+| `GetState` | ICON `GetStatus` | one call: joints, tool pose (`base_t_tip_sensed`), wrench (`wrench_at_ft`, tared and payload-compensated), gripper width, faults, enabled state. (The world service's own `WorldUpdater` separately copies ICON's joints into `world` every 30 ms.) |
 | `MoveToPose(pose, motion=ANY\|LINEAR, wait)` | `MotionPlannerService.PlanTrajectory`, ICON `intrinsic.trajectory_tracking` | planning starts from ICON's current joints; trajectory → ICON session on part `arm` → `ros2_hwm` → `/joint_command` |
 | `MoveJoints(q, wait)`, `Home(wait)` | same; `Home` uses the `home` named configuration | same |
 | `MoveWaypoints([...], blending, wait)` | `PlanTrajectory` with segments + `BlendingParameters` | same |
@@ -416,7 +420,7 @@ Typical durations: a motion 1–10 s, `CalibrateCamera` 2–5 min,
 | `GetPointCloud()` | `CameraService.Capture` (depth + intrinsics) | `robot_service` back-projects depth; points in the camera frame, plus the camera's pose in `world` |
 | `CalibrateCamera(wait)` | `CalibrationService` (`Initialize`, `CaptureData`, `Calibrate`, `Save`), Intrinsic's `pose_sampling` library | see "Calibration flow"; precondition: a board is attached |
 | `DetectObjects(wait)` | `PoseEstimationService.RunPoseEstimation` | `robot_service` writes each estimate into `world` (create or update, marked `perceived`) |
-| `WaitTask`, `GetTask` | — | task bookkeeping in `robot_service` |
+| `GetOperation`, `WaitOperation`, `CancelOperation` | — | `google.longrunning.Operations` served by `robot_service` |
 
 **`SimService`** (same process, same port; for developers and test
 scripts; not exposed to the VLM):
@@ -427,13 +431,14 @@ scripts; not exposed to the VLM):
 | `ResetScene()` | ICON stop → `/sim/reset` → wait for the new epoch → `ClearFaults`. Removes objects added with `AddObject` (the default scene is rebuilt), detaches held objects, clears payload and tare. Camera calibration is kept |
 | `GetTruePose(entity)` | `GetEntitiesStates` (ground truth, for tests) |
 | `AttachCalibrationBoard()`, `DetachCalibrationBoard()` | `/sim/attach_board`, `/sim/detach_board`: `run_scene.py` creates/removes the board rigidly fixed to `panda_hand`, offset clear of the fingers; `robot_service` adds/removes it in `world` attached to the flange |
-| `SetBeliefSource(GROUND_TRUTH\|PERCEPTION)` | see "Ground truth and belief" |
 
 ### Object catalog
 
-`assets/objects/<catalog_name>/` holds, per object type: `model.usd` (for
-Isaac), `mesh.glb` (collision and visual geometry for Intrinsic, CAD for
-FoundationPose), and `object.yaml` (mass, grasp width hints). The default
+`assets/objects/<catalog_name>/` holds, per object type: `mesh.glb` (the
+single source of geometry: collision and visual geometry for Intrinsic,
+CAD for FoundationPose), `object.yaml` (mass, color, physics material), and
+`model.usd`, generated from the two by `sim/tools/build_catalog.py` with
+Isaac's `omni.kit.asset_converter` (never edited by hand). The default
 scene (`sim/scenes/default.yaml`) lists the table, red cube, plate, peg and
 hole block by catalog name and pose. Only catalog objects are mirrored
 into Intrinsic; the robot, the camera and the ground are not.
@@ -443,7 +448,9 @@ into Intrinsic; the robot, the camera and the ground are not.
 *   Isaac is the only place objects are created. `scene_sync` polls
     `GetEntities` and `GetEntitiesStates` at 30 Hz of wall time and mirrors
     catalog objects into `sim_world` (geometry from the catalog via CAS).
-*   `world` is the belief world the planner uses. `belief_source`:
+*   `world` is the belief world the planner uses. `belief_source` is a
+    start-up setting (`config/robot_service.yaml`, read by `scene_sync` and
+    `robot_service`; changing it means restarting the container):
     *   `GROUND_TRUTH` (default until phase 5): `scene_sync` also mirrors
         catalog objects into `world` (create with `SyncObject` when new,
         update the pose on change, delete when gone), marked
@@ -464,11 +471,12 @@ Eye-to-hand: the D455 is fixed in the scene.
     `pose_sampling` library (board facing the camera, inside reach and
     view); for each reachable pose: `MoveToPose`, then `CaptureData` (with
     an image taken after the arm settled, as in `GetImage`).
-3.  `Calibrate`, then `Save`. The camera pose in `world` is updated, and
-    the result is stored in the container volume
-    (`/var/lib/intrinsic/calibration/`) and reloaded at start-up.
-The phase 4 plan defines how the service's "execute" and "initial" worlds
-map to `world` and `sim_world`.
+3.  `Calibrate`, then `Save`. `Save` is the only persistence: it writes
+    the camera pose into the world's initial state and the camera's
+    configuration through the asset-instances stand-in. The phase 4 plan
+    defines how the service's "execute" and "initial" worlds map to
+    `world` and `sim_world`, and where the stand-in keeps saved data so it
+    survives a container restart.
 
 ### Adapters
 
@@ -530,7 +538,7 @@ map to `world` and `sim_world`.
 |---|---|---|
 | CycloneDDS ↔ Fast DDS across Windows/WSL/Docker fails | No link to Isaac | Phase 0.5 first; Q1 fallbacks |
 | Round trip too slow | Simulation runs slower than real time | Lockstep keeps control correct; lower control rate (substeps keep physics ≥ 1 kHz) |
-| ICON's 20 s tick timeout | Fatal ICON fault | "Simulation absent" wall-clock ticking; automatic recovery |
+| ICON's 20 s tick timeout | ICON fault | Automatic `ClearFaults` + re-apply payload/tare/speed when states return |
 | Isaac reset or restart | Time goes backwards; ICON setpoint jumps | Epoch handling; reset only via `run_scene.py`; `ClearFaults` re-initializes |
 | GPU memory (10 GB shared) | Isaac or Triton out of memory | Budget above; measured in phase 5 |
 | Pose estimator weights missing or not licensed for product use | G7 blocked | Q4: retrain or alternative model |
@@ -538,7 +546,7 @@ map to `world` and `sim_world`.
 | Hidden platform dependencies of services not yet started | Service will not start | Stand-ins, as for registry and assets |
 | zenoh version mismatch | Services cannot exchange updates | Q6 in phase 0 |
 | Contact simulation accuracy (2 mm clearance at 1 kHz PhysX) | CUJ 6 unreliable | Phase 5b tunes contact offsets and substeps; CUJ 6 trial count measures it |
-| A service hangs without exiting | Calls stall | `robot_service` health checks → `UNAVAILABLE` |
+| A service hangs without exiting | Calls stall | gRPC deadlines → `UNAVAILABLE` |
 | Limits | One arm, one camera; simulation speed bound by round trip | Accepted (Non-Goals) |
 
 ## Alternatives Considered
@@ -633,7 +641,8 @@ map to `world` and `sim_world`.
 *   **Cons**: Blocking-only: the VLM cannot stop a motion it started, and
     long calls hit client timeouts. Polling-only: every motion needs extra
     tool calls.
-*   **Reason for Rejection**: `wait` flag with a 60 s cap gives both.
+*   **Reason for Rejection**: `wait` flag with a 60 s cap gives both,
+    using `google.longrunning` operations.
 
 --------------------------------------------------------------------------------
 
