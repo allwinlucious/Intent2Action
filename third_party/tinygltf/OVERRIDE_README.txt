@@ -1,0 +1,1 @@
+README: tinygltf 2.9.6 from github archive (sha256-k+TcDS24...), BCR patch+overlay applied. Used via --override_module=tinygltf=<this dir> because GitHub's archive no longer matches the BCR integrity.

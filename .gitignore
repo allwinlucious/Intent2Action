@@ -1,0 +1,7 @@
+.venv/
+logs/
+candidates/
+container/stage/
+shots/
+__pycache__/
+*.pyc
