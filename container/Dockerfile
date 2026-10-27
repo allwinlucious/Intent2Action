@@ -21,8 +21,10 @@ COPY container/config /opt/app/container/config
 COPY container/dds /opt/app/container/dds
 COPY container/entrypoint.sh container/logpipe.py /opt/app/container/
 COPY config /opt/app/config
+COPY sim/scenes/default.yaml /opt/app/config/default.yaml
 COPY robot_model /opt/app/robot_model
 COPY assets/robots /opt/app/assets/robots
+COPY assets/objects /opt/app/assets/objects
 
 ENV LD_LIBRARY_PATH=/opt/intrinsic/lib
 ENV PYTHONPATH=/opt/app:/opt/app/gen

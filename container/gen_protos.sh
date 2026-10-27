@@ -1,10 +1,20 @@
 #!/usr/bin/env bash
 # Generates Python protobuf + gRPC stubs for the given Intrinsic .proto files and everything they import.
 # Usage: gen_protos.sh <proto path relative to its root, e.g. intrinsic/resources/proto/resource_registry.proto>...
+# Files of this project may also be given by a path under the project root (e.g. robot_service/simlink.proto).
 set -euo pipefail
 
 source "$(dirname "$0")/proto_includes.sh"
 OUT="$PROJECT_DIR/gen"
+
+protos=()
+for proto in "$@"; do
+  if [[ -f "$proto" && "$(realpath "$proto")" == "$PROJECT_DIR"/* ]]; then
+    proto="$(realpath --relative-to="$PROJECT_DIR" "$proto")"
+  fi
+  protos+=("$proto")
+done
+set -- "${protos[@]}"
 
 cd "$INTRINSIC_DIR"
 mkdir -p "$OUT"

@@ -1,0 +1,2 @@
+# Read at start-up by scene_sync and robot_service; changing it means restarting the container.
+belief_source: GROUND_TRUTH   # GROUND_TRUTH: scene_sync mirrors Isaac's objects into `world`; PERCEPTION: it leaves `world` alone

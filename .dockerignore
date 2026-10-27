@@ -3,4 +3,5 @@ logs
 third_party
 candidates
 sim
+!sim/scenes/default.yaml
 docs

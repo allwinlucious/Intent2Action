@@ -1,0 +1,7 @@
+collision: none
+color:
+- 0.5
+- 0.5
+- 0.5
+mass: null
+static: true

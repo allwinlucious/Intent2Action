@@ -1,0 +1,7 @@
+collision: convexHull
+color:
+- 1.0
+- 1.0
+- 1.0
+mass: 0.2
+static: false

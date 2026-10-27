@@ -46,6 +46,13 @@ fi
 run icon         "$BIN/generic_icon_machine_server" --config_pbtxt_file="$ICON_CFG" --non_realtime \
                    --icon_server_port=18003 --use_runtime_asset_fallback=false --server_name=robot \
                    --zenoh_router="$ZENOH" --resource_registry_service=localhost:18010
+if [ "$BACKEND" = isaac ]; then
+  # The image's ROS 2 with Fast DDS, the vendor of Isaac's services (sourcing ROS under set -u aborts).
+  FASTDDS="set +u; source /opt/ros/humble/setup.bash; source /opt/ros_ext/setup.bash; set -u;
+    RMW_IMPLEMENTATION=rmw_fastrtps_cpp FASTRTPS_DEFAULT_PROFILES_FILE=/opt/app/container/dds/fastdds.xml exec python3"
+  run scene_sync bash -c "$FASTDDS /opt/app/container/services/scene_sync.py"
+  run camera_sim bash -c "$FASTDDS /opt/app/container/services/camera_sim.py"
+fi
 
 wait -n
 echo "a service exited; stopping the container" >&2

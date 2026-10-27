@@ -362,3 +362,19 @@ From `docs/designs/reviews/phase_3/code_review_part1.md`, all to apply:
     if the line does not already start with one; Python services use
     `logging.basicConfig(format="%(asctime)s %(levelname)s <component> %(message)s")`.
 Rebuild, rerun `phase3_hwm_check.py` (must still pass 7/7).
+
+## Part 2 follow-ups (lead decisions; do in Part 3 after the Part 1 fixes)
+
+7.  `camera_sim`: at start-up, and whenever no `/camera/camera_info` has
+    been received, publish `/camera/request` (stamp = latest `/clock`)
+    once per second until one arrives, so `DescribeCamera` works before
+    the first `Capture` (calibration calls it first).
+8.  `calib_board` origin: the catalog entry's mesh origin is the box
+    **centre** (Isaac's board prim origin is its centre, `sim/scene.py`);
+    change `tools/build_catalog_meshes.py` for `calib_board` only and
+    regenerate its `mesh.glb`/`model.usd`. Document the exception in
+    `object.yaml` (`origin: center`).
+9.  Stale objects: 5 s after `scene_sync` receives its first `/tf`, it
+    deletes from `world` and `sim_world` every object with
+    `user_data["source"] == "ground_truth"` that is not on `/tf`; it logs
+    each deletion.

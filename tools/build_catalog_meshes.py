@@ -45,6 +45,9 @@ OBJECTS = {
     "plate": (_cylinder(0.09, 0.012), False, 0.30, (0.9, 0.9, 0.9)),
     "peg": (_cylinder(0.010, 0.08), False, 0.05, (0.2, 0.4, 0.8)),
     "hole_block": (_hole_block(), True, None, (0.3, 0.3, 0.3)),
+    # The ChArUco board sim/scene.py attaches to the hand (same size and mass).
+    "calib_board": (_box(0.21, 0.15, 0.005), False, 0.2, (1.0, 1.0, 1.0)),
+    "obstacle": (_box(0.1, 0.1, 0.5), True, None, (0.5, 0.5, 0.5)),
 }
 
 
