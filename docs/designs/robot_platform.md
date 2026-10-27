@@ -242,10 +242,10 @@ connect them to Isaac Sim over ROS 2, and put one gRPC API
 
 *   **Given**: The stack is running.
 *   **When**: A developer calls `PlanOnly` for a `MoveWaypoints` request,
-    executes the same request, then `Jog`s the tool 5 cm along +x and
+    executes the same request, then `Jog`s joint 1 by 0.1 rad and
     calls `ComputeFk` on the resulting joints.
 *   **Then**: Executed duration is within 5% of the planned duration;
-    the tool moved 5 cm ± 2 mm along +x; `ComputeFk` agrees with
+    joint 1 moved 0.1 ± 0.01 rad; `ComputeFk` agrees with
     `GetState`'s tool pose within 0.1 mm.
 
 ## Technical Plan (Architecture)
@@ -438,8 +438,8 @@ Typical durations: a motion 1–10 s, `CalibrateCamera` 2–5 min,
 | `Stop()` | ICON `intrinsic.stop` | controlled stop; ends the session; the motion task ends `CANCELLED`; not a fault |
 | `SetSpeed(factor)` | ICON speed override | scales following motions; re-applied after ICON recovery |
 | `ClearFaults()` | ICON `ClearFaults` | see CUJ 5 |
-| `Jog(mode=JOINT\|CARTESIAN, axis, velocity, duration)` | joint: ICON `intrinsic.joint_jogging`; Cartesian: ICON `JoggingService` (`intrinsic_apis/intrinsic/icon/proto/v1/jogging_service.proto`) | ICON |
-| `Grasp(force, wait)`, `Release(wait)`, `SetGripper(width, force, wait)`, `IsGripping()` | ICON gripper part (`HalLinearGripperPart`), `intrinsic.simple_gripper` | ICON → `ros2_hwm` gripper interface (`intrinsic_control/intrinsic/icon/hal/interfaces/gripper.fbs`) → `/gripper_command`. `IsGripping` = fingers stopped more than 1 mm wider than commanded |
+| `Jog(joint, velocity, duration)` | ICON `JoggingService` (joint jogging; Cartesian jogging does not exist in this Intrinsic version) | ICON |
+| `Grasp(wait)`, `Release(wait)`, `IsGripping()` | ICON gripper part (`HalLinearGripperPart`), `intrinsic.simple_gripper` (GRASP/RELEASE to configured widths, force 30 N) | ICON → `ros2_hwm` gripper interface → `/gripper_command`. `Grasp` returns when the fingers stop; `IsGripping` = fingers stopped open > 1 mm after a GRASP (phase 3) |
 | `AttachObject(name)`, `DetachObject(name)`, `SetPayload(mass, com, inertia)` | `ObjectWorldService.ReparentObject` on `world`; ICON payload | the planner treats a held object as part of the arm |
 | `ListObjects` | `ObjectWorldService.ListObjects` on `world` | each object marked `ground_truth` or `perceived` |
 | `GetImage(rgb\|depth)` | `CameraService.Capture` | returns only a frame rendered at or after the request's simulation time + 50 ms (arm settled) |
@@ -521,11 +521,12 @@ Eye-to-hand: the D455 is fixed in the scene.
 
 ### `robot_service` and `mcp_server`
 
-*   **`robot_service`** (Python, Bazel `py_binary` under `ext/` so it can
-    use Intrinsic's ICON Python client): serves `RobotService` and
-    `SimService` on 127.0.0.1:18100 (our own code, so it binds loopback).
-    Holds the task table, the health checks, and the ICON recovery logic.
-    Its proto is `ext/robot_service/robot_service.proto`.
+*   **`robot_service`** (plain Python 3.10 in the image, using a vendored
+    copy of Intrinsic's ICON Python client and the `gen/` stubs; a Bazel
+    `py_binary` does not survive staging, phase 3): serves `RobotService`
+    and `SimService` on 127.0.0.1:18100 (our own code, so it binds
+    loopback). Holds the operation table and the ICON recovery logic.
+    Its proto is `robot_service/robot_service.proto`.
 *   **`mcp_server`** (Python, runs in WSL outside the container, started by
     the MCP client over stdio): generates one tool per `RobotService` RPC
     from the proto descriptors (tool description = RPC comment; input
