@@ -100,11 +100,8 @@ connect them to Isaac Sim over ROS 2, and put one gRPC API
     image into a point cloud). Simulation-only operations (spawning
     objects, resetting the scene) are in a separate `SimService` and never
     reach the robot functions.
-*   **G5.** The camera is Isaac's D455 model with RGB and depth. Isaac
-    renders ground-truth depth; `camera_sim` applies a D455 noise model
-    (error within Intel's D455 specification, ≤ 2% RMS at 4 m, and missing
-    depth at depth edges) and keeps the clean frame as ground truth (phase
-    2 decision 2).
+*   **G5.** The camera is Isaac's D455 model (848×480) with RGB and
+    depth. Depth is Isaac's clean rendered depth, with no noise model (D8).
 *   **G6.** Camera-to-robot calibration through Intrinsic's
     `CalibrationService` reaches < 2 mm and < 0.2° against Isaac's true
     camera pose.
@@ -145,6 +142,7 @@ connect them to Isaac Sim over ROS 2, and put one gRPC API
 | D5 | 2026-10-27 | Use Intrinsic's stack, not Isaac's controllers (Lula, RMPflow, differential IK) | Intrinsic provides planning, ICON control, calibration, perception and force control as services; Isaac's controllers cover motion only |
 | D6 | 2026-10-27 | Build for the finished product: no needed feature deferred; realistic sensors | This is the base of a larger product |
 | D7 | 2026-10-27 | Isaac I/O only through the ROS 2 bridge's own components; script `rclpy` only where the bridge has none (listed in phase 2) | One integration surface in Isaac; nothing custom serving data from the simulator |
+| D8 | 2026-10-27 | No depth noise model: depth stays clean unless a prebuilt noise model becomes available | Isaac's prebuilt D455 sensor is unusable (phase 2), and a hand-written model is not wanted |
 
 ## Open Questions
 
@@ -516,7 +514,7 @@ Eye-to-hand: the D455 is fixed in the scene.
     must not allocate; ROS I/O runs on separate threads with
     `intrinsic_control/intrinsic/icon/utils/async_buffer.h`.
 *   **`camera_sim`** (Python): serves `CameraService` from the ROS 2 camera
-    topics (noise comes from Isaac's sensor). Keeps the latest frames with
+    topics as they arrive (clean depth, D8). Keeps the latest frames with
     their stamps; publishes nothing back to Isaac.
 *   **`scene_sync`** (Python): see "Ground truth and belief".
 
@@ -634,8 +632,8 @@ Eye-to-hand: the D455 is fixed in the scene.
     edges (a real D455 projects an IR pattern and gives dense depth),
     values ≈ 10⁴ × metres, and the bridge's Camera Helper cannot publish
     it.
-*   **Reason for Rejection**: Not a D455-like output; a D455 noise model in
-    `camera_sim` on Isaac's ground-truth depth is used instead.
+*   **Reason for Rejection**: Not a D455-like output. Clean depth is used
+    (D8).
 
 ### Alternative J: ICON on a wall clock, Isaac paced to real time
 
@@ -745,7 +743,7 @@ find). Process per phase:
 | 1 | Franka in Intrinsic: SceneObjects from the URDF, loader, ICON with loopback | `phases/phase_1.md` | IK/FK work, G3 check passes, ICON moves the Franka in loopback |
 | 2 | Isaac: `run_scene.py`, scene + catalog, D455, wrench, sim services, timing | `phases/phase_2.md` | From the container: joint states, commands move the arm, RGB + depth arrive, `GetEntities` lists the cube; Q7 answered |
 | 3 | `ros2_hwm` (arm, gripper, F/T, clock, lockstep), `scene_sync`, `robot_service` motion/gripper/scene/safety + `SimService` | `phases/phase_3.md` | CUJ 2, CUJ 4, CUJ 5 and CUJ 7 pass; `Grasp` reports gripping; planner avoids a box |
-| 3b | `camera_sim` | `phases/phase_3b.md` | `GetImage` returns D455 frames; G5 holds |
+| 3b | `camera_sim` | `phases/phase_3b.md` | `GetImage` returns D455 RGB and depth frames through `CameraService` |
 | 4 | Calibration via `CalibrationService` | `phases/phase_4.md` | CUJ 3 / G6 |
 | 5 | Perception: Triton, models (train if needed), FoundationPose | `phases/phase_5.md` | G7; belief world filled in `PERCEPTION` mode |
 | 5b | Force/contact | `phases/phase_5b.md` | CUJ 6 / G8 |
