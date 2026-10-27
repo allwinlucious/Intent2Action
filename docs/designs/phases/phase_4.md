@@ -6,126 +6,186 @@ done (`camera_sim`, `scene_sync`, registry entry, `robot_service`).
 
 ## Goal and done criteria
 
-`tests/e2e/phase4_check.py`:
+`tests/e2e/phase4_check.py`, in this order (each step's timeout in
+brackets):
 
 | Name | Condition |
 |---|---|
-| `service_up` | `calibration_service_main` runs in the container (port 18006) and stays up |
-| `calibrate` | `SimService.AttachCalibrationBoard`, then `RobotService.CalibrateCamera(wait=true)` succeeds with ≥ 12 captures used |
-| `accuracy` | `world` object `d455` frame `sensor` pose (robot base frame) vs Isaac's true `Camera_Pseudo_Depth` pose (`SimService.GetTruePose`): < 2 mm and < 0.2° (G6) |
-| `initial_guess` | before calibrating, the `d455` pose in `world` was ≥ 2 cm and ≥ 2° away from the truth (so the check measures calibration, not the seed) |
-| `persist` | after `docker restart intrinsic`, the `d455` pose in `world` equals the calibrated one within 0.1 mm |
-| `detach` | `SimService.DetachCalibrationBoard` removes the board from Isaac and from `world` |
+| `service_up` | `calibration_service_main` runs in the container on 18006 and stays up [60 s] |
+| `fresh_seed` | the script deletes `d455` from `init_world`, restarts the container [180 s]; `world`'s `d455` `sensor` pose is the seed: ≥ 2 cm and ≥ 2° from Isaac's true `Camera_Pseudo_Depth` pose, `GetPointCloud.camera_calibrated` false |
+| `calibrate` | `SimService.AttachCalibrationBoard`; `RobotService.CalibrateCamera(wait=false)`, polled with `Operations.GetOperation` until done [15 min]; done without error, `poses_used` ≥ 12 |
+| `accuracy` | `world` `d455` `sensor` pose (robot base frame) vs Isaac's true `Camera_Pseudo_Depth` pose (`SimService.GetTruePose`): < 2 mm and < 0.2° (G6); `camera_calibrated` true |
+| `persist` | `docker restart intrinsic` [180 s]; `d455` pose in `world` equals the calibrated one within 0.1 mm / 0.01°; `camera_calibrated` still true |
+| `detach` | `SimService.DetachCalibrationBoard`; `calib_board` is gone from Isaac's `/tf` and from `world` [10 s] |
 
 ## Decisions
 
 1.  **Build:** `container/build_intrinsic.sh` adds
     `//intrinsic_perception/intrinsic/perception/calibration/services/v1:calibration_service_main`
-    (Inv §1.1); `container/stage_intrinsic.sh` stages it.
+    (Inv §1.1) and `//ext/calib_poses:sample_poses` (decision 8);
+    `container/stage_intrinsic.sh` stages both.
 2.  **Runtime config** `container/config/calibration.runtime.txtpb`
-    (encoded with `container/encode_runtime.sh`, as the planner's): `port:
-    18006`, `config` = `CalibrationServiceConfig{intrinsic_runtime{name
-    "intrinsic_runtime", interfaces: Operations → localhost:18010,
-    AssetInstances → localhost:18010, DataLogger → localhost:18010,
-    ObjectWorldService → localhost:18000}}` (Inv §1.3, §2: any server
-    passes the readiness check; DataLogger is never really called). Flags:
-    `--runtime_context_file`, `--zenoh_router=tcp/127.0.0.1:7447`. Started
-    after the world service, before `robot_service`.
-3.  **Stand-ins** (`container/services/platform_stubs.py`, Modify): add
-    `AssetInstances.GetAssetInstance`: for name `d455` return an
-    `AssetInstance` whose `config.hardware_device.service.service_config`
-    = Any(`CameraConfig{identifier{ros{device_id: "d455"}}}`); other
-    names → `NOT_FOUND` (Inv §11).
-4.  **Zenoh KV storage:** `CaptureData` writes the KV store and waits for
-    the value to read back (Inv §11). zenohd is started with a config file
-    `container/config/zenohd.json5` (Create): listen
-    `tcp/127.0.0.1:7447`, multicast scouting off, plugin
-    `storage_manager` with one storage `kv` on key expression
-    `kv_store/**`, volume `memory`. The Dockerfile copies
+    (Create), encoded at image build like the planner's
+    (`container/encode_runtime.sh container/config/calibration.runtime.txtpb container/config/calibration.runtime.pb`):
+    ```textproto
+    port: 18006
+    config {
+      [type.googleapis.com/intrinsic_proto.perception.v1.CalibrationServiceConfig] {
+        intrinsic_runtime {
+          name: "intrinsic_runtime"
+          interfaces { key: "grpc://google.longrunning.Operations"          value { grpc { connection { address: "localhost:18010" } } } }
+          interfaces { key: "grpc://intrinsic_proto.assets.v1.AssetInstances" value { grpc { connection { address: "localhost:18010" } } } }
+          interfaces { key: "grpc://intrinsic_proto.data_logger.DataLogger"    value { grpc { connection { address: "localhost:18010" } } } }
+          interfaces { key: "grpc://intrinsic_proto.world.ObjectWorldService"  value { grpc { connection { address: "localhost:18000" } } } }
+        }
+      }
+    }
+    ```
+    (Inv §1.3, §2: any gRPC server passes the readiness check; DataLogger
+    is only needed as a key.) Started by the entrypoint after `camera_sim`,
+    before `robot_service`:
+    `calibration_service_main --runtime_context_file=$CFG/calibration.runtime.pb --zenoh_router=tcp/127.0.0.1:7447`.
+3.  **Stand-in** (`container/services/platform_stubs.py`, Modify):
+    `AssetInstances.GetAssetInstance(name="d455")` → `AssetInstance` with
+    `config.hardware_device.service.service_config` =
+    Any(`CameraConfig{identifier{ros{device_id: "d455"}}}`); other names →
+    `NOT_FOUND`. Stubs: `container/gen_protos.sh` for
+    `intrinsic/perception/proto/v1/calibration_service.proto` and
+    `intrinsic/assets/proto/v1/asset_instances.proto`.
+4.  **Zenoh KV storage** (`CaptureData` waits up to 30 s for its KV write to
+    read back without one, Inv §11): `container/config/zenohd.json5`
+    (Create): listen `tcp/127.0.0.1:7447`, multicast scouting off,
+    `plugins_loading: {enabled: true, search_dirs: ["/opt/zenoh"]}`,
+    plugin `storage_manager` with storage `kv` on `kv_store/**`, volume
+    `memory`. `container/Dockerfile` (Modify) copies
     `/libzenoh_plugin_storage_manager.so` from the zenohd image to
-    `/opt/zenoh/` (Inv §11), and the config sets
-    `plugins_loading: { enabled: true, search_dirs: ["/opt/zenoh"] }`.
-5.  **Camera object in the worlds** (`robot_model/load_camera.py`, Create,
-    run by the entrypoint right after the Franka loader):
-    *   `world`: object `d455` created with `create_single_entity_object`
-        whose entity local name is `d455` (so `GetObject` by resource
-        handle name `d455` matches it through the entity-local-name rule,
-        Inv §11), `name_is_global_alias` true, plus a child frame `sensor`
-        at identity (`CreateFrame`). `sensor` is the camera's optical frame
-        (z forward, x right, y down), the frame `d455_optical` images use.
-    *   Pose: if `init_world` already has `d455` (a saved calibration),
-        copy its pose; otherwise the seed pose = Isaac's nominal camera
-        pose from `sim/scenes/default.yaml` (converted to the optical frame
-        as `tests/e2e/phase2_check.py` does) offset by +3 cm in x and +3°
-        about z (the `initial_guess` check).
-    *   `init_world`: `CloneWorld(world_id="world", cloned_world_id="init_world", allow_overwrite=true)`
-        after `d455` exists, so the robot and flange have the same IDs in
-        both worlds (`Save` needs this, Inv §8.1).
-6.  **Robot joints in `world`** come from the world service's
+    `/opt/zenoh/`; `container/entrypoint.sh` (Modify) starts zenohd with
+    `-c /opt/app/container/config/zenohd.json5`.
+5.  **Bigger board** so markers are detectable at 0.6–0.8 m (a 22 mm
+    marker is ≈ 9 px at 1 m, Inv review): 7 × 5 squares, 40 mm squares,
+    30 mm markers, `DICT_5X5_100` → 0.28 × 0.20 × 0.005 m.
+    `tools/make_charuco.py` (Modify: `0.04`, `0.03`, image 1400 × 1000 →
+    still 200 px per square), `sim/scene.py` (Modify: `BOARD_SIZE_M`
+    (0.28, 0.20, 0.005)), `tools/build_catalog_meshes.py` (Modify:
+    `calib_board` mesh 0.28 × 0.20 × 0.005). Regenerate the PNG and the
+    catalog entry.
+6.  **Calibration start pose:** the board's textured face is its +z (the
+    hand's +z, `sim/scene.py`), and pose sampling keeps the board facing
+    the hemisphere it already faces (`pose_sampling.h:76-82`). So
+    calibration starts from a pose whose hand +z points at the camera:
+    flange at (0.60, 0.0, 0.50) m in the base frame, its z axis along the
+    unit vector from there toward the camera position stored in `world`'s
+    `d455` (the seed or the last calibration, never Isaac's true pose),
+    its x axis perpendicular to z with no world-z component. Reached with
+    `MoveToPose` (tool `FLANGE`, `ANY`).
+7.  **Camera object in the worlds** (`robot_model/load_camera.py`, Create;
+    the entrypoint runs it right after the Franka loader):
+    1.  Pose source: if `init_world` has an object `d455` → its pose and
+        its `user_data["calibrated"]`; else the **seed** = Isaac's
+        nominal camera pose from `/opt/app/config/default.yaml` converted
+        to the optical frame (as `tests/e2e/phase2_check.py` does), moved
+        +0.03 m along world x and rotated +3° about world z, with
+        `calibrated` false.
+    2.  In `world`: delete `d455` if present, then create it with
+        `create_single_entity_object`, entity local name `d455` (so a
+        lookup by resource handle name `d455` finds it, Inv §11),
+        `name_is_global_alias` true, `user_data["calibrated"]` =
+        `BoolValue`, and a child frame `sensor` at identity
+        (`CreateFrame`). `sensor` is the optical frame (z forward, x right,
+        y down) = Isaac's `d455_optical`.
+    3.  `CloneWorld(world_id="world", cloned_world_id="init_world", allow_overwrite=true)`,
+        so robot and flange IDs match in both worlds (`Save` needs this,
+        Inv §8.1).
+8.  **Pose sampling with Intrinsic's `pose_sampling` library** through a
+    CLI (no Python bindings, Inv §9): `ext/calib_poses/BUILD`,
+    `sample_poses.cc` (Create), `cc_binary` `sample_poses`, deps
+    `//intrinsic_perception/intrinsic/perception/calibration:pose_sampling`.
+    Input JSON on stdin:
+    `{"base_t_flange": P, "flange_t_board": P, "base_t_camera": P, "halfsize": [x,y,z], "tilt_deg": d, "roll_deg": d, "count": n, "seed": s}`
+    with `P = {"position": [x,y,z], "quaternion_xyzw": [x,y,z,w]}`; output
+    `{"poses": [P, …]}` (each a sampled `base_t_flange`), exit 1 with a
+    message on bad input. Values used: start pose (decision 6),
+    `flange_t_board` = rotation Rz(−π/4) then translation (0, 0, 0.12)
+    in that rotated frame (board fixed 0.12 m along Isaac's `panda_hand`
+    z), `base_t_camera` = `world`'s `d455` `sensor` pose, halfsize
+    (0.08, 0.12, 0.08), tilt 15°, roll 20°, count 200, seed 0. Unit test
+    `ext/calib_poses/sample_poses_test.cc` (Create, `cc_test`): 200 poses,
+    all finite, board z of every pose has a positive dot product with the
+    direction to the camera, poses differ.
+9.  **Robot joints in `world`** come from the world service's
     `WorldUpdater` (phase 3 decision 14). `CaptureData` is called without
-    `base_t_flange`; before each capture `robot_service` waits until
-    `world`'s `franka` joints equal ICON's sensed joints within 1e-5 rad
-    (poll `GetObject` every 20 ms, timeout 2 s), because the service reads
-    the flange pose from `world` (Inv §5).
-7.  **Pose sampling uses Intrinsic's `pose_sampling` library** through a
-    small C++ CLI (no Python bindings exist, Inv §9):
-    `ext/calib_poses/sample_poses.cc` (`cc_binary`
-    `//ext/calib_poses:sample_poses`, deps
-    `//intrinsic_perception/intrinsic/perception/calibration:pose_sampling`),
-    args: JSON on stdin `{base_t_flange, flange_t_board, base_t_camera,
-    halfsize: [0.15, 0.15, 0.10], tilt_deg: 20, roll_deg: 30, count: 200,
-    seed}` → JSON list of `base_t_flange` poses on stdout. Staged into the
-    image. `flange_t_board` = translation (0, 0, 0.12) rotated by
-    Rz(−π/4) (board fixed to Isaac's `panda_hand` 0.12 m along its z,
-    `sim/scene.py`).
-8.  **Calibration flow** in `robot_service.CalibrateCamera` (replaces the
-    phase 3 `UNIMPLEMENTED`):
-    1.  Precondition: `calib_board` exists in `world` and is attached to
-        the flange (`SimService.AttachCalibrationBoard` does
-        `SimLink.AttachBoard`, then reparents `calib_board` under
-        `franka`'s `flange` in `world` with `ReparentObject`, and marks it
-        attached in `scene_sync`). Else `FAILED_PRECONDITION`.
-    2.  `Initialize`: `pattern_detection_config{name "charuco",
+    `base_t_flange`; before each capture `robot_service` waits 0.2 s of sim
+    time, then until `world`'s `franka` joints equal ICON's sensed joints
+    within 1e-4 rad (poll `GetObject` every 20 ms, up to 2 s; on timeout
+    skip the pose and log it).
+10. **`AttachCalibrationBoard`** (`robot_service`, Modify):
+    `SimLink.AttachBoard`; wait until `calib_board` is in `world` (≤ 5 s,
+    `scene_sync` creates it); `ReparentObject` it under `franka`'s
+    `flange`; `SimLink.SetAttached(calib_board, true)`.
+    **`DetachCalibrationBoard`:** `SimLink.SetAttached(calib_board, false)`,
+    `SimLink.DetachBoard`; `scene_sync` deletes it when it leaves `/tf`.
+11. **Calibration flow** (`robot_service.CalibrateCamera`, replaces the
+    phase 3 `UNIMPLEMENTED`; operation states `PLANNING` → `EXECUTING` →
+    `DONE`/`FAILED`, `detail` = "capture k/20: <status>"):
+    1.  Precondition: `calib_board` attached (decision 10) → else
+        `FAILED_PRECONDITION` "calibration board not attached".
+    2.  Move to the start pose (decision 6); failure → `ABORTED` with the
+        planner's message.
+    3.  `Initialize`: `pattern_detection_config{name "charuco",
         charuco_pattern_detection_config{pattern{squares_x 7, squares_y 5,
-        square_length 0.03, marker_length 0.022, dictionary DICT_5X5_100}},
-        publish_annotated_image true}`, one camera handle
+        square_length 0.04, marker_length 0.03, dictionary DICT_5X5_100}},
+        publish_annotated_image true}`; one camera handle
         `{name "d455", connection_info.grpc.address "localhost:18005",
-        resource_data["CameraConfig"] = Any(CameraConfig{identifier ros d455})}`,
-        `arm_part` = `franka` by name; worlds default (`world`,
-        `init_world`).
-    3.  Sample 200 poses (decision 7) around the current pose; keep those
-        with a collision-free `ComputeIk` and a successful `PlanTrajectory`,
-        in sampled order, until 20 are kept.
-    4.  For each kept pose: `MoveToPose` (tool `FLANGE`), wait for the
-        world sync (decision 6) and 0.2 s of sim time, `CaptureData`.
-        Count captures with status `NO_ERRORS`; fewer than 12 →
-        `ABORTED` ("too few board detections").
-    5.  `Calibrate{calibrate_camera_to_robot: true,
-        camera_to_robot_calibration_type: CAMERA_SETUP_STATIONARY}`, then
-        `Save` with the result, then `Home`.
-    6.  Operation response `CalibrationResult{camera_pose, reprojection_error_px, poses_used}`
-        (`reprojection_error_px` from the service's result if it reports
-        one, else 0).
-9.  **`DetachCalibrationBoard`:** `SimLink.DetachBoard`; `scene_sync`
-    then deletes `calib_board` from the worlds when it leaves `/tf`.
-10. **Design doc:** "Calibration flow" and CUJ 3 are updated to match
-    decisions 5–9 (`Save` writes only `init_world`, Inv §12).
+        resource_data["CameraConfig"] = Any(CameraConfig{identifier ros d455})}`;
+        `arm_part` = `franka` by name.
+    4.  Sample poses (decision 8); keep, in order, those with a
+        collision-free `ComputeIk` and a successful `PlanTrajectory`, until
+        20 are kept.
+    5.  For each kept pose: `MoveToPose` (tool `FLANGE`); on failure skip
+        and log. Sync wait (decision 9). `CaptureData`; count `NO_ERRORS`.
+    6.  Fewer than 12 `NO_ERRORS` captures → `ABORTED`
+        "only k board detections (need 12)".
+    7.  `Calibrate{calibrate_camera_to_robot: true,
+        camera_to_robot_calibration_type: CAMERA_SETUP_STATIONARY}`;
+        `Save(result)`; set `user_data["calibrated"] = true` on `d455` in
+        `world` and `init_world` (`UpdateObjectProperties`); `Home`.
+    8.  Response `CalibrationResult` — `robot_service/robot_service.proto`
+        (Modify): replace `reprojection_error_px` with
+        `rms_translation_m` and `rms_rotation_deg` (from the service's
+        camera-to-robot result) and keep `poses_used` = number of
+        `NO_ERRORS` captures.
+12. **`GetPointCloud.camera_calibrated`** (phase 3 decision 26, Modify):
+    `user_data["calibrated"]` of `world`'s `d455`; `camera_pose` = its
+    `sensor` pose.
+13. **Design doc** (`robot_platform.md`, Modify): "Calibration flow" and
+    CUJ 3 per decisions 5–11 (`Save` writes only `init_world`, Inv §12);
+    "Ground truth and belief": the camera pose in `world` is a nominal
+    seed flagged `calibrated: false` until calibration, never Isaac's true
+    pose.
 
-## Step 0 (experiments, before the code)
+## Steps
 
-Each with a short script under `tests/e2e/exp4/` (Create); record results
-in `phase_4_notes.md`:
-1.  zenohd with decision 4's config: the calibration service's
-    `Initialize` then one `CaptureData` (board attached, arm at home)
-    completes in < 5 s (no 30 s KV timeout).
-2.  `GetObject(resource_handle_name="d455")` on `world` finds the object
-    of decision 5.
-3.  `CloneWorld(world → init_world)` keeps object IDs (compare `franka`'s
-    ID in both).
-If one fails, stop and record it (the plan needs a new decision).
+1.  Decisions 1–5 and 7 (build, configs, stand-in, zenohd, board, camera
+    loader); rebuild the image.
+2.  **Experiments** (`tests/e2e/exp4/`, Create), results into
+    `phase_4_notes.md`:
+    a.  `GetObject(resource_handle_name="d455")` on `world` finds the
+        decision 7 object.
+    b.  `franka`'s object ID is the same in `world` and `init_world` after
+        the clone.
+    c.  Board attached, arm at the decision 6 start pose: `Initialize` +
+        one `CaptureData` completes in < 5 s with `NO_ERRORS`.
+    d.  Detection rate: 20 sampled poses (decision 8) → ≥ 16 `NO_ERRORS`.
+    If any fails, stop and record it.
+3.  Decisions 8–12; unit tests `tests/test_calibration_flow.py` (Create:
+    the flow with fake services: precondition, skip on move failure,
+    `ABORTED` below 12).
+4.  `tests/e2e/phase4_check.py` (Create) until all checks pass; then
+    decision 13; write `phase_4_notes.md`.
 
 ## Constraints
 
-As phase 3 (Bazel only via `build_intrinsic.sh`; no `git commit`; Docker
-via `sg docker -c`; no `pkill -f`; do not modify `~/intrinsic-core`
-except the `ext` symlink).
+As phase 3: Bazel only via `container/build_intrinsic.sh`; no `git
+commit`; Docker via `sg docker -c`; no `pkill -f`; do not modify
+`~/intrinsic-core` except the `ext` symlink and `.git/info/exclude`.
+Follow the design's Observability requirement for every new call.
