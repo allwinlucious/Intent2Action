@@ -100,10 +100,11 @@ connect them to Isaac Sim over ROS 2, and put one gRPC API
     image into a point cloud). Simulation-only operations (spawning
     objects, resetting the scene) are in a separate `SimService` and never
     reach the robot functions.
-*   **G5.** The camera is Isaac's D455 model with RGB and depth. Depth
-    comes from Isaac's stereo-disparity depth sensor, with error against
-    noise-free depth within Intel's D455 specification (≤ 2% RMS at 4 m) and
-    with missing depth at depth edges.
+*   **G5.** The camera is Isaac's D455 model with RGB and depth. Isaac
+    renders ground-truth depth; `camera_sim` applies a D455 noise model
+    (error within Intel's D455 specification, ≤ 2% RMS at 4 m, and missing
+    depth at depth edges) and keeps the clean frame as ground truth (phase
+    2 decision 2).
 *   **G6.** Camera-to-robot calibration through Intrinsic's
     `CalibrationService` reaches < 2 mm and < 0.2° against Isaac's true
     camera pose.
@@ -331,10 +332,13 @@ reason.
 | Robot state ↑ | `/joint_states` (7 arm + 2 finger joints: position, velocity, effort), stamped with simulation time | ROS2 Publish Joint State |
 | Wrench ↑ | `/wrist_wrench` (`geometry_msgs/WrenchStamped`, frame `panda_hand`), same stamp | `run_scene.py` reads the measured joint force of `panda_hand_joint` (kept as a separate joint, not merged) and publishes it through a `ROS2Publisher` node |
 | Arm command ↓ | `/joint_command` (7 arm joints: position + velocity feed-forward), stamped with the state stamp it answers | `run_scene.py` applies it to the articulation |
-| Gripper command ↓ | `/gripper_command` (`control_msgs/msg/GripperCommand`: total width, max effort) | `run_scene.py`: both finger joints to width/2; finger drive max force = max effort / 2 |
-| Camera ↑ | `/camera/rgb`, `/camera/depth` (32FC1, meters, with sensor noise), `/camera/depth_gt` (noise-free), `/camera/camera_info`; 30 Hz of simulation time | `rsd455.usd` (`Isaac/Sensors/Intel/RealSense/rsd455.usd`) via `SingleViewDepthSensorAsset` + ROS2 Camera Helper |
-| Scene ↕ | `simulation_interfaces`: `SpawnEntity`, `DeleteEntity`, `GetEntities`, `GetEntitiesStates` | `isaacsim.ros2.sim_control` |
-| Sim control ↕ | `/sim/reset`, `/sim/attach_board`, `/sim/detach_board` (`std_srvs/srv/Trigger`) | `run_scene.py` |
+| Gripper command ↓ | `/gripper_command` (`sensor_msgs/JointState`: `panda_finger_joint1`, position = width/2, effort = max force N) | bridge Subscribe Joint State; `run_scene.py` sets the finger drive target and max force (the second finger mimics the first) |
+| Camera request ↓ | `/camera/request` (`std_msgs/Header`, stamp = minimum sim time) | bridge generic Subscriber; `run_scene.py` renders on request |
+| Camera ↑ | `/camera/rgb`, `/camera/depth` (32FC1, metres, ground truth), `/camera/camera_info` | `rsd455.usd` camera + bridge Camera Helper |
+| Object poses ↑ | `/tf` (objects under `/World/objects`, camera), 30 Hz sim time | bridge Publish Transform Tree |
+| Epoch ↑ | `/sim/epoch` (`std_msgs/UInt32`, transient-local) | bridge generic Publisher |
+| Scene ↕ | `simulation_interfaces`: `SpawnEntity`, `DeleteEntity`, `GetEntities` | `isaacsim.ros2.sim_control` (served during renders) |
+| Sim control ↕ | `/sim/reset`, `/sim/attach_board`, `/sim/detach_board` (`std_srvs/srv/Trigger`) | `run_scene.py`'s own `rclpy` (D7 exception: the bridge's service nodes reply before the script can act) |
 | Clock ↑ | `/clock` | ROS2 Publish Clock |
 
 #### Timing: lockstep between Isaac and ICON
@@ -354,7 +358,8 @@ reason.
         stamped *t*.
     3.  `run_scene.py` waits for `/joint_command` stamped *t*, applies it,
         and continues.
-    *   Rendering for the camera runs every 33 ms of simulation time.
+    *   Rendering happens only on a camera request and every 0.5 s of wall
+        time (renders cost 100–200 ms; phase 2).
 *   **Consequence.** ICON runs on simulation time. Round-trip latency
     limits the real-time factor (how fast simulation runs against the wall
     clock), not control accuracy: a slow link makes the simulation run
@@ -376,12 +381,11 @@ reason.
     survives the timeout.
 *   **Reset.** Only `run_scene.py` resets the simulation (`/sim/reset`);
     `sim_control`'s `ResetSimulation` is not used because it stops and
-    restarts Isaac's timeline behind `run_scene.py`. A reset starts a new
-    *epoch*: simulation time restarts at 0, so `ros2_hwm` treats a stamp
-    lower than the last one as a new epoch (not a duplicate), reports a
-    fault ("simulation reset"), and accepts the new stamps. `SimService
-    .ResetScene` then calls `ClearFaults`, which re-initializes ICON's
-    setpoints from the measured joints.
+    restarts Isaac's timeline behind `run_scene.py`. A reset increments
+    `/sim/epoch`; simulation time continues. `ros2_hwm` treats an epoch
+    change as a reset: it reports a fault ("simulation reset").
+    `SimService.ResetScene` then calls `ClearFaults`, which re-initializes
+    ICON's setpoints from the measured joints.
 *   **Duplicates and QoS.** Both directions use reliable QoS, depth 1.
     Within an epoch, a stamp not newer than the last is ignored.
 *   **Timeouts in `robot_service`** are in simulation time: 2 × the planned
@@ -452,7 +456,7 @@ scripts; not exposed to the VLM):
 |---|---|
 | `AddObject(catalog_name, name, pose)`, `RemoveObject(name)` | Isaac `SpawnEntity` / `DeleteEntity` with the catalog entry's USD |
 | `ResetScene()` | ICON stop → `/sim/reset` → wait for the new epoch → `ClearFaults`. Removes objects added with `AddObject` (the default scene is rebuilt), detaches held objects, clears payload and tare. Camera calibration is kept |
-| `GetTruePose(entity)` | `GetEntitiesStates` (ground truth, for tests) |
+| `GetTruePose(entity)` | latest `/tf` pose from Isaac (ground truth, for tests) |
 | `AttachCalibrationBoard()`, `DetachCalibrationBoard()` | `/sim/attach_board`, `/sim/detach_board`: `run_scene.py` creates/removes the board rigidly fixed to `panda_hand`, offset clear of the fingers; `robot_service` adds/removes it in `world` attached to the flange |
 
 ### Object catalog
@@ -468,9 +472,10 @@ into Intrinsic; the robot, the camera and the ground are not.
 
 ### Ground truth and belief
 
-*   Isaac is the only place objects are created. `scene_sync` polls
-    `GetEntities` and `GetEntitiesStates` at 30 Hz of wall time and mirrors
-    catalog objects into `sim_world` (geometry from the catalog via CAS).
+*   Isaac is the only place objects are created. `scene_sync` follows
+    `/tf` (poses, 30 Hz sim time) and `GetEntities` (which objects exist,
+    on change of the `/tf` frame set) and mirrors catalog objects into
+    `sim_world` (geometry from the catalog via CAS).
 *   `world` is the belief world the planner uses. `belief_source` is a
     start-up setting (`config/robot_service.yaml`, read by `scene_sync` and
     `robot_service`; changing it means restarting the container):
@@ -622,12 +627,15 @@ Eye-to-hand: the D455 is fixed in the scene.
 *   **Cons**: Reaches the driver over Zenoh, not DDS.
 *   **Reason for Rejection**: D3.
 
-### Alternative I: Hand-written D455 noise in `camera_sim`
+### Alternative I: Isaac's stereo-disparity depth sensor for noisy depth
 
-*   **Pros**: Full control.
-*   **Cons**: Hand-tuned; Isaac's stereo-disparity sensor derives noise and
-    holes from scene geometry.
-*   **Reason for Rejection**: Isaac's sensor models the physical cause.
+*   **Pros**: Noise derived from scene geometry.
+*   **Cons**: Measured in phase 2: 12–15% valid pixels, only along image
+    edges (a real D455 projects an IR pattern and gives dense depth),
+    values ≈ 10⁴ × metres, and the bridge's Camera Helper cannot publish
+    it.
+*   **Reason for Rejection**: Not a D455-like output; a D455 noise model in
+    `camera_sim` on Isaac's ground-truth depth is used instead.
 
 ### Alternative J: ICON on a wall clock, Isaac paced to real time
 
