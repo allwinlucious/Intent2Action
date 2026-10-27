@@ -259,6 +259,33 @@ container, Isaac and Bazel, so they never run in parallel.
     (phase 4), `DetectObjects` (phase 5), `MoveToContact` and
     `MoveCompliant` (phase 5b), `PlanGrasp` (phase 5c).
 
+### Logging and status (all parts)
+
+28. Follow the design's **Observability** requirement
+    (`robot_platform.md`, Non-Functional Requirements). Concretely:
+    *   `robot_service`: a gRPC server interceptor logs each RPC
+        (`method`, request summary ≤ 200 chars, duration ms, status code,
+        message). Every error path sets a specific status code and a
+        message naming the cause (ICON fault text, planner failure reason,
+        missing object name, timeout with the waited quantity). Operation
+        metadata `OperationInfo` gains `string state = 3` (`PLANNING`,
+        `EXECUTING`, `DONE`, `FAILED`, `CANCELLED`) and
+        `string detail = 4` (last progress message); update
+        `robot_service/robot_service.proto` accordingly.
+    *   `ros2_hwm`: `LOG(INFO)` on enable/disable, fault (with reason),
+        epoch change, ClearFaults, taring start/end, lockstep ↔
+        no-state transitions (> 1 s without a state), and once per 10 s a
+        summary (ticks, dropped entries); never per cycle in
+        `ReadStatus`/`ApplyCommand`.
+    *   `scene_sync`, `camera_sim`: one line per object create/delete,
+        world created, SimLink call (+ result), capture (stamp, wait ms).
+    *   `container/entrypoint.sh`: the `run` helper also appends to
+        `/var/lib/intrinsic/logs/<name>.log`, rotated at 10 MB × 3 (a
+        small `container/logpipe.py` reading stdin).
+    *   Tests: `phase3_cuj_check.py` asserts that a failing call (e.g.
+        `MoveToPose` to an unreachable pose) returns a non-OK code with a
+        non-empty message, and that `robot_service.log` has a line for it.
+
 ## Parts and checks
 
 All e2e checks reuse `tests/e2e/phase2_check.py`'s Isaac harness (move

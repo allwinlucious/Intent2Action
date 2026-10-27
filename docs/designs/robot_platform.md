@@ -697,6 +697,26 @@ Eye-to-hand: the D455 is fixed in the scene.
     credentials in the repository.
 *   **Performance**: see "Timing". Phase 0.5 measures the round-trip time;
     the real-time factor at 250 Hz control is 1 / (250 × round trip).
+*   **Observability (owner requirement, 2026-10-27)**:
+    *   Every API reply carries a status: gRPC code plus a human-readable
+        message saying what failed and why (for example
+        `FAILED_PRECONDITION: robot faulted: simulation reset`,
+        `ABORTED: no collision-free path to the target`). Long-running
+        operations report `done`, `error` (code + message) or the result,
+        and their metadata carries the current state (`PLANNING`,
+        `EXECUTING`, `DONE`, `FAILED`, `CANCELLED`). No call fails silently
+        or returns an empty error.
+    *   Every process we write logs one line per event to stdout in the
+        form `<time> <LEVEL> <component> <message> key=value…`
+        (Python `logging`; C++ via Intrinsic's `LOG`). `robot_service`
+        logs every RPC: method, key arguments, duration, resulting status;
+        `ros2_hwm` logs state changes (enabled, faulted, epoch, taring,
+        free-run/lockstep transitions) but never per cycle; `scene_sync`
+        and `camera_sim` log each object/world change and each capture.
+    *   The entrypoint prefixes each process's lines with its name (as
+        now) and also writes them to `/var/lib/intrinsic/logs/<name>.log`
+        (persistent volume, rotated at 10 MB × 3), so logs survive a
+        crash and a restart. `docker logs intrinsic` shows all of them.
 *   **Reproducibility**: Bazel targets and Docker base images are pinned;
     `container/build_intrinsic.sh`, `container/stage_intrinsic.sh` and
     `docker build` recreate the image from a clean checkout.

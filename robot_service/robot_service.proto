@@ -54,6 +54,8 @@ enum ToolFrame {
 message OperationInfo {
   string kind = 1;              // e.g. "MoveToPose"
   double planned_duration_s = 2;
+  string state = 3;             // PLANNING, EXECUTING, DONE, FAILED, CANCELLED
+  string detail = 4;            // last progress or error message
 }
 
 message MoveToPoseRequest {
