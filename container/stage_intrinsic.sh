@@ -24,6 +24,6 @@ for b in "${BINARIES[@]}"; do
   ldd "$BIN/$b" 2>/dev/null | awk '/=> \// {print $3}' | grep "/.cache/bazel/" | xargs -r cp -L -t "$STAGE/lib/" || true
 done
 
-missing="$(for f in "$STAGE"/bin/*; do [ -f "$f" ] && LD_LIBRARY_PATH="$STAGE/lib" ldd "$f" 2>/dev/null | grep "not found"; done | sort -u)"
+missing="$(for f in "$STAGE"/bin/*; do [ -f "$f" ] && LD_LIBRARY_PATH="$STAGE/lib" ldd "$f" 2>/dev/null | grep "not found" || true; done | sort -u)"
 [ -z "$missing" ] || { echo "unresolved libraries:"; echo "$missing"; exit 1; }
 du -sh "$STAGE"

@@ -1,0 +1,8 @@
+# proto-file: intrinsic_apis/intrinsic/icon/hal/proto/hardware_module_config.proto
+# proto-message: intrinsic_proto.icon.HardwareModuleConfig
+name: "robot_hwm"
+module_config {
+  [type.googleapis.com/intrinsic_proto.icon.LoopbackConfig] { num_dof: 7 }  # Franka arm: 7 joints (Inv uses 6)
+}
+drives_realtime_clock: true
+control_frequency_hz: 250

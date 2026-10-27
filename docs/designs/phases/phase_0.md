@@ -12,7 +12,7 @@ The Docker image `intrinsic-core:dev` starts these processes, and
 | Process | Check in `phase0_smoke.py` |
 |---|---|
 | `zenohd` | TCP connect to 127.0.0.1:7447 succeeds |
-| `zenoh_sessions` | Q6: `ss -Htnp state established '( dport = :7447 )'` (run on the host; host networking) shows at least one connection from each of the processes `world_binary`, `motion_planner_` and `generic_icon_ma` (`ss` truncates names to 15 characters). Zenoh rejects a protocol-version mismatch during the handshake, so an established session shows compatibility. zenohd in the image reports v1.7.2, the same as the linked zenoh-c (Inv §4) |
+| `zenoh_sessions` | Q6: `ss -Htnp state established '( dport = :7447 )'` run inside the container with `docker exec` (a host-side `ss -p` cannot name root processes) shows at least one connection from each of the processes `world_binary`, `motion_planner_` and `generic_icon_ma` (`ss` truncates names to 15 characters). Zenoh rejects a protocol-version mismatch during the handshake, so an established session shows compatibility. zenohd in the image reports v1.7.2, the same as the linked zenoh-c (Inv §4) |
 | localcas | gRPC channel to 127.0.0.1:18020 becomes ready within 5 s |
 | platform_stubs | `ResourceRegistry.ListResourceInstances` on 127.0.0.1:18010 returns OK |
 | geometry | gRPC channel to 127.0.0.1:18001 becomes ready within 5 s |
@@ -111,7 +111,7 @@ too (Inv §5); kept so the process matches its supported configuration. No
 `--rm`: the stopped container keeps its logs for `docker logs`; `run.sh`
 removes the previous one first.
 
-### 5. `container/Dockerfile` (No change)
+### 5. `container/Dockerfile` (Modify: add `iproute2` to the apt install, for the `zenoh_sessions` check)
 
 It already copies `container/config` (including the new files) and
 `/zenohd` from the zenohd image (verified: the image's entrypoint is
