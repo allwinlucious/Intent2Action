@@ -19,7 +19,7 @@ COPY gen /opt/app/gen
 COPY container/services /opt/app/container/services
 COPY container/config /opt/app/container/config
 COPY container/dds /opt/app/container/dds
-COPY container/entrypoint.sh /opt/app/container/entrypoint.sh
+COPY container/entrypoint.sh container/logpipe.py /opt/app/container/
 COPY config /opt/app/config
 COPY robot_model /opt/app/robot_model
 COPY assets/robots /opt/app/assets/robots

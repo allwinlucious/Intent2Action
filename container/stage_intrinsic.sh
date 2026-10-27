@@ -13,6 +13,7 @@ BINARIES=(
   intrinsic_control/intrinsic/icon/server/generic_icon_machine_server
   intrinsic_control/intrinsic/icon/hardware_modules/loopback/loopback_hardware_module_main
   intrinsic/storage/onprem_cas/cmd/localcas
+  ext/ros2_hwm/ros2_hwm_main
 )
 
 rm -rf "$STAGE" && mkdir -p "$STAGE/bin" "$STAGE/lib"

@@ -1,0 +1,40 @@
+# proto-file: intrinsic_apis/intrinsic/icon/server/config/icon_main_config.proto
+# proto-message: intrinsic_proto.icon.IconMainConfig
+control_frequency_hz: 250
+hardware_module_read_write_timeout_seconds: 10
+hardware_module_names: "robot_hwm"
+hardware_module_that_drives_clock: "robot_hwm"
+services {
+  world_service_from_grpc { world_id: "world" }
+  kinematics_from_world_service: true
+  allow_non_real_time_inverse_kinematics: true   # only for Cartesian actions
+}
+realtime_control_config {
+  parts_by_name {
+    key: "arm"
+    value {
+      part_type_name: "HalArmPart"
+      safety_action_type_name: "intrinsic.stop"
+      hardware_resource_name: "franka"
+      config {
+        [type.googleapis.com/intrinsic_proto.icon.HalArmPartConfig] {
+          joint_position_command   { module_name: "robot_hwm" interface_name: "joint_position_command" }
+          joint_position_state     { module_name: "robot_hwm" interface_name: "joint_position_state" }
+          joint_velocity_state     { module_name: "robot_hwm" interface_name: "joint_velocity_state" }
+          joint_acceleration_state { module_name: "robot_hwm" interface_name: "joint_acceleration_state" }
+        }
+      }
+    }
+  }
+}
+intrinsic_runtime {
+  name: "intrinsic_runtime"
+  interfaces {
+    key: "grpc://intrinsic_proto.world.ObjectWorldService"
+    value { grpc { connection { address: "localhost:18000" } } }
+  }
+  interfaces {
+    key: "grpc://intrinsic_proto.geometry.GeometryService"
+    value { grpc { connection { address: "localhost:18001" } } }
+  }
+}

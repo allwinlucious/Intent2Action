@@ -69,6 +69,7 @@ ARM_JOINTS = np.arange(7)
 # panda_hand_joint is joint 7; its measured-force row is joint index + 1 (Inv §2.4).
 HAND_JOINT_ROW = 8
 HAND_JOINT_PRIM = "/World/franka/panda_link7/panda_hand_joint"
+HAND_PRIM = "/World/franka/panda_hand"  # on /tf: the true hand pose
 FINGER_JOINT = "panda_finger_joint1"
 # Franka Hand continuous grasp force (Franka datasheet).
 FINGER_MAX_FORCE_N = 70.0
@@ -152,7 +153,8 @@ class Scene:
 
   def refresh_tf_targets(self, prims_replaced: bool = False) -> None:
     self.graphs.set_tf_targets(
-        scene_lib.object_paths(self.stage) + [scene_lib.CAMERA_PRIM],
+        scene_lib.object_paths(self.stage)
+        + [scene_lib.CAMERA_PRIM, HAND_PRIM],
         prims_replaced,
     )
 

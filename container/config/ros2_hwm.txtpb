@@ -1,0 +1,18 @@
+# proto-file: intrinsic_apis/intrinsic/icon/hal/proto/hardware_module_config.proto
+# proto-message: intrinsic_proto.icon.HardwareModuleConfig
+name: "robot_hwm"
+module_config {
+  [type.googleapis.com/ros2_hwm.Ros2HwmConfig] {
+    arm_joint_names: ["panda_joint1", "panda_joint2", "panda_joint3", "panda_joint4",
+                      "panda_joint5", "panda_joint6", "panda_joint7"]
+    finger_joint_name: "panda_finger_joint1"
+    joint_states_topic: "/joint_states"
+    wrench_topic: "/wrist_wrench"
+    joint_command_topic: "/joint_command"
+    gripper_command_topic: "/gripper_command"
+    epoch_topic: "/sim/epoch"
+    stamp_tolerance_s: 1.0e-6  # = config/timing.yaml stamp_match_tolerance_s
+  }
+}
+drives_realtime_clock: true
+control_frequency_hz: 250

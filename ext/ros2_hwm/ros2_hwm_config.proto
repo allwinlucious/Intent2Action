@@ -1,0 +1,21 @@
+// Configuration of the ros2_hwm ICON hardware module (phase_3.md, decision 6).
+// Packed into HardwareModuleConfig.module_config (container/config/ros2_hwm.txtpb).
+
+syntax = "proto3";
+
+package ros2_hwm;
+
+message Ros2HwmConfig {
+  // The 7 arm joints in ICON's order (API joints 1-7).
+  repeated string arm_joint_names = 1;
+  // The driven finger joint; gripper width = 2 x its position.
+  string finger_joint_name = 2;
+  string joint_states_topic = 3;
+  string wrench_topic = 4;
+  string joint_command_topic = 5;
+  string gripper_command_topic = 6;
+  string epoch_topic = 7;
+  // Maximum |stamp difference| for a /joint_states + /wrist_wrench pair.
+  // Must equal config/timing.yaml stamp_match_tolerance_s.
+  double stamp_tolerance_s = 8;
+}

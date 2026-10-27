@@ -22,6 +22,55 @@ realtime_control_config {
           joint_position_state     { module_name: "robot_hwm" interface_name: "joint_position_state" }
           joint_velocity_state     { module_name: "robot_hwm" interface_name: "joint_velocity_state" }
           joint_acceleration_state { module_name: "robot_hwm" interface_name: "joint_acceleration_state" }
+          joint_torque_state       { module_name: "robot_hwm" interface_name: "joint_torque_state" }
+          payload_command          { module_name: "robot_hwm" interface_name: "payload_command" }
+          payload_state            { module_name: "robot_hwm" interface_name: "payload_state" }
+        }
+      }
+    }
+  }
+  parts_by_name {
+    key: "gripper"
+    value {
+      part_type_name: "HalLinearGripperPart"
+      safety_action_type_name: "intrinsic.empty"
+      config {
+        [type.googleapis.com/intrinsic_proto.icon.HalLinearGripperPartConfig] {
+          status_interface  { module_name: "robot_hwm" interface_name: "gripper_status" }
+          command_interface { module_name: "robot_hwm" interface_name: "gripper_command" }
+          default_grasp_width: 0.0     # GRASP is done only at width <= this
+          default_release_width: 0.075 # Isaac's open fingers reach 0.0762
+          min_width: 0.0
+          max_width: 0.08
+          default_force: 30.0
+          min_force: 0.0
+          max_force: 70.0
+          default_speed: 0.1
+          min_speed: 0.0
+          max_speed: 0.2
+        }
+      }
+    }
+  }
+  parts_by_name {
+    key: "ft_sensor"
+    value {
+      part_type_name: "HalForceTorqueSensorPart"
+      safety_action_type_name: "intrinsic.empty"
+      hardware_resource_name: "franka"
+      config {
+        [type.googleapis.com/intrinsic_proto.icon.HalForceTorqueSensorPartConfig] {
+          force_torque_state   { module_name: "robot_hwm" interface_name: "force_torque_status" }
+          force_torque_command { module_name: "robot_hwm" interface_name: "force_torque_command" }
+          joint_position_state { module_name: "robot_hwm" interface_name: "joint_position_state" }
+          world_robot_collection_name: "franka"
+          target_link_name: "panda_link8"
+          ft_sensor_link_name: "panda_hand"
+          support_mass: 0.0
+          ft_t_cog: [0.0, 0.0, 0.0]
+          # Isaac's wrench can repeat exactly. ICON reads this uint32 into an int, so
+          # INT32_MAX is the largest value that does not wrap to -1 (phase_3_notes.md).
+          num_acceptable_constant_readings: 2147483647
         }
       }
     }

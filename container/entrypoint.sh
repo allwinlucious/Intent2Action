@@ -7,13 +7,20 @@ BIN=/opt/intrinsic/bin
 CFG=/opt/app/container/config
 ZENOH="tcp/127.0.0.1:7447"
 
+BACKEND="${ROBOT_BACKEND:-isaac}"
+case "$BACKEND" in
+  isaac|loopback) ;;
+  *) echo "ROBOT_BACKEND must be isaac or loopback, got '$BACKEND'" >&2; exit 1 ;;
+esac
+
 run() {  # run <name> <command...>: start in the background, prefix every log line with the name
-  local name="$1"; shift
-  "$@" > >(sed -u "s/^/[$name] /") 2>&1 &
+  local name="$1"; shift  # and append it to /var/lib/intrinsic/logs/<name>.log
+  "$@" > >(python3 -u /opt/app/container/logpipe.py "$name") 2>&1 &
 }
 
 export ALLOWED_PUBSUB_IPv4=127.0.0.1  # Zenoh peer listeners bind loopback instead of 0.0.0.0
 mkdir -p /var/lib/intrinsic/worlds
+echo "robot backend: $BACKEND"
 
 run zenohd       /opt/zenoh/zenohd --listen "$ZENOH" --no-multicast-scouting
 run localcas     "$BIN/localcas" --port=18020 --objects_dir=/var/lib/intrinsic/cas --partial_dir=/var/lib/intrinsic/cas-partial
@@ -27,8 +34,16 @@ run planner      "$BIN/motion_planner_service_assetized_main" --runtime_context_
                    --world_service_address=localhost:18000 --geometry_service_address=localhost:18001 \
                    --zenoh_router="$ZENOH"
 python3 -m robot_model.load_franka || { echo "[loader] failed" >&2; exit 1; }
-run hwm          "$BIN/loopback_hardware_module_main" --module_config_file="$CFG/loopback_hwm.txtpb" --logger_connection_timeout=0s
-run icon         "$BIN/generic_icon_machine_server" --config_pbtxt_file="$CFG/icon.txtpb" --non_realtime \
+if [ "$BACKEND" = loopback ]; then
+  run hwm        "$BIN/loopback_hardware_module_main" --module_config_file="$CFG/loopback_hwm.txtpb" --logger_connection_timeout=0s
+  ICON_CFG="$CFG/icon_loopback.txtpb"
+else
+  # Bazel's own ROS 2 (no setup sourced); the RMW is loaded relative to the working directory.
+  run ros2_hwm   bash -c "cd $BIN/ros2_hwm_main.runfiles/_main && CYCLONEDDS_URI=file:///opt/app/container/dds/cyclonedds.xml \
+                   exec $BIN/ros2_hwm_main --module_config_file=$CFG/ros2_hwm.txtpb --logger_connection_timeout=0s"
+  ICON_CFG="$CFG/icon.txtpb"  # ICON must follow at once: the HWM's clock needs ICON within 1 minute
+fi
+run icon         "$BIN/generic_icon_machine_server" --config_pbtxt_file="$ICON_CFG" --non_realtime \
                    --icon_server_port=18003 --use_runtime_asset_fallback=false --server_name=robot \
                    --zenoh_router="$ZENOH" --resource_registry_service=localhost:18010
 
