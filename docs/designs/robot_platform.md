@@ -280,17 +280,32 @@ connect them to Isaac Sim over ROS 2, and put one gRPC API
     left empty (feature off).
 *   The container uses the host network. Fixed ports: world 18000,
     geometry 18001, planner 18002, ICON 18003, `camera_sim` 18005,
-    calibration 18006, pose estimator 18007, `robot_service` 18100 (both
+    calibration 18006, pose estimator 18007, `SimLink` (`scene_sync`) 18101, `robot_service` 18100 (both
     services), stubs 18010, localcas 18020, Triton 18030 (HTTP) / 18031
     (gRPC) / 18032 (metrics), zenohd 7447. Other listening ports exist
     (world's second port, HWM gRPC, metrics exporters, Zenoh peers on
     random ports); the phase 0 plan lists them all. Exposure is controlled
     as described under Security.
-*   **Every ROS 2 node in the container uses CycloneDDS** (consequence of
-    D1): `ros2_hwm` through Bazel's ROS 2; the Python nodes and the grasp
-    planner through the image's ROS 2 Humble with
-    `RMW_IMPLEMENTATION=rmw_cyclonedds_cpp`. The only DDS-vendor boundary is
-    container ↔ Isaac.
+*   **DDS per process** (phase 0.5): ROS 2 *services* and large messages
+    are only safe between the same DDS vendor (rmw_cyclonedds puts a
+    request header inside service payloads), and Isaac on Windows has only
+    Fast DDS.
+    *   `ros2_hwm`: CycloneDDS (D1, Bazel's ROS 2); topics only
+        (`/joint_states`, `/wrist_wrench`, `/joint_command`,
+        `/gripper_command`), which cross vendors.
+    *   `scene_sync` and `camera_sim`: Fast DDS, through the image's ROS 2
+        Humble (`rmw_fastrtps_cpp`, the image's default). `scene_sync`
+        makes every ROS 2 *service* call to Isaac (`simulation_interfaces`,
+        `/sim/*`) and serves them to `robot_service` over an internal gRPC
+        API (`SimLink`, 127.0.0.1:18101); `camera_sim` receives the camera
+        topics vendor-to-vendor.
+    *   `robot_service`: no direct ROS 2 link to Isaac; Isaac operations go
+        through `SimLink`. Its only ROS 2 peer is the grasp planner.
+    *   Grasp planner: CycloneDDS (apt `rmw_cyclonedds_cpp`), the same
+        vendor as `robot_service`'s Bazel ROS 2.
+    *   Discovery on both sides: unicast to 127.0.0.1, multicast off
+        (multicast does not cross Windows ↔ WSL both ways). Configuration in
+        `container/dds/` (phase 0.5).
 *   **GPU budget** (one RTX 3080, 10 GB, shared by Windows and WSL): Isaac
     rendering ≤ 6 GB (camera 848×480, the D455's native depth resolution);
     Triton ≤ 3.5 GB (RF-DETR and FoundationPose in FP16). Phase 5 measures

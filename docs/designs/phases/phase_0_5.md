@@ -1,130 +1,171 @@
 # Phase 0.5: ROS 2 between Isaac (Fast DDS, Windows) and the container (WSL)
 
-Part of [robot_platform.md](../robot_platform.md). Facts with citations:
-[phase_0_5_inventory.md](phase_0_5_inventory.md) ("Inv §n").
+Part of [robot_platform.md](../robot_platform.md). Facts, with source
+citations, are in [phase_0_5_inventory.md](phase_0_5_inventory.md)
+("Inv §n"). Terms: RMW = the ROS 2 middleware layer that picks the DDS
+vendor (`rmw_cyclonedds_cpp` or `rmw_fastrtps_cpp`); D1 = the design's
+owner decision that `ros2_hwm` uses Intrinsic's Bazel ROS 2 (CycloneDDS).
+
+Preconditions (true now): WSL mirrored networking active; `container/stage/`
+populated (phase 0); image `intrinsic-core:dev` exists.
 
 ## Goal and done criteria
 
-`tests/e2e/phase0_5_check.py` runs the probes below and prints `PASS`/`FAIL`
-per check. All must pass, except `service_cyclone`, whose result (either
-way) is recorded because it decides which RMW the container's Python nodes
-use.
+`tests/e2e/phase0_5_check.py` runs the probe twice (container side on
+CycloneDDS, then on Fast DDS) and prints `PASS`/`FAIL` per check:
 
-| Name | Condition |
-|---|---|
-| `topic_cyclone` | Isaac (Fast DDS) publishes `/probe/ping` (`sensor_msgs/JointState`) at 250 Hz for 20 s; a container node on **CycloneDDS** echoes each message to `/probe/pong`; Isaac receives ≥ 99% of them back |
-| `topic_fastdds` | the same with the container node on **Fast DDS** (Linux) |
-| `latency` | from `topic_cyclone`: round-trip p50, p99, max printed; pass if p99 < 4 ms (one 250 Hz cycle) |
-| `service_fastdds` | a container client on Fast DDS calls Isaac's `/probe/trigger` (`std_srvs/srv/Trigger`) 10 times; all succeed with `message == "isaac"` |
-| `service_cyclone` | the same from a CycloneDDS client (recorded, not required) |
-| `no_7400` | while all probes run, neither Windows (`netstat -ano -p udp`) nor WSL (`ss -uln`) has a socket on port 7400 or 7401 |
-| `firewall` | `Get-NetFirewallHyperVVMSetting` for WSL reports `DefaultInboundAction: Block` (already observed, Inv §4.5; re-checked by the script) |
+| Name | Required | Condition |
+|---|---|---|
+| `topic_cyclone` | yes | Isaac (Fast DDS) sends `/probe/ping` (`sensor_msgs/JointState`) at 250 Hz for 20 s; the container peer on CycloneDDS echoes each to `/probe/pong`; Isaac gets ≥ 99% back |
+| `topic_fastdds` | yes | the same with the peer on Fast DDS (Linux) |
+| `service_fastdds` | yes | the Fast DDS peer calls Isaac's `/probe/trigger` (`std_srvs/srv/Trigger`) 10 times; ok = `success == True and message == "isaac"`; all 10 ok |
+| `service_cyclone` | no (recorded) | the same from the CycloneDDS peer |
+| `no_7400` | yes | 10 s after the peer prints `FIRST_PING`: no UDP socket on port 7400 or 7401 on Windows (`netstat -ano -p udp`) or WSL (`ss -uln`) |
+| `firewall` | yes | `Get-NetFirewallHyperVVMSetting` for WSL: `DefaultInboundAction : Block` |
+| `latency` | no (recorded) | round-trip p50 / p99 / max (ms) for each run; input to phase 2's control-rate choice (design: "Timing") |
 
-Then `docs/designs/phases/phase_0_5_notes.md` records the numbers and the
-RMW decision below.
+Only Isaac-side servers exist in the design, so services are tested in that
+direction only. The probe uses the script's own `rclpy`, not the OmniGraph
+bridge nodes (same DDS libraries; the bridge path is tested in phase 2).
 
 ## Decisions made in this plan
 
-*   **Discovery is unicast on loopback on both sides; multicast off.**
-    Multicast does not cross Windows ↔ WSL in both directions, and the two
-    share one UDP port space (Inv §4.4). Peers = `127.0.0.1`, participant
-    indices auto-assigned, peer range 20 on both sides (Isaac uses several
-    participants; the container will run about five processes).
-*   **RMW of the container's Python nodes depends on `service_cyclone`.**
-    `ros2_hwm` is CycloneDDS (D1) and uses topics only. If `service_cyclone`
-    fails, the Python nodes (`scene_sync`, `robot_service`'s sim calls,
-    `camera_sim`) use Fast DDS (`rmw_fastrtps_cpp`, the image's default),
-    because they call Isaac's services; the design doc's "Every ROS 2 node
-    in the container uses CycloneDDS" is changed accordingly. If it
-    passes, all container nodes stay on CycloneDDS.
-*   QoS for the probes: reliable, keep-last depth 1 (the design's control
-    QoS).
+*   **DDS per process** is now fixed in the design doc ("Process model",
+    "DDS per process"): Isaac-facing service calls and camera topics on
+    Fast DDS (same vendor as Isaac), `ros2_hwm` on CycloneDDS (topics only).
+    This phase proves the two required paths (`topic_cyclone`,
+    `service_fastdds` / `topic_fastdds`). `service_cyclone` is recorded
+    to confirm or refute the incompatibility (Inv §5.3).
+*   **Discovery:** unicast to 127.0.0.1 on both sides, multicast off.
+    Windows → WSL multicast works only on the LAN interface, WSL → Windows
+    multicast fails on every interface, and loopback multicast fails both
+    ways; Windows and WSL also share one UDP port space (Inv §4.4).
+*   **Peer range:** participant IDs 0–19 on both sides: Fast DDS
+    `maxInitialPeersRange` 20, Cyclone `MaxAutoParticipantIndex` 19.
+    Expected participants: Isaac 2 (bridge + script `rclpy`), container 5
+    (`ros2_hwm`, `scene_sync`, `camera_sim`, `robot_service`, grasp
+    planner), plus headroom for probes and tools.
+*   **QoS** for ping/pong: reliable, keep-last depth 1, volatile, the
+    design's control-loop QoS (a dropped command would stall lockstep).
 
 ## Constraints
 
-*   No Bazel; no `git commit`; Docker via `sg docker -c`; no `pkill -f`.
-*   Isaac's Python: `cat <script> | cmd.exe /c "cd /d C:\isaac-sim && python.bat -"`.
-    Environment variables from WSL do not reach it; the script sets its
-    own (Inv §1.5).
-*   Windows-side files live in `C:\isaac-sim-work\` (`/mnt/c/isaac-sim-work/`
-    from WSL); copy them there from the repository before running.
+*   No Bazel; no `git commit`; Docker via `sg docker -c "…"`; no `pkill -f`
+    or `killall` (stop the probe container with `docker rm -f probe`).
+*   Isaac's Python: pipe the script on stdin:
+    `cmd.exe /c "cd /d C:\isaac-sim && python.bat -" < <repo>/sim/ros_probe.py`.
+    WSL environment variables do not reach it (Inv §1.5).
+*   Windows-side files: only `fastdds.xml`, copied by the orchestrator to
+    `C:\isaac-sim-work\fastdds.xml` (`/mnt/c/isaac-sim-work/fastdds.xml`).
+*   `<repo>` = `/home/mew/untitled-project` (absolute, never `$PWD`).
 
 ## Target files
 
-### 1. `sim/dds/fastdds_isaac.xml` (Create)
+### 1. `container/dds/fastdds.xml` (Create)
 
-Inv §3.3's profile with `maxInitialPeersRange` 20. Used by Isaac and by
-the container's Fast DDS nodes (same file; the container mounts it).
+Inv §3.3's profile with `maxInitialPeersRange` 20. Used by Isaac (copied to
+Windows) and by the container's Fast DDS nodes (copied into the image).
 
 ### 2. `container/dds/cyclonedds.xml` (Create)
 
-Inv §4.2's configuration, unchanged (`MaxAutoParticipantIndex` 20).
+Inv §4.2's configuration with `MaxAutoParticipantIndex` 19.
 
-### 3. `sim/ros_probe.py` (Create; runs in Isaac's Python)
+### 3. `container/Dockerfile` (Modify)
 
-1.  Before anything else: `os.environ` `ROS_DISTRO=humble`,
-    `RMW_IMPLEMENTATION=rmw_fastrtps_cpp`, `PATH += ;C:\isaac-sim\exts\isaacsim.ros2.bridge\humble\lib`,
-    `FASTRTPS_DEFAULT_PROFILES_FILE=C:\isaac-sim-work\fastdds_isaac.xml`,
-    `ROS_DOMAIN_ID=0` (Inv §1.5, §3.1).
-2.  `SimulationApp({"headless": True, "extra_args": ["--/app/vulkan=false"]})`,
-    `enable_extension("isaacsim.ros2.bridge")`, `simulation_app.update()`,
-    then `import rclpy` (Inv §1.4).
-3.  Node `isaac_probe`: service `/probe/trigger` (`std_srvs/srv/Trigger`,
-    returns `success=True, message="isaac"`); subscriber `/probe/pong`;
-    publisher `/probe/ping`. QoS: reliable, keep-last 1.
-4.  Wait up to 30 s for `/probe/pong`'s publisher count ≥ 1 and
-    `/probe/ping`'s subscription count ≥ 1 (spinning). Then for 20 s at
-    250 Hz: publish `JointState` with `position=[seq]` and
-    `header.stamp` = `time.perf_counter_ns()` split into sec/nanosec;
-    spin with `timeout_sec=0` between sends. On each pong, RTT =
-    now − stamp. Keep spinning 30 s after the last ping so the container
-    clients can finish their service calls.
-5.  Write `C:\isaac-sim-work\probe_result.json`: `sent`, `received`,
-    RTT list in ms. Exit.
+Add `ros-humble-rmw-cyclonedds-cpp` to the `apt-get install` line. The
+existing `COPY container/config …` pattern: add
+`COPY container/dds /opt/app/container/dds`.
 
-The phase runs this script twice (once per container RMW).
+### 4. `sim/ros_probe.py` (Create; Isaac's Python 3.11)
 
-### 4. `tests/e2e/ros_probe_peer.py` (Create; runs in the container)
+1.  Before any other import of Isaac modules:
+    ```python
+    os.environ["ROS_DISTRO"] = "humble"
+    os.environ["RMW_IMPLEMENTATION"] = "rmw_fastrtps_cpp"
+    os.environ["PATH"] += r";C:\isaac-sim\exts\isaacsim.ros2.bridge\humble\lib"
+    os.environ["FASTRTPS_DEFAULT_PROFILES_FILE"] = r"C:\isaac-sim-work\fastdds.xml"
+    os.environ["ROS_DOMAIN_ID"] = "0"
+    ```
+2.  `SimulationApp({"headless": True, "extra_args": ["--/app/vulkan=false"]})`;
+    `from isaacsim.core.utils.extensions import enable_extension`;
+    `enable_extension("isaacsim.ros2.bridge")`; `simulation_app.update()`;
+    `import rclpy`; `rclpy.init()` (Inv §1.4, `clock.py`).
+3.  Node `isaac_probe` with: service `/probe/trigger` (returns
+    `success=True, message="isaac"`); publisher `/probe/ping` and
+    subscriber `/probe/pong`, both QoS reliable / keep-last 1 / volatile.
+4.  Wait (spinning with `spin_once(timeout_sec=0.05)`) until
+    `/probe/ping` has ≥ 1 subscriber and `/probe/pong` has ≥ 1 publisher,
+    at most 120 s. On timeout: write the result file with `sent=0`, close,
+    exit.
+5.  Print `PING_START` (flush). Send loop, absolute schedule: for
+    `k in range(5000)` (20 s at 250 Hz): `t_k = t0 + k * 4 ms`
+    (`time.perf_counter_ns()`); publish `JointState(position=[float(k)])`
+    with `header.stamp` = send time split into sec/nanosec; then
+    `while perf_counter_ns() < t_{k+1}: spin_once(timeout_sec=remaining)`.
+    The pong callback records `perf_counter_ns() - stamp` (RTT) keyed by
+    `k`.
+6.  After the last ping, keep spinning for 30 s (late pongs, service
+    calls).
+7.  Write `C:\isaac-sim-work\probe_result.json`:
+    `{"sent": n, "received": m, "rtt_ms": [...]}`; print `PROBE_DONE`;
+    `simulation_app.close()`.
 
-`rclpy` node: subscribe `/probe/ping`, republish each message unchanged on
-`/probe/pong` (same QoS); after the first ping arrives, call
-`/probe/trigger` 10 times (5 s timeout each) and print
-`SERVICE <ok_count>/10`; exit after 10 s without pings.
+### 5. `tests/e2e/ros_probe_peer.py` (Create; container's Python 3.10)
 
-### 5. `container/Dockerfile` (Modify)
+Single-threaded `rclpy` executor; nothing blocks inside callbacks:
+*   Subscriber `/probe/ping` → republish the same message on `/probe/pong`
+    (same QoS as file 4). On the first ping print `FIRST_PING` (flush).
+*   Service client `/probe/trigger`: after the first ping, run calls one at
+    a time with `call_async`; start the next when the previous future is
+    done or 5 s have passed (that call counts as failed). ok =
+    `result.success and result.message == "isaac"`. After 10 calls print
+    `SERVICE <ok>/10`.
+*   Exit: wait up to 180 s for the first ping (else print
+    `NO_PING` and exit 1); after that, exit 10 s after the last ping.
 
-Add `ros-humble-rmw-cyclonedds-cpp` to the `apt-get install` line. Add
-`COPY container/dds /opt/app/container/dds` and
-`COPY sim/dds /opt/app/sim/dds`.
+### 6. `tests/e2e/phase0_5_check.py` (Create; WSL, `.venv` Python)
 
-### 6. `tests/e2e/phase0_5_check.py` (Create; runs on WSL)
+For each `rmw` in `rmw_cyclonedds_cpp`, `rmw_fastrtps_cpp`:
+1.  Copy `container/dds/fastdds.xml` to `/mnt/c/isaac-sim-work/`; delete
+    `probe_result.json` there; `sg docker -c "docker rm -f probe"`.
+2.  Start the peer with `subprocess.Popen` (stdout piped, read by a
+    thread):
+    `sg docker -c "docker run --rm --name probe --network host -e RMW_IMPLEMENTATION=<rmw> -e CYCLONEDDS_URI=file:///opt/app/container/dds/cyclonedds.xml -e FASTRTPS_DEFAULT_PROFILES_FILE=/opt/app/container/dds/fastdds.xml -v /home/mew/untitled-project/tests/e2e:/probe:ro --entrypoint bash intrinsic-core:dev -c 'source /opt/ros/humble/setup.bash && python3 /probe/ros_probe_peer.py'"`.
+3.  Start Isaac's probe with `subprocess.Popen` (stdin = the script file),
+    stdout read by a thread.
+4.  When the peer prints `FIRST_PING`: wait 10 s, then run `no_7400`. If
+    no `FIRST_PING` within 180 s: mark the run's topic and service checks
+    `FAIL` (cause: no discovery).
+5.  Wait for Isaac to exit (timeout 300 s; on timeout terminate it) and
+    for the peer to exit (timeout 60 s; on timeout `docker rm -f probe`).
+6.  Evaluate from `probe_result.json` and the peer's `SERVICE n/10` line
+    (missing line = 0/10). Latency: p50, p99 and max of `rtt_ms`.
 
-Orchestrates, for `rmw` in (`rmw_cyclonedds_cpp`, `rmw_fastrtps_cpp`):
-1.  Copy `sim/ros_probe.py` and `sim/dds/fastdds_isaac.xml` to
-    `/mnt/c/isaac-sim-work/`; delete any old `probe_result.json`.
-2.  Start the peer:
-    `sg docker -c "docker run --rm --name probe --network host -e RMW_IMPLEMENTATION=<rmw> -e CYCLONEDDS_URI=file:///opt/app/container/dds/cyclonedds.xml -e FASTRTPS_DEFAULT_PROFILES_FILE=/opt/app/sim/dds/fastdds_isaac.xml -v $PWD/tests/e2e:/probe --entrypoint bash intrinsic-core:dev -c 'source /opt/ros/humble/setup.bash && python3 /probe/ros_probe_peer.py'"`
-    in the background, capturing its output.
-3.  Start Isaac's probe (`cat /mnt/c/isaac-sim-work/ros_probe.py | cmd.exe /c "cd /d C:\isaac-sim && python.bat -"`),
-    timeout 180 s.
-4.  While both run (about 10 s into the ping phase): `no_7400` (Windows
-    via `cmd.exe /c netstat -ano -p udp`, WSL via `ss -uln`).
-5.  Read `probe_result.json` and the peer's `SERVICE n/10` line; evaluate
-    the checks for this RMW.
-Finally `firewall` (PowerShell, as in Inv §4.5). Print `PASS`/`FAIL` lines
-and the latency numbers; exit 0 if all required checks pass.
+Then `firewall` via `powershell.exe -NoProfile -Command
+"Get-NetFirewallHyperVVMSetting -PolicyStore ActiveStore -Name '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}'"`.
+Print all lines; exit 0 if every required check passes.
 
 ## Steps
 
-1.  Files 1–6; rebuild the image
-    (`sg docker -c "docker build -f container/Dockerfile -t intrinsic-core:dev ."`).
+1.  Files 1–6. Rebuild:
+    `sg docker -c "docker build -f container/Dockerfile -t intrinsic-core:dev ."`.
 2.  `.venv/bin/python tests/e2e/phase0_5_check.py`.
-3.  If discovery fails (no pongs), try in order and record each result:
-    (a) explicit peer ports in Cyclone (`127.0.0.1:7410` … `:7420`, even
-    numbers) and in Fast DDS (`initialPeersList` locators with ports
-    7410–7420); (b) DDS on the LAN address 192.168.0.161 instead of
-    127.0.0.1 in both XML files. Do not change anything else; if none
-    works, stop and record.
-4.  Write `docs/designs/phases/phase_0_5_notes.md` (Create): the script
-    output, the configuration that worked, the latency numbers, the
-    `service_cyclone` result and the resulting RMW decision.
+3.  If a required topic check fails in either run, apply fallback (a),
+    rerun both runs; if still failing, apply (b) on top, rerun; record
+    every result.
+    *   (a) Explicit ports, indices 0–19 (even ports 7410–7448).
+        `cyclonedds.xml`: replace `<Peer Address="127.0.0.1"/>` with
+        twenty `<Peer Address="127.0.0.1:74NN"/>` for NN = 10, 12, …, 48.
+        `fastdds.xml`: replace the single `initialPeersList` locator with
+        twenty `<locator><udpv4><address>127.0.0.1</address><port>74NN</port></udpv4></locator>`
+        for the same ports.
+    *   (b) LAN address instead of loopback: let `L` = the IPv4 address of
+        the interface carrying the default route (`ip -4 route get 1.1.1.1`
+        → `src`). Replace every `127.0.0.1` in both files with `L`
+        (`interfaceWhiteList`, `metatrafficUnicastLocatorList`,
+        `initialPeersList` in Fast DDS; `NetworkInterface@address` and
+        `Peer@Address` in Cyclone).
+    If (b) also fails: stop and record.
+4.  Write `docs/designs/phases/phase_0_5_notes.md` (Create): full script
+    output, the configuration that worked, latency numbers per run, the
+    `service_cyclone` result.
