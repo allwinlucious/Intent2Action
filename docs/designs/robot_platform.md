@@ -113,8 +113,12 @@ connect them to Isaac Sim over ROS 2, and put one gRPC API
 *   **G8.** Force/contact: `MoveToContact` stops with measured force within
     ±20% of the requested limit; the peg-in-hole insertion of CUJ 6
     succeeds in ≥ 9 of 10 trials.
-*   **G9.** Grasp planning: grasps from `PlanGrasp` lift the target object
-    in ≥ 9 of 10 trials for each catalog object.
+*   **G9.** Grasp planning: grasps from `PlanGrasp` lift the target in
+    ≥ 9 of 10 trials for each graspable catalog object (`red_cube`,
+    `peg`); objects wider than the 0.075 m gripper opening are rejected
+    with a clear status. The grasp planner (Intrinsic's MoveIt grasp
+    pipeline, ROS 2 action) is called directly by `robot_service`;
+    Intrinsic's grasp *skill* is not used.
 *   **G10.** An MCP server exposes every `RobotService` call as a tool,
     generated from the `RobotService` proto (names, descriptions and
     argument schemas come from the proto and its comments). the frontier model
@@ -163,13 +167,9 @@ connect them to Isaac Sim over ROS 2, and put one gRPC API
     answer is no: train on Isaac-rendered data with Intrinsic's
     `TrainService` / published training recipes, or choose another model
     the pose estimator supports.
-*   **Q5 (phase 5c).** The grasp planner: Intrinsic's MoveIt-based grasp
-    planning is described in the local tutorial
-    `developer_resources/learn/tutorials/moveit_grasp_planning.md`, but its
-    code is in a separate Intrinsic repository. Phase 5c finds it, checks
-    that it builds on ROS 2 Humble and runs as a ROS 2 service without
-    Intrinsic's skill and ROS bridge, and defines the service interface
-    `robot_service` calls.
+*   **Q5 (answered).** The planner is in `intrinsic-ai/intrinsic-moveit`
+    (Apache-2.0); it is a ROS 2 action. Its Intrinsic-free pipeline is
+    vendored and built for Humble with a new `main` (phase 5c).
 *   **Q6 (phase 0).** zenohd (from Intrinsic's image) and the zenoh-c
     version linked by the services must be compatible.
 *   **Q7 (phase 2).** Does `SingleViewDepthSensor` work with the Direct3D
@@ -256,7 +256,7 @@ connect them to Isaac Sim over ROS 2, and put one gRPC API
                                │ Intrinsic       motion_planner · world (world + sim_world)       │
                                │                 geometry · ICON --non_realtime (arm/gripper/F-T) │
                                │                 calibration service · pose estimator + Triton    │
-                               │                 grasp planner (ROS 2 service)                    │
+                               │                 grasp planner (ROS 2 action)                    │
                                │ Stand-ins       platform_stubs · localcas · zenohd · runtime pb  │
                                │ Adapters (ours) ros2_hwm    ICON hardware module ↔ ROS 2 topics  │
                                │                 camera_sim  serves CameraService from ROS 2      │
@@ -434,7 +434,7 @@ Typical durations: a motion 1–10 s, `CalibrateCamera` 2–5 min,
 | `GetWrench()`, `TareWrench()` | ICON F/T part status; ICON `intrinsic.tare_force_torque_sensor` | `/wrist_wrench` → `ros2_hwm` F/T interface → ICON. Tare removes static load only (not acceleration effects) |
 | `MoveToContact(direction, max_force, speed, wait)` | ICON `intrinsic.force_primitive` | moves along `direction` until the measured force along it reaches `max_force` |
 | `MoveCompliant(target_pose, stiffness, max_force, wait)` | ICON `intrinsic.cartesian_admittance_action` | moves toward the target while yielding to contact forces |
-| `PlanGrasp(object)` | Intrinsic grasp planner (ROS 2 service, Q5), then `PlanTrajectory` | object mesh + pose from `world` |
+| `PlanGrasp(object)` | Intrinsic's MoveIt grasp pipeline (ROS 2 action `/grasp_planning/plan_grasps`) | object pose from `world`, box dims from the catalog; graspable check, width filter, depth offset (phase 5c) |
 | `Stop()` | ICON `intrinsic.stop` | controlled stop; ends the session; the motion task ends `CANCELLED`; not a fault |
 | `SetSpeed(factor)` | ICON speed override | scales following motions; re-applied after ICON recovery |
 | `ClearFaults()` | ICON `ClearFaults` | see CUJ 5 |

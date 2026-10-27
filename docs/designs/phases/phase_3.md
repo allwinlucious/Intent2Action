@@ -247,7 +247,8 @@ container, Isaac and Bazel, so they never run in parallel.
     factor (tare is not re-applied; `GetState.wrench` is untared until
     `TareWrench`). Motion calls while faulted return `FAILED_PRECONDITION`
     with the fault reason.
-25. **`ResetScene`:** cancel the running operation; `SimLink.Reset` (gets
+25. **`ResetScene`:** cancel the running operation; `DetachObject` every
+    attached object in `world` and `Release` the gripper; `SimLink.Reset` (gets
     the new epoch); wait until ICON reports `FAULTED` (up to 5 s);
     `ClearFaults`; wait until `READY` (10 s); clear payload; speed 1.0.
 26. **`GetImage`/`GetPointCloud`:** `CameraService.Capture` via

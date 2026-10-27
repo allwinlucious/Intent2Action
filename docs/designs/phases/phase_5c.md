@@ -1,8 +1,9 @@
 # Phase 5c: grasp planning with Intrinsic's MoveIt grasp planner
 
 Part of [robot_platform.md](../robot_platform.md) (G9, Q5). Facts:
-[phase_5c_inventory.md](phase_5c_inventory.md) ("Inv §n"). Requires
-phase 3 done. Runs after phase 4 (shares Isaac and the container).
+[phase_5c_inventory.md](phase_5c_inventory.md) ("Inv §n"); upstream file
+lines are in `intrinsic-moveit` tag `v0.0.4` ("IM/…"). Requires phases 3
+and 4 done (shares Isaac and the container).
 
 ## Goal and done criteria
 
@@ -10,104 +11,161 @@ phase 3 done. Runs after phase 4 (shares Isaac and the container).
 
 | Name | Condition |
 |---|---|
-| `planner_up` | `move_group` and `grasp_planner` run in the container; `/grasp_planning/plan_grasps` action server is available [120 s] |
-| `cube` | 10 trials (`ResetScene` before each): `PlanGrasp("red_cube")` → `MoveToPose(pregrasp)` → `MoveToPose(grasp, LINEAR)` → `Grasp` → `AttachObject` → `MoveToPose(grasp + 0.10 m z, LINEAR)`; success = Isaac's true `red_cube` z rose ≥ 0.08 m and `IsGripping`; ≥ 9/10 (G9) |
+| `planner_up` | `move_group` and `grasp_planner` run; action server `/grasp_planning/plan_grasps` available [120 s] |
+| `cube` | 10 trials, each: `ResetScene`; `PlanGrasp("red_cube")`; `MoveToPose(pregrasp)`; `MoveToPose(grasp, LINEAR)`; `Grasp`; `AttachObject("red_cube")`; `MoveToPose(grasp + 0.10 m world z, LINEAR)`; success = Isaac's true `red_cube` z rose ≥ 0.08 m and `IsGripping`; then `Release`, `DetachObject`. ≥ 9/10 (G9) |
 | `peg` | the same for `peg`; ≥ 9/10 |
-| `too_wide` | `PlanGrasp("plate")` returns `ABORTED` with a message naming the gripper's 0.075 m limit |
-| `logs` | `robot_service.log` has one line per `PlanGrasp` with status and duration |
+| `too_wide` | `PlanGrasp("plate")` → `ABORTED`, message contains "0.075" |
+| `errors` | `PlanGrasp("nope")` → `NOT_FOUND`; in a container started with `GRASP_PLANNER=off`, `PlanGrasp("red_cube")` → `UNAVAILABLE` "grasp planner not running" |
+| `logs` | `robot_service.log` has one line per `PlanGrasp` call with status and duration; `grasp_planner.log` one line per goal |
 
-G9 in the design is narrowed to graspable catalog objects (`red_cube`,
-`peg`); the plate (0.18 m) is wider than the open gripper on every side.
+G9 covers the graspable catalog objects `red_cube` and `peg`; `plate`
+(0.18 m across, 0.012 m thick on a table), `hole_block`, `table` and
+`obstacle` (static) are not grasp targets.
 
 ## Decisions
 
-1.  **What runs:** a Humble build of the planner's Intrinsic-free core
-    (the grasp pipeline, Inv §8.2) with a new `main`, next to MoveIt's
-    `move_group`, both on CycloneDDS (same vendor as `robot_service`'s
-    `rclpy`, design "DDS per process"). Intrinsic's own node does not
-    build on Humble (Inv §8.4).
-2.  **Sources** (vendored, Apache-2.0 headers kept): from
-    `https://github.com/intrinsic-ai/intrinsic-moveit` tag `v0.0.4` copy
-    `moveit_planning_interfaces/` (unchanged) and the three pipeline
-    sources + headers (`grasp_planning_pipeline.{hpp,cpp}`,
-    `generate_box_grasp_poses.{hpp,cpp}`, `object_geometry.{hpp,cpp}`)
-    into `ros_ws/src/moveit_planning_interfaces/` and
-    `ros_ws/src/grasp_planner/` (Create). Include fix: the three MoveIt
-    `.hpp` includes → `.h` (Inv §8.3). `ros_ws/src/grasp_planner/src/main.cpp`
-    (Create): node `grasp_planner`, `/get_planning_scene` client,
-    `GraspPlanningPipeline`, action server `grasp_planning/plan_grasps`
-    as `moveit_planning_node.cpp:637-721` does, with a
-    `rclcpp::executors::MultiThreadedExecutor` and without the World
-    synchronizer; parameter `expect_collision_objects` true. Logs per
-    goal: target, candidates, result count, duration (Observability).
-3.  **Franka MoveIt config** `ros_ws/src/franka_grasp_config/` (Create):
-    *   URDF: `assets/robots/franka/lula_franka_gen.urdf` (copied at build;
-        the same model as everywhere, G3).
-    *   SRDF: virtual joint `world`→`base_link` **fixed**; group
-        `panda_arm` chain `base_link`→`panda_link8`; group `hand` joints
-        `panda_finger_joint1`, `panda_finger_joint2` (passive);
-        `end_effector` `hand`, parent link `panda_link8`, parent group
-        `panda_arm`; group states on `hand`: `open` (0.04, 0.04), `closed`
-        (0.0, 0.0); `disable_collisions` copied from
-        `ros-humble-moveit-resources-panda-moveit-config`'s `panda.srdf`
-        (BSD) for adjacent/never-colliding link pairs.
-    *   Tool frame: `right_gripper` (0.1 m along `panda_link8` z, the
-        same frame as Intrinsic's `tcp`); its +z is the approach axis
-        (Inv §3.6).
-    *   `kinematics.yaml`: KDL for `panda_arm`; `ompl_planning.yaml` from
-        the apt Panda config; `joint_limits.yaml` from the URDF.
-    *   `launch/grasp_planner.launch.py`: `robot_state_publisher`,
-        static TF `world`→`base_link` identity, `move_group`,
-        `grasp_planner`. `/joint_states` comes from Isaac (cross-vendor
-        topic; joint names match the URDF).
-4.  **Image** (`container/Dockerfile`, Modify): apt
+1.  **What runs:** the planner's Intrinsic-free grasp pipeline (Inv §8.2)
+    with a new `main`, plus MoveIt `move_group`, both CycloneDDS (same
+    vendor as `robot_service`'s `rclpy`). Intrinsic's own node does not
+    build on Humble (Inv §8.4). Not started with `ROBOT_BACKEND=loopback`
+    or `GRASP_PLANNER=off` (env, default `on`).
+2.  **Vendored sources** (Apache-2.0 headers kept; record the upstream
+    commit in `ros_ws/src/VENDORED.md`, Create):
+    *   `ros_ws/src/moveit_planning_interfaces/` ← IM `moveit_planning_interfaces/`
+        unchanged.
+    *   `ros_ws/src/grasp_planner/include/moveit_planning_service/` ←
+        `grasp_planning_pipeline.hpp`, `generate_box_grasp_poses.hpp`,
+        `object_geometry.hpp`; `ros_ws/src/grasp_planner/src/` ← the three
+        `.cpp`. Include fix: `moveit/robot_model/robot_model.hpp`,
+        `moveit/robot_model_loader/robot_model_loader.hpp`,
+        `moveit/planning_scene/planning_scene.hpp` → `.h` (Inv §8.3).
+    *   `ros_ws/src/grasp_planner/src/main.cpp` (Create): port from IM
+        `moveit_planning_node.cpp` the goal, cancel, accept and execute
+        handlers (`:50-198`) and the node set-up (`:637-721`: separate
+        callback group and executor for the `/get_planning_scene` client,
+        `GraspPlanningPipeline`, action server `grasp_planning/plan_grasps`),
+        with `rclcpp::executors::MultiThreadedExecutor`. Do **not** port
+        `orchestrate_scene_synchronization` (`:252-390`) or anything
+        Intrinsic; set `scene_ready = true` at start (`robot_service`
+        applies the planning scene before every goal). Declare every
+        parameter the ported code reads (with upstream defaults). Log one
+        line per goal: target, candidates, grasps returned, duration,
+        error code.
+    *   `ros_ws/src/grasp_planner/CMakeLists.txt`, `package.xml` (Create):
+        `ament_cmake`; deps `rclcpp`, `rclcpp_action`, `moveit_core`,
+        `moveit_ros_planning`, `moveit_ros_planning_interface`,
+        `moveit_task_constructor_core`, `moveit_planning_interfaces`,
+        `geometry_msgs`, `sensor_msgs`, `Eigen3`; one executable
+        `grasp_planner`; installs to `lib/grasp_planner`.
+3.  **Franka MoveIt config** `ros_ws/src/franka_grasp_config/` (Create;
+    `ament_cmake`, installs `urdf/`, `srdf/`, `config/`, `launch/`,
+    `meshes/`):
+    *   `ros_ws/prepare.sh` (Create; run in the Dockerfile before colcon):
+        copies `assets/robots/franka/lula_franka_gen.urdf` to
+        `franka_grasp_config/urdf/franka.urdf`, removing every link and
+        joint whose name starts with `camera_` (Intrinsic's model drops
+        them too, phase 1), and rewriting mesh URIs
+        `package://franka_description/meshes/{visual,collision}/<n>.{dae,stl}`
+        → `package://franka_grasp_config/meshes/<n>.stl`; copies
+        `assets/robots/franka/meshes/collision/*.stl` to
+        `franka_grasp_config/meshes/`.
+    *   `srdf/franka.srdf`: virtual joint `world`→`base_link` fixed; group
+        `panda_arm` chain `base_link`→`panda_link8`; group `hand` with
+        links `panda_hand`, `panda_leftfinger`, `panda_rightfinger` and
+        joints `panda_finger_joint1`, `panda_finger_joint2`; end effector
+        `hand`, parent link `panda_link8`, parent group `panda_arm`;
+        states on `hand`: `open` (0.04, 0.04), `closed` (0.0, 0.0);
+        `disable_collisions` copied from apt
+        `moveit_resources_panda_moveit_config/config/panda.srdf`.
+    *   Tool frame `right_gripper` (= Intrinsic `tcp`; +z = approach, Inv
+        §3.6).
+    *   `config/kinematics.yaml` (KDL, `panda_arm`, timeout 0.05 s),
+        `config/ompl_planning.yaml` (from the apt Panda config),
+        `config/joint_limits.yaml` (velocity from the URDF, acceleration
+        from `assets/robots/franka/robot_descriptor.yaml`).
+    *   `launch/grasp_planner.launch.py`: `MoveItConfigsBuilder("franka",
+        package_name="franka_grasp_config")` with the URDF, SRDF,
+        kinematics, joint limits and the OMPL pipeline; `move_group` with
+        `moveit_config.to_dict()`, `allow_trajectory_execution: false`,
+        `use_sim_time: true`; `grasp_planner` with the same dict and
+        `use_sim_time: true`. No `robot_state_publisher` and no static TF
+        (`move_group` takes the state from Isaac's `/joint_states`;
+        Isaac already publishes `/tf`).
+4.  **Image** (`container/Dockerfile`, Modify), in this order: apt
     `ros-humble-moveit ros-humble-moveit-task-constructor-core
     ros-humble-moveit-configs-utils ros-humble-moveit-msgs
-    ros-humble-moveit-resources-panda-moveit-config`; `colcon build` of
-    `ros_ws/src` into `/opt/ros_ext` (with the existing
-    `simulation_interfaces` build). Entrypoint (Modify): start the launch
-    file after `scene_sync` with CycloneDDS
-    (`RMW_IMPLEMENTATION=rmw_cyclonedds_cpp`, `CYCLONEDDS_URI`), ROS
-    sourced under `set +u`.
-5.  **Object dimensions:** `tools/build_catalog_meshes.py` (Modify) writes
-    `dims: [x, y, z]` (bounding box, m) into each `object.yaml`; the image
-    copies them (already under `assets/objects`).
-6.  **`robot_service.PlanGrasp`** (replaces `UNIMPLEMENTED`):
-    1.  Look up the object in `world` (`NOT_FOUND` if absent) and its
-        catalog `dims` (via `scene_sync`'s catalog map — `SimLink` gains
-        `GetCatalog(name) → catalog` in `simlink.proto`, Modify).
-    2.  `/apply_planning_scene`: add every `world` object except the robot,
-        hand, `d455` and attached objects as a BOX collision object (id =
-        name, pose = its world pose with the box centred at
-        `dims.z / 2` above the bottom-centre origin); remove MoveIt scene
-        objects no longer in `world`.
-    3.  `PlanGrasps` goal: `group_name panda_arm`, `end_effector_group
-        hand`, `tool_frame right_gripper`, `planning_timeout_sec 10`,
-        `gripper_motion_duration_sec 0.5`, `retract_dist_m 0.08`, surfaces
-        0–5, `num_rotations 4`, `max_num_grasps 8`, one candidate with
-        `target.id` = name, `obj_dims_in_meters` = dims,
-        `obj_t_obj_center` = (0, 0, dims.z/2).
-    4.  Filter: keep grasps whose object extent along the tool y axis
-        (the finger axis; `right_gripper` = Isaac `panda_hand` rotated π
-        about z) is ≤ 0.075 m. None left → `ABORTED` "object wider than
-        the gripper opening (0.075 m) on every approach". Planner failure
-        → `ABORTED` with its `error_code`.
-    5.  Return the best remaining grasp (highest `grasp_quality`):
-        `grasp` and `pregrasp` = object pose ∘ object_T_tool (base frame,
-        TCP = `right_gripper` = Intrinsic `tcp`), `grasp_joints` from
-        `grasp_ik_solution` ordered `panda_joint1..7`.
-7.  **Design doc** (Modify): G9 narrowed (above); RobotService table row
-    `PlanGrasp` describes steps 6.2–6.5.
+    ros-humble-moveit-resources-panda-moveit-config`; `COPY ros_ws
+    /opt/ws/ros_ws`; `COPY assets/robots /opt/ws/assets/robots`; run
+    `ros_ws/prepare.sh`; one `colcon build --merge-install --install-base
+    /opt/ros_ext` over `/opt/ws/src` (the existing `simulation_interfaces`
+    clone) and `/opt/ws/ros_ws/src`. Entrypoint (Modify): after
+    `scene_sync`, `ros2 launch franka_grasp_config grasp_planner.launch.py`
+    with CycloneDDS and ROS sourced under `set +u`; its output goes to
+    the `grasp_planner` log (Observability).
+5.  **Object dimensions without simulation APIs:** `tools/build_catalog_meshes.py`
+    (Modify) writes `dims: [x, y, z]` (bounding box, m) into each
+    `object.yaml`. `scene_sync` (Modify) sets `user_data["catalog"]` =
+    `StringValue(<catalog>)` on every object it creates; perceived objects
+    (phase 5) set it too. `robot_service` reads
+    `/opt/app/assets/objects/<catalog>/object.yaml`. No `SimLink` call.
+6.  **`robot_service.PlanGrasp`** (`container/services/robot/grasp.py`,
+    Create; wired in `robot_service.py`, Modify):
+    1.  `GetObject(name)` in `world` (`NOT_FOUND` if absent or without
+        `user_data["catalog"]`); dims from the catalog.
+    2.  **Graspable check before planning:** graspable if the smaller of
+        the object's horizontal extents (`dims.x`, `dims.y`, the object is
+        upright) ≤ 0.075 m; else `ABORTED` "object wider than the gripper
+        opening (0.075 m) in every horizontal direction".
+    3.  `/apply_planning_scene` (timeout 5 s; failure → `UNAVAILABLE`):
+        every `world` object with a catalog, except attached ones, as a
+        `CollisionObject` with `header.frame_id = "world"`, `id` = name,
+        `pose` = the object's world pose (its origin is the bottom centre),
+        one BOX primitive of `dims` with `primitive_poses[0]` = (0, 0,
+        dims.z/2), operation `ADD`; MoveIt objects no longer in `world`
+        with operation `REMOVE`.
+    4.  Goal: `group_name panda_arm`, `end_effector_group hand`,
+        `tool_frame right_gripper`, `planning_timeout_sec 10`,
+        `gripper_motion_duration_sec 0.5`, `retract_dist_m 0.08`,
+        `surfaces [0, 1, 2, 3, 4]` (no −Z), `num_rotations 4`,
+        `max_num_grasps 20` (all candidates, so filtering is not cut short),
+        one candidate: `target.id` = name, `obj_dims_in_meters` = dims,
+        `obj_t_obj_center` = (0, 0, dims.z/2). Server not available in
+        10 s → `UNAVAILABLE` "grasp planner not running"; goal rejected →
+        `FAILED_PRECONDITION`; no result in 30 s → cancel,
+        `DEADLINE_EXCEEDED`; planner failure → `ABORTED` "no feasible
+        grasp found (see grasp_planner.log)".
+    5.  Width filter on all returned grasps: keep those whose object
+        extent along the tool y axis (the finger axis) ≤ 0.075 m; none →
+        `ABORTED` as in step 2.
+    6.  Depth: move the grasp pose along its own +z by
+        d = min(0.02, extent along the approach axis − 0.01) so the finger
+        pads overlap the object (the planner puts the TCP on the face,
+        fingertips are 3.4 mm beyond `right_gripper`, Inv review).
+    7.  Return the best (highest `grasp_quality`): `grasp`, `pregrasp`
+        = world_T_object ∘ object_T_tool (world = robot base, Franka at
+        the origin), `grasp_joints` from `grasp_ik_solution` ordered
+        `panda_joint1..7`.
+7.  **`ResetScene` cleanup** (phase 3 decision 25 gains, Modify
+    `phase_3.md` and `robot_service`): detach every attached object in
+    `world` (`DetachObject`) and `Release` the gripper before
+    `SimLink.Reset`.
+8.  **Design doc** (Modify): G9 as above; Q5 answered (action
+    `/grasp_planning/plan_grasps`, vendored pipeline); RobotService row
+    `PlanGrasp` per decision 6; architecture diagram "grasp planner (ROS 2
+    action)".
 
 ## Steps
 
-1.  Decisions 2–5; rebuild the image; `planner_up`.
-2.  Decision 6; unit tests `tests/test_plan_grasp.py` (Create: box pose
-    conversion, the width filter, frame composition).
-3.  `tests/e2e/phase5c_check.py` (Create) until it passes; write
-    `phase_5c_notes.md` (Create) with success rates and planning times.
-4.  If the pipeline fails to link or run on Humble (only compiled so far,
+1.  Decisions 2–5; rebuild the image; `planner_up`. If the pipeline
+    fails to link or MTC/OMPL plugins fail to load (only compiled so far,
     Inv §8.3), stop and record it.
+2.  Decision 6–7; unit tests `tests/test_plan_grasp.py` (Create; pure
+    Python, no ROS imports at module level) with cases: cube at yaw 0 and
+    yaw 30°, grasp pose composition; finger-axis extent exactly 0.075
+    (kept) and 0.076 (dropped); plate rejected by step 2; depth for the
+    cube (0.02) and for a 0.025 m tall box (0.015).
+3.  `tests/e2e/phase5c_check.py` (Create) until it passes; write
+    `phase_5c_notes.md` (Create): success rates, planning times.
 
 ## Constraints
 
