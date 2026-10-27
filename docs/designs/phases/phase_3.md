@@ -343,3 +343,22 @@ operation table, stall detector, PNG encoder), `tests/e2e/phase3_cuj_check.py`
     `.git/info/exclude` (decision 5).
 *   If a decision proves impossible, stop and record it in
     `phase_3_notes.md`.
+
+## Part 1 review fixes (do first in Part 3)
+
+From `docs/designs/reviews/phase_3/code_review_part1.md`, all to apply:
+1.  `ext/ros2_hwm`: reset `last_gripper_` when the baseline epoch changes
+    and in `Prepare()` (Isaac reopens the fingers on reset/restart).
+2.  `ext/ros2_hwm`: never publish a gripper command with force ≤ 0 (ICON's
+    unset default would set Isaac's finger max effort to 0).
+3.  `ext/ros2_hwm`: clear the tare bias (`taring_ = {}`) in `ReadStatus`
+    when the baseline epoch changes (decision 24: untared after reset).
+4.  `ext/ros2_hwm`: tick-failure warnings via `LOG_EVERY_N_SEC(WARNING, 5)`
+    plus one line when an entry is dropped; check `tickStopping()` before
+    `Reset` in the retry loop.
+5.  `ext/ros2_hwm`: clear the stamp pairer on the "no state for > 1 s"
+    transition.
+6.  `container/logpipe.py`: prefix each file line with an ISO-8601 time
+    if the line does not already start with one; Python services use
+    `logging.basicConfig(format="%(asctime)s %(levelname)s <component> %(message)s")`.
+Rebuild, rerun `phase3_hwm_check.py` (must still pass 7/7).
