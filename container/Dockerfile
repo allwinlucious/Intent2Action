@@ -5,7 +5,7 @@ FROM us-central1-docker.pkg.dev/intrinsic-mirror/intrinsic-build-images/zenohd@s
 # Humble matches the ROS 2 distro Intrinsic's Bazel build links against.
 FROM ros:humble-ros-base
 
-RUN apt-get update && apt-get install -y --no-install-recommends python3-pip iproute2 && rm -rf /var/lib/apt/lists/* \
+RUN apt-get update && apt-get install -y --no-install-recommends python3-pip iproute2 ros-humble-rmw-cyclonedds-cpp && rm -rf /var/lib/apt/lists/* \
  && pip3 install --no-cache-dir grpcio==1.85.0 protobuf==7.36.2
 
 COPY --from=zenoh /zenohd /opt/zenoh/zenohd
@@ -14,6 +14,7 @@ COPY container/stage/lib /opt/intrinsic/lib
 COPY gen /opt/app/gen
 COPY container/services /opt/app/container/services
 COPY container/config /opt/app/container/config
+COPY container/dds /opt/app/container/dds
 COPY container/entrypoint.sh /opt/app/container/entrypoint.sh
 COPY robot_model /opt/app/robot_model
 COPY assets/robots /opt/app/assets/robots

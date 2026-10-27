@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- UDPv4 only, loopback, unicast discovery (phase_0_5_inventory.md §3.3).
+     Used by Isaac (copied to C:\isaac-sim-work\fastdds.xml) and by the
+     container's Fast DDS nodes. -->
+<profiles xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+  <transport_descriptors>
+    <transport_descriptor>
+      <transport_id>udp_loopback</transport_id>
+      <type>UDPv4</type>
+      <interfaceWhiteList><address>127.0.0.1</address></interfaceWhiteList>
+      <maxInitialPeersRange>20</maxInitialPeersRange>
+    </transport_descriptor>
+  </transport_descriptors>
+  <participant profile_name="isaac_loopback" is_default_profile="true">
+    <rtps>
+      <useBuiltinTransports>false</useBuiltinTransports>  <!-- drops SHM and the default UDP -->
+      <userTransports><transport_id>udp_loopback</transport_id></userTransports>
+      <builtin>
+        <metatrafficUnicastLocatorList>
+          <locator><udpv4><address>127.0.0.1</address></udpv4></locator>
+        </metatrafficUnicastLocatorList>
+        <initialPeersList>
+          <locator><udpv4><address>127.0.0.1</address></udpv4></locator>
+        </initialPeersList>
+      </builtin>
+    </rtps>
+  </participant>
+</profiles>
