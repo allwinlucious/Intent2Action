@@ -335,7 +335,7 @@ reason.
 | Gripper command ↓ | `/gripper_command` (`sensor_msgs/JointState`: `panda_finger_joint1`, position = width/2, effort = max force N) | bridge Subscribe Joint State; `run_scene.py` sets the finger drive target and max force (the second finger mimics the first) |
 | Camera request ↓ | `/camera/request` (`std_msgs/Header`, stamp = minimum sim time) | bridge generic Subscriber; `run_scene.py` renders on request |
 | Camera ↑ | `/camera/rgb`, `/camera/depth` (32FC1, metres, ground truth), `/camera/camera_info` | `rsd455.usd` camera + bridge Camera Helper |
-| Object poses ↑ | `/tf` (objects under `/World/objects`, camera), 30 Hz sim time | bridge Publish Transform Tree |
+| Object poses ↑ | `/tf` (parent `world`; objects under `/World/objects`, `Camera_Pseudo_Depth`, `d455_optical`), 31.25 Hz sim time | bridge Publish Transform Tree + Raw Transform Tree |
 | Epoch ↑ | `/sim/epoch` (`std_msgs/UInt32`, transient-local) | bridge generic Publisher |
 | Scene ↕ | `simulation_interfaces`: `SpawnEntity`, `DeleteEntity`, `GetEntities` | `isaacsim.ros2.sim_control` (served during renders) |
 | Sim control ↕ | `/sim/reset`, `/sim/attach_board`, `/sim/detach_board` (`std_srvs/srv/Trigger`) | `run_scene.py`'s own `rclpy` (D7 exception: the bridge's service nodes reply before the script can act) |
@@ -630,7 +630,7 @@ Eye-to-hand: the D455 is fixed in the scene.
 ### Alternative I: Isaac's stereo-disparity depth sensor for noisy depth
 
 *   **Pros**: Noise derived from scene geometry.
-*   **Cons**: Measured in phase 2: 12–15% valid pixels, only along image
+*   **Cons**: Measured in phase 2: 12–15% valid pixels, only along intensity
     edges (a real D455 projects an IR pattern and gives dense depth),
     values ≈ 10⁴ × metres, and the bridge's Camera Helper cannot publish
     it.
