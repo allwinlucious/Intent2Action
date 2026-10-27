@@ -143,6 +143,7 @@ connect them to Isaac Sim over ROS 2, and put one gRPC API
 | D6 | 2026-10-27 | Build for the finished product: no needed feature deferred; realistic sensors | This is the base of a larger product |
 | D7 | 2026-10-27 | Isaac I/O only through the ROS 2 bridge's own components; script `rclpy` only where the bridge has none (listed in phase 2) | One integration surface in Isaac; nothing custom serving data from the simulator |
 | D8 | 2026-10-27 | No depth noise model: depth stays clean unless a prebuilt noise model becomes available | Isaac's prebuilt D455 sensor is unusable (phase 2), and a hand-written model is not wanted |
+| D9 | 2026-10-27 | Perception uses Intrinsic's current pose-estimation path (`nvidia_pose_estimator`: SAM 3 + FoundationStereo + FoundationPose on TensorRT), not the older `ioc_pose_estimator` + Triton | Current upstream path; FoundationPose weights under the NVIDIA Open Model License (commercial use); the older path's weights are under a restrictive EULA and the path is deprecated (phase 5 inventory) |
 
 ## Open Questions
 

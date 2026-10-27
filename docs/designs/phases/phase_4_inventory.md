@@ -507,7 +507,7 @@ Where the initial world comes from in this container:
   (`:150-154`).
 - `CloneWorld` accepts `init_world` as a destination
   (`ic/intrinsic/world/service/world_storage.cc:272-280`). It copies with
-  `world.Clone()` (`ic/intrinsic/world/service/object_world_service.cc:1719-1723`).
+  `world.Clone()` (`ic/intrinsic/world/service/object_world_service.cc:1722`, `:1744`).
   Whether the clone keeps object IDs was not checked.
 - Persistence: `--save_worlds_to_disk` defaults to `true`
   (`world_storage.cc:60`). Changed worlds are marked
@@ -593,14 +593,14 @@ The sequence:
    (`SK/initialize_calibration.cc:147-219`)
 2. `SampleCalibrationPoses` (§9).
 3. `CollectCalibrationData`: for each waypoint, move, read `base_t_flange`
-   from the world, then call `CaptureData`. A 
+   from the world, then call `CaptureData`. The returned
    `CaptureDataStatus` is not checked (TODO at `:159`). By default it
    returns to the start pose between waypoints (`SK/collect_calibration_data.cc:126-169`).
 4. `CalibrateCameraToRobot`: `Calibrate` (`SK/calibrate_camera_to_robot.cc:88-107`).
 5. `SaveCalibrationResult`: `Save` (`SK/save_calibration_result.cc:56-68`).
 
 The skills need the executive and skill runtime, which the project
-excludes (`project/docs/designs/robot_platform.md:126-127`, D4 at `:141`).
+excludes (`project/docs/designs/robot_platform.md:127-128`, D4 at `:141`).
 `robot_service` would make the same gRPC calls itself. No Python
 `CalibrationService` stubs exist yet: `project/gen/intrinsic/perception/proto/v1/`
 does not exist (ls printed nothing). `project/container/gen_protos.sh:1-21`

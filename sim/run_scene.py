@@ -37,6 +37,10 @@ simulation_app = SimulationApp(
     }
 )
 
+import carb  # DEBUG
+
+_s = carb.settings.get_settings()  # DEBUG
+print("DEBUG settings", {k: _s.get(k) for k in ("/app/asyncRendering", "/app/asyncRenderingLowLatency", "/omni/replicator/asyncRendering", "/app/hydraEngine/waitIdle")}, flush=True)  # DEBUG
 from isaacsim.core.utils.extensions import enable_extension  # noqa: E402  pylint: disable=g-import-not-at-top
 
 enable_extension("isaacsim.ros2.bridge")
@@ -221,6 +225,7 @@ def main() -> None:
     for _ in range(count):
       sim.render()
     last_render = time.perf_counter()
+    print(f"DEBUG render x{count} t={sim.current_time:.4f} {1e3 * (last_render - start):.0f} ms", flush=True)  # DEBUG
     renders += count
     render_s += last_render - start
     # sim_control spawns and deletes only inside renders (Inv §5.2).
