@@ -122,10 +122,11 @@ connect them to Isaac Sim over ROS 2, and put one gRPC API
     with a clear status. The grasp planner (Intrinsic's MoveIt grasp
     pipeline, ROS 2 action) is called directly by `robot_service`;
     Intrinsic's grasp *skill* is not used.
-*   **G10.** An MCP server exposes every `RobotService` call as a tool,
-    generated from the `RobotService` proto (names, descriptions and
-    argument schemas come from the proto and its comments). the frontier model
-    completes CUJ 1 in ≥ 4 of 5 trials.
+*   **G10.** An MCP server exposes every `RobotService` call except
+    `GetPointCloud` as a tool, generated from the `RobotService` proto
+    (names, descriptions and argument schemas come from the proto and its
+    comments). the frontier model completes CUJ 1 in ≥ 4 of 5 trials
+    (`tests/e2e/phase6_cuj1.py`; [phase_6.md](phases/phase_6.md)).
 
 ## Non-Goals
 
@@ -559,10 +560,22 @@ clones `world` into `init_world`, so the robot and flange IDs that
     and `SimService` on 127.0.0.1:18100 (our own code, so it binds
     loopback). Holds the operation table and the ICON recovery logic.
     Its proto is `robot_service/robot_service.proto`.
-*   **`mcp_server`** (Python, runs in WSL outside the container, started by
-    the MCP client over stdio): generates one tool per `RobotService` RPC
-    from the proto descriptors (tool description = RPC comment; input
-    schema = request message). Connects to 127.0.0.1:18100.
+*   **`mcp_server`** (`mcp_server/server.py`, Python in the WSL venv,
+    outside the container, started by the MCP client over stdio; registered
+    in `.mcp.json`): at start-up generates one tool per `RobotService` RPC
+    except `GetPointCloud` (too many points for a language model; it stays a
+    gRPC API) from `gen/robot_service.desc`, a descriptor set with source
+    info written by `container/gen_protos.sh`. Tool name = RPC name in
+    snake_case; description = RPC comment plus one line per request field
+    (field and enum value comments); input schema = JSON Schema of the
+    request message; `wait` defaults to true. Replies are JSON text;
+    `google.longrunning.Operation` becomes `{name, done, state, detail,
+    planned_duration_s, error?, response?}` with metadata and response
+    unpacked; `GetImage` returns an MCP image content block (PNG) plus
+    `{kind, width, height, sim_time}`; gRPC errors become error results
+    `"<CODE>: <message>"`. Connects to `RobotService` on 127.0.0.1:18100
+    (never `SimService`); logs one line per tool call to
+    `logs/mcp_server.log`.
 
 ### Franka model (same robot on both sides)
 

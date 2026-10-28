@@ -165,7 +165,9 @@ message MoveToContactRequest {
   double dy = 2;
   double dz = 3;
   double max_force = 4;  // N
-  double speed = 5;      // m/s
+  // m/s. Valid range depends on max_force: about 0.00015·max_force to
+  // 0.002·max_force (e.g. 0.0021–0.0303 m/s for 15 N).
+  double speed = 5;
   bool wait = 6;
 }
 

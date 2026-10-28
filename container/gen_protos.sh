@@ -28,4 +28,12 @@ s = descriptor_pb2.FileDescriptorSet(); s.ParseFromString(open(sys.argv[1], 'rb'
 print('\n'.join(f.name for f in s.file if not f.name.startswith('google/protobuf/')))" "$desc")
 rm -f "$desc"
 "$PY" -m grpc_tools.protoc "${INCLUDES[@]}" --python_out="$OUT" --grpc_python_out="$OUT" "${files[@]}"
+# The MCP server (mcp_server/server.py) builds its tools from this descriptor set, comments included.
+for proto in "$@"; do
+  if [[ "$proto" == robot_service/robot_service.proto ]]; then
+    "$PY" -m grpc_tools.protoc "${INCLUDES[@]}" --include_source_info --include_imports \
+      --descriptor_set_out="$OUT/robot_service.desc" "$proto"
+    echo "wrote $OUT/robot_service.desc"
+  fi
+done
 echo "generated ${#files[@]} files into $OUT"

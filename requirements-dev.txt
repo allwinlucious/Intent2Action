@@ -6,6 +6,7 @@ grpcio-tools==1.85.0
 iniconfig==2.3.1
 isort==9.0.2
 manifold3d==3.5.4
+mcp==2.3.0
 mypy_extensions==1.1.0
 numpy==2.5.4
 opencv-python-headless==5.0.0.93
