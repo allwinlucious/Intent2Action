@@ -318,9 +318,10 @@ service RobotService {
   rpc GetWrench(google.protobuf.Empty) returns (Wrench);
   // Zero the wrist sensor (removes the current static load).
   rpc TareWrench(google.protobuf.Empty) returns (google.protobuf.Empty);
-  // Move along a direction until the force limit is reached.
+  // Tares, moves along the direction at about `speed`, stops when the contact force reaches `max_force`.
   rpc MoveToContact(MoveToContactRequest) returns (google.longrunning.Operation);
-  // Move toward a pose while yielding to contact forces.
+  // Moves toward the TCP pose as a spring of `stiffness`, using the current tare; ends at the target, at
+  // `max_force`, or when it stops moving (jam).
   rpc MoveCompliant(MoveCompliantRequest) returns (google.longrunning.Operation);
   // Plan a grasp for an object in the world.
   rpc PlanGrasp(PlanGraspRequest) returns (PlanGraspResponse);

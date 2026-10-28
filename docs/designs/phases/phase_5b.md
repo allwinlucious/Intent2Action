@@ -145,3 +145,29 @@ Bazel only via `container/build_intrinsic.sh`; Observability). Files:
 `docs/designs/robot_platform.md` (Modify), `gen/…` (regenerated),
 `tests/test_force.py`, `tests/e2e/phase5b_check.py`,
 `docs/designs/phases/phase_5b_notes.md` (Create).
+
+## Addendum A (after run 2, phase_5b_notes.md findings 1–5)
+
+1.  **Compliant contact in Isaac** (finding 1): `sim/tools/build_catalog.py`
+    (Modify) gives every catalog object a `UsdPhysics.MaterialAPI` +
+    `PhysxMaterialAPI` material with `compliantContactStiffness` 60000
+    (N/m, MakeContact's MEDIUM model) and `compliantContactDamping` 600,
+    friction static/dynamic 0.5/0.4; regenerate the USDs. Keep the 85 N
+    excessive-force abort.
+2.  **CUJ 6 becomes search-then-insert** (findings 2–3): after
+    `MoveToContact((0,0,−1), 15, 0.01)` on the top face (peg 3 mm off
+    axis), `MoveCompliant(target = contact TCP pose moved to the hole
+    axis in x/y and 0.005 m lower in z, stiffness 1000, max_force 30)` →
+    done (normal force ≈ 5 N, lateral pull ≈ 3 N); then
+    `MoveToContact((0,0,−1), 15, 0.01)` → contact on the hole bottom.
+    Success = peg bottom ≥ 0.025 m below the top face, no fault; ≥ 9/10.
+    Update `tests/e2e/phase5b_check.py` and CUJ 6 in `robot_platform.md`
+    (Step 4) accordingly.
+3.  **`jam`** (finding 4): gripper closed, TCP 2 cm above the table;
+    `TareWrench`; `MoveToContact((0,0,−1), 10, 0.01)`; then
+    `MoveCompliant(target 0.03 m below the contact TCP pose, stiffness
+    1000, max_force 40)` → `ABORTED` "settled before reaching the target"
+    (spring ≈ 30 N < 40).
+4.  **Checks poll** (finding 5): long calls in `phase5b_check.py` use
+    `wait=false` + `WaitOperation` (timeout 120 s).
+Then Steps 3–4.

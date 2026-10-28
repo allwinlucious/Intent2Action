@@ -31,6 +31,7 @@ from google.protobuf import wrappers_pb2  # noqa: E402
 import grpc  # noqa: E402
 from intrinsic.icon.actions import simple_gripper_pb2  # noqa: E402
 from intrinsic.icon.actions import stop_utils  # noqa: E402
+from intrinsic.icon.actions import tare_force_torque_sensor_pb2  # noqa: E402
 from intrinsic.icon.actions import tare_force_torque_sensor_utils  # noqa: E402
 from intrinsic.icon.actions import trajectory_tracking_action_utils  # noqa: E402
 from intrinsic.icon.python import actions as icon_actions  # noqa: E402
@@ -50,11 +51,14 @@ import rclpy  # noqa: E402
 from rclpy.executors import SingleThreadedExecutor  # noqa: E402
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy  # noqa: E402
 from robot import calibration  # noqa: E402
+from robot import force  # noqa: E402
 from robot import grasp  # noqa: E402
 from robot import gripper  # noqa: E402
 from robot import png  # noqa: E402
+from robot.grasp import matrix_pose  # noqa: E402
 from robot.icon import ARM, FT_SENSOR, GRIPPER, Icon  # noqa: E402
 from robot.motion import ROBOT, ArmChain, Planner, blending, from_pose_proto, joints, segment, duration_s  # noqa: E402
+from robot.motion import pose_matrix, to_pose_proto  # noqa: E402
 from robot.ops import CANCELLED, EXECUTING, PLANNING, ApiError, Operation, OperationTable  # noqa: E402
 from robot_model.franka_scene_object import HOME  # noqa: E402
 from robot_model.load_camera import CALIBRATED_KEY, INIT_WORLD, SENSOR_FRAME  # noqa: E402
@@ -80,6 +84,23 @@ STOP_SETTLE_TIMEOUT_S = 5.0  # sim
 SETTLE_TOLERANCE_RAD = 0.01  # a motion completes when every sensed joint is this close to the trajectory end
 SETTLE_TIMEOUT_S = 2.0  # sim
 TARE_TIMEOUT_S = 5.0  # sim
+# MoveToContact (phase_5b.md decision 4, after Intrinsic's move_to_contact skill) and MoveCompliant (decision 5).
+FORCE_PRIMITIVE = "intrinsic.force_primitive"
+ADMITTANCE = "intrinsic.cartesian_admittance_action"
+SENSED_FORCE = "intrinsic.sensed_force"
+IS_SETTLED = "intrinsic.is_settled"
+ELAPSED_TIME = "elapsed_time_seconds"
+DISTANCE_TRAVELED = "intrinsic.translational_distance_traveled"
+SETTLED_FOR_SECONDS = "intrinsic.settled_for_seconds"
+CONTACT_SWITCH_RATIO = 0.5  # approach -> stabilize above max(ratio * max_force, CONTACT_MIN_SWITCH_N)
+CONTACT_MIN_SWITCH_N = 3.0
+CONTACT_MIN_APPROACH_S = 0.05  # sim; ignores force spikes when the approach starts
+CONTACT_SETTLE_TIMEOUT_S = 2.0  # sim; stabilize -> stop after this even if not settled
+CONTACT_MAX_TRAVEL_M = 0.15
+CONTACT_TIMEOUT_S = 60.0  # sim
+COMPLIANT_JAM_SETTLED_S = 1.0  # sim
+COMPLIANT_TIMEOUT_S = 30.0  # sim
+JAMMED = "settled before reaching the target"
 FAULT_WATCH_PERIOD_S = 0.5
 AUTO_CLEAR_AFTER_S = 2.0
 CLOCK_ADVANCING_S = 1.0  # the watcher clears faults only if /clock moved this recently (Isaac running)
@@ -404,6 +425,42 @@ class Robot:
     self.icon.run_action([ARM], stop_utils.create_stop_action(1, ARM), settled,
                          condition=reactions.Condition.is_true(stop_utils.StateVariables.IS_SETTLED))
 
+  def flange_t_tcp(self, q) -> api.Pose:
+    flange, tcp = (pose_matrix(self.planner.fk(q, tool)) for tool in (api.FLANGE, api.TCP))
+    return matrix_pose(np.linalg.inv(flange) @ tcp)
+
+  def run_force(self, op: Operation, kind: str, actions, transitions, aborts, success, timeout_s: float,
+                push_direction: np.ndarray, explain=lambda outcome, q: outcome) -> None:
+    """One force sequence (Icon.run_sequence on arm and ft_sensor; the last action is the stop) as `op`.
+
+    Ends `op` with a MotionResult, or fails it: ABORTED (abort message, extended by explain(outcome, q)),
+    DEADLINE_EXCEEDED or CANCELLED. Logs status, sim duration and the final force along `push_direction`.
+    """
+    start = self.clock.now()
+    try:
+      result = self.icon.run_sequence([ARM, FT_SENSOR], actions, transitions, aborts, success, actions[-1][0],
+                                      timeout_s, self.clock.now, op.cancel.is_set)
+    except ApiError as error:
+      # ICON ended the session (often faulted): no final force to report.
+      log.warning("force %s %s status=%s duration_s=%.3f force_along_push_n=nan message=%s",
+                  kind, op.name, error.code.name, self.clock.now() - start, error.message)
+      raise
+    took = self.clock.now() - start
+    q = self.icon.arm_joints(result.status)
+    w = result.status.part_status[FT_SENSOR].wrench_at_ft
+    along = force.push_force((w.x, w.y, w.z), push_direction, pose_matrix(self.planner.fk(q, api.FLANGE))[:3, :3])
+    summary = f"after {took:.2f} s of sim time, force along the push {along:.1f} N"
+    code, message = {
+        "ok": (grpc.StatusCode.OK, f"done {summary}"),
+        "timeout": (grpc.StatusCode.DEADLINE_EXCEEDED, f"not finished within {timeout_s:.0f} s of sim time ({summary})"),
+        "cancelled": (grpc.StatusCode.CANCELLED, f"stopped ({summary})"),
+    }.get(result.outcome, (grpc.StatusCode.ABORTED, f"{explain(result.outcome, q)} ({summary})"))
+    log.info("force %s %s status=%s duration_s=%.3f force_along_push_n=%.2f message=%s",
+             kind, op.name, code.name, took, along, message)
+    if code != grpc.StatusCode.OK:
+      raise ApiError(code, message)
+    self.ops.finish(op, api.MotionResult(final_joints=api.Joints(positions=q), duration_s=took), message)
+
   def start_gripper(self, kind: str, command: int, resetting_ok: bool = False) -> Operation:
     self.icon.require_enabled()
     with self.lock:
@@ -686,8 +743,75 @@ class RobotService(api_grpc.RobotServiceServicer):
     self.r.icon.run_action([FT_SENSOR], tare_force_torque_sensor_utils.create_tare_force_torque_sensor_action(1, FT_SENSOR), done)
     return empty_pb2.Empty()
 
-  MoveToContact = _unimplemented("MoveToContact", "5b")
-  MoveCompliant = _unimplemented("MoveCompliant", "5b")
+  def MoveToContact(self, request, context):
+    """Tares, then MakeContact (approach, stabilize) and stop in one ICON sequence (phase_5b.md decision 4)."""
+    direction = force.validate_contact((request.dx, request.dy, request.dz), request.max_force, request.speed)
+    inertia = force.contact_inertia(request.max_force, request.speed)
+    switch = max(CONTACT_SWITCH_RATIO * request.max_force, CONTACT_MIN_SWITCH_N)
+    slots = {ARM: ARM, FT_SENSOR: FT_SENSOR}
+    sensed_above = lambda value: reactions.Condition.is_greater_than(SENSED_FORCE, float(value))  # noqa: E731
+
+    def work(op: Operation) -> None:
+      tcp = self.r.flange_t_tcp(self.r.icon.arm_joints())
+      actions = [
+          (1, tare_force_torque_sensor_utils.ACTION_TYPE_NAME, tare_force_torque_sensor_pb2.TareForceTorqueSensorParams(),
+           FT_SENSOR),
+          (2, FORCE_PRIMITIVE, force.make_contact_params(direction, request.max_force, inertia, tcp), slots),
+          (3, FORCE_PRIMITIVE, force.make_contact_params(direction, request.max_force, inertia, tcp, stabilize=True), slots),
+          (4, stop_utils.ACTION_TYPE_NAME, None, ARM),
+      ]
+      transitions = [
+          (1, reactions.Condition.is_done(), 2),
+          (2, reactions.Condition.all_of([
+              reactions.Condition.is_greater_than(ELAPSED_TIME, CONTACT_MIN_APPROACH_S), sensed_above(switch)]), 3),
+          (3, reactions.Condition.any_of([
+              reactions.Condition.all_of([sensed_above(switch), reactions.Condition.is_true(IS_SETTLED)]),
+              reactions.Condition.is_greater_than(ELAPSED_TIME, CONTACT_SETTLE_TIMEOUT_S)]), 4),
+      ]
+      aborts = [
+          ([2, 3], reactions.Condition.is_greater_than(DISTANCE_TRAVELED, CONTACT_MAX_TRAVEL_M),
+           f"no contact within {CONTACT_MAX_TRAVEL_M:.2f} m"),
+          ([2, 3], sensed_above(force.MAX_FORCE_N), "excessive force"),
+      ]
+      success = (4, reactions.Condition.is_true(stop_utils.StateVariables.IS_SETTLED))
+      self.r.run_force(op, "MoveToContact", actions, transitions, aborts, success, CONTACT_TIMEOUT_S, direction)
+
+    detail = f"moving along {np.round(direction, 3).tolist()} to {request.max_force:g} N at {request.speed:g} m/s"
+    return self.r.reply(self.r.start_arm("MoveToContact", work, detail=detail), request.wait)
+
+  def MoveCompliant(self, request, context):
+    """Admittance toward the TCP pose with the current tare (no tare here: in contact it would zero the force)."""
+    force.validate_compliant(request.stiffness, request.max_force)
+    to_pose_proto(request.pose)  # INVALID_ARGUMENT for a non-finite pose or a zero quaternion
+    target = request.pose
+    slots = {ARM: ARM, FT_SENSOR: FT_SENSOR}
+
+    def work(op: Operation) -> None:
+      q = self.r.icon.arm_joints()
+      start = self.r.planner.fk(q, api.TCP)
+      offset = np.array([target.x - start.x, target.y - start.y, target.z - start.z])
+      push = offset / max(float(np.linalg.norm(offset)), 1e-9)
+      actions = [
+          (1, ADMITTANCE, force.admittance_params(target, request.stiffness, self.r.flange_t_tcp(q)), slots),
+          (2, stop_utils.ACTION_TYPE_NAME, None, ARM),
+      ]
+      aborts = [
+          ([1], reactions.Condition.is_greater_than(SENSED_FORCE, float(request.max_force)), "force limit reached"),
+          ([1], reactions.Condition.is_greater_than(SETTLED_FOR_SECONDS, COMPLIANT_JAM_SETTLED_S), JAMMED),
+      ]
+
+      def explain(outcome: str, q_end) -> str:
+        if outcome != JAMMED:
+          return outcome
+        end = self.r.planner.fk(q_end, api.TCP)
+        error = math.dist((end.x, end.y, end.z), (target.x, target.y, target.z))
+        return f"{JAMMED} (position error {error:.4f} m)"
+
+      self.r.run_force(op, "MoveCompliant", actions, [], aborts, (1, reactions.Condition.is_done()),
+                       COMPLIANT_TIMEOUT_S, push, explain)
+
+    detail = f"compliant move to ({target.x:.3f}, {target.y:.3f}, {target.z:.3f}) at {request.stiffness:g} N/m"
+    return self.r.reply(self.r.start_arm("MoveCompliant", work, detail=detail), request.wait)
 
   def PlanGrasp(self, request, context):
     return self.r.grasps.plan_grasp(self.r.world, request.object, self.r.planner.check_collisions)

@@ -20,6 +20,7 @@ simulation_app = SimulationApp(
 sys.path.append(r"C:\isaac-sim\exts\omni.pip.compute\pip_prebundle")
 
 from pxr import Gf  # noqa: E402  pylint: disable=g-import-not-at-top
+from pxr import PhysxSchema
 from pxr import Sdf
 from pxr import Usd
 from pxr import UsdGeom
@@ -56,6 +57,10 @@ def write_model(directory: Path) -> None:
   UsdPhysics.MeshCollisionAPI.Apply(geom.GetPrim()).CreateApproximationAttr(
       description["collision"]
   )
+  # Contacts start 1 mm out and rest at the surface: the peg-in-hole clearance is 1 mm per side.
+  physx = PhysxSchema.PhysxCollisionAPI.Apply(geom.GetPrim())
+  physx.CreateContactOffsetAttr(0.001)
+  physx.CreateRestOffsetAttr(0.0)
 
   if not description["static"]:
     UsdPhysics.RigidBodyAPI.Apply(root)

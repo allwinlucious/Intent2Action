@@ -274,14 +274,15 @@ class RobotServiceServicer:
         raise NotImplementedError('Method not implemented!')
 
     def MoveToContact(self, request, context):
-        """Move along a direction until the force limit is reached.
+        """Tares, moves along the direction at about `speed`, stops when the contact force reaches `max_force`.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def MoveCompliant(self, request, context):
-        """Move toward a pose while yielding to contact forces.
+        """Moves toward the TCP pose as a spring of `stiffness`, using the current tare; ends at the target, at
+        `max_force`, or when it stops moving (jam).
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
