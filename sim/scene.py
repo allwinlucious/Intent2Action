@@ -43,8 +43,8 @@ BOARD_OFFSET_M = (0.0, 0.0, 0.12)
 TEXTURE_LIFT_M = 1e-4
 
 
-def build(stage: Usd.Stage, scene: dict, asset_root: str) -> Camera:
-  """Builds the default scene; returns the D455 depth camera."""
+def build(stage: Usd.Stage, scene: dict, asset_root: str, camera: bool = True) -> Camera | None:
+  """Builds the default scene; returns the D455 depth camera (None without `camera`: no render product)."""
   GroundPlane(prim_path="/World/ground", z_position=scene["ground_z"])
   # Without lights the RGB image is black.
   UsdLux.DomeLight.Define(stage, "/World/lights/dome").CreateIntensityAttr(800.0)
@@ -74,6 +74,8 @@ def build(stage: Usd.Stage, scene: dict, asset_root: str) -> Camera:
   UsdPhysics.RigidBodyAPI(
       stage.GetPrimAtPath(f"{D455_PRIM}/RSD455")
   ).GetKinematicEnabledAttr().Set(True)
+  if not camera:
+    return None
   camera = Camera(prim_path=CAMERA_PRIM, resolution=CAMERA_RESOLUTION)
   camera.initialize()
   camera.set_clipping_range(*CAMERA_CLIPPING_M)

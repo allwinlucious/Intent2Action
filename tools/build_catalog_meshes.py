@@ -44,6 +44,9 @@ def _hole_block() -> trimesh.Trimesh:
 OBJECTS = {
     "table": (_box(1.2, 0.8, 0.75), True, None, (0.55, 0.45, 0.35)),
     "red_cube": (_box(0.05, 0.05, 0.05), False, 0.10, (0.8, 0.1, 0.1)),
+    "blue_cube": (_box(0.05, 0.05, 0.05), False, 0.10, (0.1, 0.2, 0.8)),
+    "green_cube": (_box(0.05, 0.05, 0.05), False, 0.10, (0.1, 0.7, 0.2)),
+    "small_yellow_cube": (_box(0.035, 0.035, 0.035), False, 0.05, (0.9, 0.8, 0.1)),
     "plate": (_cylinder(0.09, 0.012), False, 0.30, (0.9, 0.9, 0.9)),
     "peg": (_cylinder(0.010, 0.08), False, 0.05, (0.2, 0.4, 0.8)),
     "hole_block": (_hole_block(), True, None, (0.3, 0.3, 0.3)),
@@ -56,6 +59,9 @@ OBJECTS = {
 ATTRIBUTES = {
     "table": ("table", "brown"),
     "red_cube": ("cube", "red"),
+    "blue_cube": ("cube", "blue"),
+    "green_cube": ("cube", "green"),
+    "small_yellow_cube": ("cube", "yellow"),
     "plate": ("plate", "white"),
     "peg": ("peg", "blue"),
     "hole_block": ("block_with_hole", "grey"),

@@ -1,0 +1,13 @@
+category: cube
+collision: convexHull
+color:
+- 0.1
+- 0.7
+- 0.2
+color_name: green
+dims:
+- 0.05
+- 0.05
+- 0.05
+mass: 0.1
+static: false

@@ -11,7 +11,7 @@ import subprocess
 import threading
 import time
 
-ROOT = Path("/home/mew/untitled-project")
+ROOT = Path(__file__).resolve().parents[2]
 LOG_DIR = ROOT / "logs"
 ISAAC_COMMAND = [
     "cmd.exe",
@@ -21,7 +21,7 @@ ISAAC_COMMAND = [
 READY_TIMEOUT_S = 180
 PROBE_COMMAND = (
     "docker run --rm --name {name} --network host"
-    " -v /home/mew/untitled-project/tests/e2e:/probe:ro"
+    " -v " + str(ROOT) + "/tests/e2e:/probe:ro"
     " -e FASTRTPS_DEFAULT_PROFILES_FILE=/opt/app/container/dds/fastdds.xml"
     " -e CYCLONEDDS_URI=file:///opt/app/container/dds/cyclonedds.xml"
     " -e RMW_IMPLEMENTATION={rmw}"
