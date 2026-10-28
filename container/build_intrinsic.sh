@@ -22,10 +22,12 @@ bazel build "${FLAGS[@]}" \
   //intrinsic/geometry/service:geometry_service \
   //intrinsic_control/intrinsic/icon/server:generic_icon_machine_server \
   //intrinsic_control/intrinsic/icon/hardware_modules/loopback:loopback_hardware_module_main \
-  //intrinsic/storage/onprem_cas/cmd:localcas
+  //intrinsic/storage/onprem_cas/cmd:localcas \
+  //intrinsic_perception/intrinsic/perception/calibration/services/v1:calibration_service_main
 # hardware_module_binary depends on ICON's malloc_guard, visible only to Intrinsic's own packages,
 # so //ext builds with visibility checks off (phase_3_notes.md, Part 1).
-bazel build "${FLAGS[@]}" --nocheck_visibility //ext/ros2_hwm:ros2_hwm_main
+bazel build "${FLAGS[@]}" --nocheck_visibility //ext/ros2_hwm:ros2_hwm_main //ext/calib_poses:sample_poses
 if $RUN_TESTS; then
-  bazel test "${FLAGS[@]}" --test_output=errors //ext/ros2_hwm:ros2_hwm_logic_test
+  bazel test "${FLAGS[@]}" --test_output=errors --nocheck_visibility \
+    //ext/ros2_hwm:ros2_hwm_logic_test //ext/calib_poses:sample_poses_test
 fi

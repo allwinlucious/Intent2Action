@@ -48,7 +48,7 @@ enum ToolFrame {
 
 // Long-running calls: with wait = true the call blocks up to 60 s and
 // returns the Operation (done or still running); with wait = false it
-// returns at once. Poll with google.longrunning.Operations.
+// returns at once. Poll with RobotService.GetOperation or WaitOperation.
 // Operation.metadata is OperationInfo; Operation.response is the RPC's
 // documented result message.
 message OperationInfo {
@@ -102,9 +102,11 @@ message PlanOnlyRequest {
 }
 
 message PlanOnlyResponse {
-  double duration_s = 1;
+  double duration_s = 1;  // at the current speed factor
   Joints final_joints = 2;
-  // Axis-aligned bounds of the swept volume in the base frame.
+  // Approximate axis-aligned bounds of the swept volume in the base frame
+  // (only x, y, z are used): the TCP and every arm link origin on every
+  // 10th trajectory point, enlarged by 0.08 m for the link radius.
   Pose swept_min = 3;
   Pose swept_max = 4;
 }
@@ -138,9 +140,13 @@ message CheckCollisionsRequest {
 
 message CheckCollisionsResponse {
   bool in_collision = 1;
-  repeated string colliding_pairs = 2;  // "objectA/objectB"
+  // The planner's description of the collision (one entry, free text naming
+  // the colliding objects); empty when not in collision.
+  repeated string colliding_pairs = 2;
 }
 
+// While the robot is faulted, joints, tool_pose, wrench and the gripper
+// fields are unset (ICON reports no state); faulted and fault_reason say why.
 message GetStateResponse {
   Joints joints = 1;
   Pose tool_pose = 2;           // TCP in the base frame
@@ -245,10 +251,17 @@ message GetImageResponse {
   double sim_time = 5;
 }
 
+message GetPointCloudRequest {
+  // Keep every stride-th pixel (row-major order); 0 means 4, which gives at
+  // most 101 760 points (< 1.3 MB).
+  int32 stride = 1;
+}
+
 message GetPointCloudResponse {
   // Points in the camera frame `d455_optical` (m), x0 y0 z0 x1 ...
   repeated float xyz = 1;
-  Pose camera_pose = 2;  // in the base frame (from calibration; identity until calibrated)
+  Pose camera_pose = 2;  // d455 `sensor` (optical frame) in the base frame: the nominal seed until calibrated
+  // true once CalibrateCamera succeeded (world's d455 user_data "calibrated")
   bool camera_calibrated = 3;
 }
 
@@ -330,12 +343,19 @@ service RobotService {
   rpc ListObjects(google.protobuf.Empty) returns (ListObjectsResponse);
   // Take a camera image.
   rpc GetImage(GetImageRequest) returns (GetImageResponse);
-  // Take a point cloud from the depth camera.
-  rpc GetPointCloud(google.protobuf.Empty) returns (GetPointCloudResponse);
+  // Take a point cloud from the depth camera: every stride-th pixel (default
+  // 4, at most 101 760 points, < 1.3 MB).
+  rpc GetPointCloud(GetPointCloudRequest) returns (GetPointCloudResponse);
   // Calibrate the camera against the robot (board must be attached).
   rpc CalibrateCamera(CalibrateCameraRequest) returns (google.longrunning.Operation);
   // Detect objects and update the world model.
   rpc DetectObjects(DetectObjectsRequest) returns (google.longrunning.Operation);
+  // State of a long-running call (from its Operation.name): done, error
+  // (code and message) or result; metadata is OperationInfo.
+  rpc GetOperation(google.longrunning.GetOperationRequest) returns (google.longrunning.Operation);
+  // Wait until a long-running call is done or the timeout (default and at
+  // most 60 s) passes; returns its Operation either way.
+  rpc WaitOperation(google.longrunning.WaitOperationRequest) returns (google.longrunning.Operation);
 }
 
 // Simulation-only operations for developers and tests; not exposed to the

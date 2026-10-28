@@ -43,6 +43,7 @@ DEFAULT_OBJECTS = tuple(
     ]
 )
 ROBOT_OBJECTS = ("franka", "franka_hand")
+CAMERA_OBJECT = "d455"
 POSITION_TOLERANCE_M = 0.005
 SYNC_TIMEOUT_S = 60
 EXTRA = "extra_cube"
@@ -286,12 +287,14 @@ def check_restart() -> str:
       w: {n: len(v) for n, v in _objects(w).items()} for w in WORLDS
   }
   want = {n: 1 for n in DEFAULT_OBJECTS + ROBOT_OBJECTS}
-  if any(c != want for c in counts.values()):
+  # `world` also holds the camera object (phase_4.md decision 7); sim_world mirrors only Isaac's /tf.
+  wanted = {w: want for w in WORLDS} | {"world": want | {CAMERA_OBJECT: 1}}
+  if counts != wanted:
     raise RuntimeError(f"object counts after restart: {counts}")
   return (
       f"objects re-created {time.monotonic() - start - RESTART_SETTLE_S:.0f} s"
       " after docker restart;"
-      f" exactly one of each in both worlds: {sorted(want)}"
+      f" exactly one of each in both worlds: {sorted(want)} (and {CAMERA_OBJECT} in world)"
   )
 
 

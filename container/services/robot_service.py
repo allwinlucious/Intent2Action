@@ -49,9 +49,10 @@ from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPo
 from robot import gripper  # noqa: E402
 from robot import png  # noqa: E402
 from robot.icon import ARM, FT_SENSOR, GRIPPER, Icon  # noqa: E402
-from robot.motion import Planner, blending, from_pose_proto, joints, segment, duration_s  # noqa: E402
+from robot.motion import ArmChain, Planner, blending, from_pose_proto, joints, segment, duration_s  # noqa: E402
 from robot.ops import CANCELLED, EXECUTING, PLANNING, ApiError, Operation, OperationTable  # noqa: E402
 from robot_model.franka_scene_object import HOME  # noqa: E402
+from robot_model.load_camera import CALIBRATED_KEY, SENSOR_FRAME  # noqa: E402
 from robot_service import robot_service_pb2 as api  # noqa: E402
 from robot_service import robot_service_pb2_grpc as api_grpc  # noqa: E402
 from robot_service import simlink_pb2  # noqa: E402
@@ -76,8 +77,10 @@ SETTLE_TIMEOUT_S = 2.0  # sim
 TARE_TIMEOUT_S = 5.0  # sim
 FAULT_WATCH_PERIOD_S = 0.5
 AUTO_CLEAR_AFTER_S = 2.0
+CLOCK_ADVANCING_S = 1.0  # the watcher clears faults only if /clock moved this recently (Isaac running)
 RESET_FAULT_WAIT_S = 5.0
 RESET_ENABLED_WAIT_S = 10.0
+POINT_CLOUD_STRIDE = 4  # GetPointCloud default: <= 101 760 points (< 1.3 MB), under gRPC's 4 MB limit
 CLOCK_QOS = QoSProfile(
     reliability=ReliabilityPolicy.RELIABLE, history=HistoryPolicy.KEEP_LAST, depth=1,
     durability=DurabilityPolicy.VOLATILE,
@@ -91,6 +94,7 @@ class SimClock:
 
   def __init__(self):
     self._now: float | None = None
+    self._advanced_at: float | None = None  # time.monotonic() of the last /clock that moved forward
     node = rclpy.create_node("robot_service")
     node.create_subscription(Clock, "/clock", self._on_clock, CLOCK_QOS)
     executor = SingleThreadedExecutor()
@@ -98,7 +102,14 @@ class SimClock:
     threading.Thread(target=executor.spin, daemon=True).start()
 
   def _on_clock(self, msg: Clock) -> None:
-    self._now = msg.clock.sec + msg.clock.nanosec * 1e-9
+    now = msg.clock.sec + msg.clock.nanosec * 1e-9
+    if self._now is None or now != self._now:
+      self._advanced_at = time.monotonic()
+    self._now = now
+
+  def advancing(self, within_s: float) -> bool:
+    """True if /clock moved within the last within_s (wall), i.e. Isaac is running."""
+    return self._advanced_at is not None and time.monotonic() - self._advanced_at <= within_s
 
   def now(self) -> float:
     if self._now is None:
@@ -152,6 +163,22 @@ class World:
     )
     return from_pose_proto(response.a_t_b)
 
+  def frame_pose(self, name: str, frame: str) -> api.Pose:
+    """Pose of the object's frame in the base frame."""
+    response = self._call("GetTransform", world_pb.GetTransformRequest(
+        world_id=WORLD, node_a=refs_pb.TransformNodeReference(id="root"),
+        node_b=refs_pb.TransformNodeReference(by_name=refs_pb.TransformNodeReferenceByName(
+            frame=refs_pb.FrameReferenceByName(object_name=name, frame_name=frame)))))
+    return from_pose_proto(response.a_t_b)
+
+  def flag(self, name: str, key: str) -> bool:
+    """A BoolValue in the object's user data (False if absent)."""
+    value = wrappers_pb2.BoolValue()
+    user_data = self.get(name).object_component.user_data
+    if key in user_data:
+      user_data[key].Unpack(value)
+    return value.value
+
   def attach(self, name: str) -> None:
     """Parents the object to the flange of `franka`, keeping its pose."""
     self._call(
@@ -194,6 +221,7 @@ class Robot:
   def __init__(self, args, mirror_world: bool):
     self.icon = Icon(args.icon)
     self.planner = Planner(args.planner)
+    self.chain = ArmChain()
     self.world = World(args.world)
     self.camera = camera_grpc.CameraServiceStub(grpc.insecure_channel(args.camera))
     self.simlink = simlink_pb2_grpc.SimLinkStub(grpc.insecure_channel(args.simlink))
@@ -202,6 +230,7 @@ class Robot:
     self.mirror_world = mirror_world
     self.lock = threading.Lock()
     self.recover_lock = threading.Lock()
+    self.reset_lock = threading.Lock()  # one ResetScene at a time
     self.motion: Operation | None = None  # the arm operation (motion or jog), one at a time
     self.gripper_op: Operation | None = None
     self.last_grasp = False
@@ -228,7 +257,10 @@ class Robot:
       result = self.camera.Capture(request, timeout=30.0).capture_result
     except grpc.RpcError as error:
       raise _dependency_error("camera_sim CameraService.Capture", error) from error
-    return next(i for i in result.sensor_images if i.sensor_config.id == sensor_id)
+    image = next((i for i in result.sensor_images if i.sensor_config.id == sensor_id), None)
+    if image is None:
+      raise ApiError(grpc.StatusCode.INTERNAL, f"camera_sim returned no image of sensor {sensor_id}")
+    return image
 
   # ---- operations ----
 
@@ -260,7 +292,8 @@ class Robot:
     with self.lock:
       if self.resetting.is_set():
         raise ApiError(grpc.StatusCode.FAILED_PRECONDITION, "ResetScene is in progress")
-      if self.motion is not None and not self.motion.worker_done.is_set():
+      # op.done, not worker_done: a motion cancelled while planning ends at once (its worker sees it later).
+      if self.motion is not None and not self.motion.done:
         raise ApiError(grpc.StatusCode.FAILED_PRECONDITION,
                        f"another motion is running ({self.motion.name}); wait for it or call Stop")
       op = self.motion = self.ops.create(kind, PLANNING if detail == "planning" else EXECUTING, detail)
@@ -273,10 +306,10 @@ class Robot:
   def _run_motion(self, op: Operation, segments, curve) -> None:
     start = self.icon.arm_joints()
     trajectory = self.planner.plan(start, segments, curve).discretized
-    if op.cancel.is_set():
-      raise ApiError(grpc.StatusCode.CANCELLED, "stopped while planning")
     planned = duration_s(trajectory) / self.speed  # the speed override stretches execution
-    self.ops.update(op, EXECUTING, f"executing a {planned:.2f} s trajectory", planned_duration_s=planned)
+    if op.cancel.is_set() or not self.ops.update(op, EXECUTING, f"executing a {planned:.2f} s trajectory",
+                                                 planned_duration_s=planned):
+      raise ApiError(grpc.StatusCode.CANCELLED, "stopped while planning")
     timeout = 2 * planned + 2.0
     times = {}
 
@@ -315,7 +348,7 @@ class Robot:
   def stop(self) -> None:
     """Cancels the running arm operation, then intrinsic.stop in a new session (decision 19)."""
     op = self.motion
-    if op is not None and not op.worker_done.is_set():
+    if op is not None and not op.done:
       op.cancel.set()
       if op.state == PLANNING:
         self.ops.fail(op, ApiError(grpc.StatusCode.CANCELLED, "stopped while planning"))
@@ -335,9 +368,11 @@ class Robot:
     self.icon.run_action([ARM], stop_utils.create_stop_action(1, ARM), settled,
                          condition=reactions.Condition.is_true(stop_utils.StateVariables.IS_SETTLED))
 
-  def start_gripper(self, kind: str, command: int) -> Operation:
+  def start_gripper(self, kind: str, command: int, resetting_ok: bool = False) -> Operation:
     self.icon.require_enabled()
     with self.lock:
+      if self.resetting.is_set() and not resetting_ok:
+        raise ApiError(grpc.StatusCode.FAILED_PRECONDITION, "ResetScene is in progress")
       if self.gripper_op is not None and not self.gripper_op.worker_done.is_set():
         raise ApiError(grpc.StatusCode.FAILED_PRECONDITION, f"another gripper call is running ({self.gripper_op.name})")
       op = self.gripper_op = self.ops.create(kind, EXECUTING, f"{kind} started")
@@ -384,7 +419,7 @@ class Robot:
       log.info("faults cleared; re-applied payload=%.3f kg speed=%.2f", mass, self.speed)
 
   def _watch_faults(self) -> None:
-    faulted_since = None
+    faulted_since, waiting_for_isaac = None, False
     while True:
       time.sleep(FAULT_WATCH_PERIOD_S)
       try:
@@ -393,7 +428,12 @@ class Robot:
         faulted_since = None
         continue
       if state != "FAULTED" or self.resetting.is_set():
-        faulted_since = None
+        faulted_since, waiting_for_isaac = None, False
+        continue
+      if not self.clock.advancing(CLOCK_ADVANCING_S):
+        if not waiting_for_isaac:
+          log.warning("ICON faulted (%s) and Isaac's /clock is not advancing; leaving the fault until it does", reason)
+        faulted_since, waiting_for_isaac = None, True
         continue
       faulted_since = faulted_since or time.monotonic()
       if time.monotonic() - faulted_since > AUTO_CLEAR_AFTER_S:
@@ -500,11 +540,13 @@ class RobotService(api_grpc.RobotServiceServicer):
 
   def PlanOnly(self, request, context):
     segments, curve = self._segments(request.waypoints, request.tool)
-    response = self.r.planner.plan(self.r.icon.arm_joints(), segments, curve)
-    # swept_min/max stay unset: the open-source planner has no swept volume (phase_3_notes.md, Part 3).
+    trajectory = self.r.planner.plan(self.r.icon.arm_joints(), segments, curve).discretized
+    swept_min, swept_max = self.r.planner.swept_bounds(trajectory, self.r.chain)
     return api.PlanOnlyResponse(
-        duration_s=duration_s(response.discretized),
-        final_joints=api.Joints(positions=response.discretized.state[-1].position),
+        duration_s=duration_s(trajectory) / self.r.speed,  # as the operation's planned_duration_s
+        final_joints=api.Joints(positions=trajectory.state[-1].position),
+        swept_min=swept_min,
+        swept_max=swept_max,
     )
 
   def _seed(self, seed) -> list[float]:
@@ -549,6 +591,12 @@ class RobotService(api_grpc.RobotServiceServicer):
   CalibrateCamera = _unimplemented("CalibrateCamera", "4")
   DetectObjects = _unimplemented("DetectObjects", "5")
 
+  def GetOperation(self, request, context):
+    return get_operation(self.r, request)
+
+  def WaitOperation(self, request, context):
+    return wait_operation(self.r, request)
+
   def Stop(self, request, context):
     self.r.stop()
     return empty_pb2.Empty()
@@ -556,6 +604,9 @@ class RobotService(api_grpc.RobotServiceServicer):
   def SetSpeed(self, request, context):
     if not 0 < request.factor <= 1:
       raise ApiError(grpc.StatusCode.INVALID_ARGUMENT, f"factor must be in (0, 1], got {request.factor}")
+    if self.r.motion is not None and not self.r.motion.done:
+      raise ApiError(grpc.StatusCode.FAILED_PRECONDITION,
+                     f"the speed applies to following motions; {self.r.motion.name} is running")
     self.r.icon.set_speed(request.factor)
     self.r.speed = request.factor
     return empty_pb2.Empty()
@@ -584,13 +635,15 @@ class RobotService(api_grpc.RobotServiceServicer):
         times.setdefault("start", now)
         return not op.cancel.is_set() and now - times["start"] < request.duration_s
 
-      self.r.icon.jog(index, normalized, keep_going)
+      self.r.icon.jog(index, normalized, keep_going, request.duration_s)
       if op.cancel.is_set():
         raise ApiError(grpc.StatusCode.CANCELLED, "jog stopped")
       self.r.ops.finish(op, empty_pb2.Empty(), f"jogged joint {request.joint} for {request.duration_s} s")
 
     op = self.r.start_arm("Jog", run, detail=f"jogging joint {request.joint} at {request.velocity} rad/s")
-    self.r.ops.wait(op, request.duration_s * 10 + 10)
+    wait_s = request.duration_s * 10 + 10
+    if not self.r.ops.wait(op, wait_s):
+      raise ApiError(grpc.StatusCode.DEADLINE_EXCEEDED, f"{op.name} still running after {wait_s:.0f} s")
     if op.error is not None:
       raise op.error
     return empty_pb2.Empty()
@@ -605,15 +658,22 @@ class RobotService(api_grpc.RobotServiceServicer):
     width = self.r.gripper_width()
     return api.IsGrippingResponse(gripping=gripper.gripping(self.r.last_grasp, width), width=width)
 
+  @staticmethod
+  def _require_scene_object(name: str) -> None:
+    if name in ROBOT_OBJECTS:
+      raise ApiError(grpc.StatusCode.INVALID_ARGUMENT, f"{name!r} is part of the robot")
+    if name == CAMERA_OBJECT:
+      raise ApiError(grpc.StatusCode.INVALID_ARGUMENT, f"{name!r} is the camera, not a scene object")
+
   def AttachObject(self, request, context):
-    if request.name in ROBOT_OBJECTS:
-      raise ApiError(grpc.StatusCode.INVALID_ARGUMENT, f"{request.name!r} is part of the robot")
+    self._require_scene_object(request.name)
     self.r.world.get(request.name)
     self.r.world.attach(request.name)
     self.r.sim("SetAttached", simlink_pb2.SetAttachedRequest(name=request.name, attached=True))
     return empty_pb2.Empty()
 
   def DetachObject(self, request, context):
+    self._require_scene_object(request.name)
     if self.r.world.get(request.name).parent.name != "root":
       self.r.world.detach(request.name)
     self.r.sim("SetAttached", simlink_pb2.SetAttachedRequest(name=request.name, attached=False))
@@ -640,7 +700,7 @@ class RobotService(api_grpc.RobotServiceServicer):
     if not all(math.isfinite(v) for v in values) or request.mass < 0:
       raise ApiError(grpc.StatusCode.INVALID_ARGUMENT, f"mass must be >= 0 and all values finite, got {values}")
     self.r.icon.require_enabled()
-    if self.r.motion is not None and not self.r.motion.worker_done.is_set():
+    if self.r.motion is not None and not self.r.motion.done:
       raise ApiError(grpc.StatusCode.FAILED_PRECONDITION, f"ICON sets the payload only between motions ({self.r.motion.name} runs)")
     com = (request.com_x, request.com_y, request.com_z)
     self.r.icon.set_payload(request.mass, com)
@@ -650,7 +710,7 @@ class RobotService(api_grpc.RobotServiceServicer):
   def ListObjects(self, request, context):
     response = api.ListObjectsResponse()
     for o in self.r.world.objects():
-      if o.name in ROBOT_OBJECTS:
+      if o.name in ROBOT_OBJECTS or o.name == CAMERA_OBJECT:
         continue
       response.objects.add(name=o.name, source=World.source(o), pose=self.r.world.pose(o.name),
                            attached_to="" if o.parent.name == "root" else o.parent.name)
@@ -673,20 +733,21 @@ class RobotService(api_grpc.RobotServiceServicer):
                                 sim_time=stamp.seconds + stamp.nanos * 1e-9)
 
   def GetPointCloud(self, request, context):
+    if request.stride < 0:
+      raise ApiError(grpc.StatusCode.INVALID_ARGUMENT, f"stride must be >= 0 (0 = 4), got {request.stride}")
+    stride = request.stride or POINT_CLOUD_STRIDE
     image = self.r.capture(4)
     buffer, k = image.buffer, image.sensor_config.camera_params.intrinsic_params
-    width, height = buffer.dimensions.cols, buffer.dimensions.rows
-    z = np.frombuffer(buffer.data, dtype="<f4").reshape(height, width)
-    v, u = np.mgrid[0:height, 0:width]
+    z = np.frombuffer(buffer.data, dtype="<f4")
+    v, u = np.divmod(np.arange(z.size), buffer.dimensions.cols)
+    z, u, v = z[::stride], u[::stride], v[::stride]  # every stride-th pixel in row-major order
     valid = np.isfinite(z) & (z > 0)
     z, u, v = z[valid], u[valid], v[valid]
     xyz = np.stack([(u - k.principal_point_x) * z / k.focal_length_x,
                     (v - k.principal_point_y) * z / k.focal_length_y, z], axis=1).astype(np.float32)
-    response = api.GetPointCloudResponse(camera_pose=api.Pose(qw=1.0), camera_calibrated=False)
+    response = api.GetPointCloudResponse(camera_pose=self.r.world.frame_pose(CAMERA_OBJECT, SENSOR_FRAME),
+                                         camera_calibrated=self.r.world.flag(CAMERA_OBJECT, CALIBRATED_KEY))
     response.xyz.extend(xyz.ravel().tolist())
-    if self.r.world.exists(CAMERA_OBJECT):
-      response.camera_pose.CopyFrom(self.r.world.pose(CAMERA_OBJECT))
-      response.camera_calibrated = True
     return response
 
 
@@ -718,31 +779,41 @@ class SimService(api_grpc.SimServiceServicer):
   def ResetScene(self, request, context):
     """Decision 25: cancel, detach + release, SimLink.Reset, wait FAULTED, ClearFaults, payload and speed reset."""
     r = self.r
-    r.resetting.set()
+    if not r.reset_lock.acquire(blocking=False):
+      raise ApiError(grpc.StatusCode.FAILED_PRECONDITION, "another ResetScene is in progress")
     try:
-      for op in (r.motion, r.gripper_op):
-        if op is not None and not op.worker_done.is_set():
-          op.cancel.set()
-          if op.state == PLANNING:
-            r.ops.fail(op, ApiError(grpc.StatusCode.CANCELLED, "cancelled by ResetScene"))
-          elif not op.worker_done.wait(STOP_WAIT_S):
-            raise ApiError(grpc.StatusCode.DEADLINE_EXCEEDED, f"{op.name} did not end within {STOP_WAIT_S:.0f} s")
-      for name in r.world.attached():
-        r.world.detach(name)
-        r.sim("SetAttached", simlink_pb2.SetAttachedRequest(name=name, attached=False))
-      if r.icon.operational()[0] == "ENABLED":
-        release = r.start_gripper("Release", simple_gripper_pb2.SimpleGripperFixedParams.RELEASE)
-        r.ops.wait(release, WAIT_S)
-      epoch = r.sim("Reset", empty_pb2.Empty()).epoch
-      state, reason = r.icon.wait_state("FAULTED", RESET_FAULT_WAIT_S)
-      log.info("reset: epoch %d, ICON %s (%s)", epoch, state, reason)
-      r.icon.clear_faults(RESET_ENABLED_WAIT_S)
-      r.icon.set_payload(0.0, (0.0, 0.0, 0.0))
-      r.icon.set_speed(1.0)
-      r.payload, r.speed, r.last_grasp = (0.0, (0.0, 0.0, 0.0)), 1.0, False
+      r.resetting.set()
+      # recover_lock: a watcher recover() that started before `resetting` must not re-apply the old
+      # payload and speed after the reset.
+      with r.recover_lock:
+        self._reset()
     finally:
       r.resetting.clear()
+      r.reset_lock.release()
     return empty_pb2.Empty()
+
+  def _reset(self) -> None:
+    r = self.r
+    for op in (r.motion, r.gripper_op):
+      if op is not None and not op.done:
+        op.cancel.set()
+        if op.state == PLANNING:
+          r.ops.fail(op, ApiError(grpc.StatusCode.CANCELLED, "cancelled by ResetScene"))
+        elif not op.worker_done.wait(STOP_WAIT_S):
+          raise ApiError(grpc.StatusCode.DEADLINE_EXCEEDED, f"{op.name} did not end within {STOP_WAIT_S:.0f} s")
+    for name in r.world.attached():
+      r.world.detach(name)
+      r.sim("SetAttached", simlink_pb2.SetAttachedRequest(name=name, attached=False))
+    if r.icon.operational()[0] == "ENABLED":
+      release = r.start_gripper("Release", simple_gripper_pb2.SimpleGripperFixedParams.RELEASE, resetting_ok=True)
+      r.ops.wait(release, WAIT_S)
+    epoch = r.sim("Reset", empty_pb2.Empty()).epoch
+    state, reason = r.icon.wait_state("FAULTED", RESET_FAULT_WAIT_S)
+    log.info("reset: epoch %d, ICON %s (%s)", epoch, state, reason)
+    r.icon.clear_faults(RESET_ENABLED_WAIT_S)
+    r.icon.set_payload(0.0, (0.0, 0.0, 0.0))
+    r.icon.set_speed(1.0)
+    r.payload, r.speed, r.last_grasp = (0.0, (0.0, 0.0, 0.0)), 1.0, False
 
   def GetTruePose(self, request, context):
     return self.r.sim("GetTruePose", simlink_pb2.TruePoseRequest(frame=request.frame))
@@ -763,13 +834,24 @@ class SimService(api_grpc.SimServiceServicer):
     return empty_pb2.Empty()
 
 
+def get_operation(r: Robot, request) -> operations_pb2.Operation:
+  return r.ops.to_proto(r.ops.get(request.name))
+
+
+def wait_operation(r: Robot, request) -> operations_pb2.Operation:
+  op = r.ops.get(request.name)
+  timeout = request.timeout.ToTimedelta().total_seconds() if request.HasField("timeout") else WAIT_S
+  r.ops.wait(op, min(timeout, WAIT_S))
+  return r.ops.to_proto(op)
+
+
 class Operations(operations_pb2_grpc.OperationsServicer):
 
   def __init__(self, robot: Robot):
     self.r = robot
 
   def GetOperation(self, request, context):
-    return self.r.ops.to_proto(self.r.ops.get(request.name))
+    return get_operation(self.r, request)
 
   def ListOperations(self, request, context):
     return operations_pb2.ListOperationsResponse(operations=[self.r.ops.to_proto(o) for o in self.r.ops.list()])
@@ -779,10 +861,7 @@ class Operations(operations_pb2_grpc.OperationsServicer):
     return empty_pb2.Empty()
 
   def WaitOperation(self, request, context):
-    op = self.r.ops.get(request.name)
-    timeout = request.timeout.ToTimedelta().total_seconds() if request.HasField("timeout") else WAIT_S
-    self.r.ops.wait(op, min(timeout, WAIT_S))
-    return self.r.ops.to_proto(op)
+    return wait_operation(self.r, request)
 
   def CancelOperation(self, request, context):
     """The running motion: same as Stop. Others: cancelled at their next check."""

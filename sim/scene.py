@@ -28,7 +28,7 @@ CAMERA_RESOLUTION = (848, 480)
 CAMERA_CLIPPING_M = (0.05, 20.0)
 
 BOARD_PRIM = f"{OBJECTS_ROOT}/calib_board"
-BOARD_SIZE_M = (0.21, 0.15, 0.005)
+BOARD_SIZE_M = (0.28, 0.20, 0.005)
 BOARD_MASS_KG = 0.2
 # Beyond the fingertips along the hand's +z (Inv §6.2).
 BOARD_OFFSET_M = (0.0, 0.0, 0.12)

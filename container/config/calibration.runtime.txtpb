@@ -1,0 +1,17 @@
+# RuntimeContext for calibration_service_main (phase_4.md decision 2). Encode with:
+#   container/encode_runtime.sh container/config/calibration.runtime.txtpb container/config/calibration.runtime.pb \
+#     intrinsic/perception/proto/v1/calibration_service.proto
+# Operations, AssetInstances and DataLogger go to platform_stubs (any gRPC server passes the readiness check;
+# DataLogger is only needed as a key, phase_4_inventory.md §1.3, §2).
+port: 18006
+config {
+  [type.googleapis.com/intrinsic_proto.perception.v1.CalibrationServiceConfig] {
+    intrinsic_runtime {
+      name: "intrinsic_runtime"
+      interfaces { key: "grpc://google.longrunning.Operations"          value { grpc { connection { address: "localhost:18010" } } } }
+      interfaces { key: "grpc://intrinsic_proto.assets.v1.AssetInstances" value { grpc { connection { address: "localhost:18010" } } } }
+      interfaces { key: "grpc://intrinsic_proto.data_logger.DataLogger"    value { grpc { connection { address: "localhost:18010" } } } }
+      interfaces { key: "grpc://intrinsic_proto.world.ObjectWorldService"  value { grpc { connection { address: "localhost:18000" } } } }
+    }
+  }
+}

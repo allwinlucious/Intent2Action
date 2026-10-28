@@ -1,20 +1,29 @@
-"""Unit tests of robot_service's helpers: operation table, gripper stall detector, PNG encoder."""
+"""Unit tests of robot_service's helpers: operation table, LINEAR replan, arm chain, calibration poses, gripper
+stall detector, PNG."""
 
+import json
+import math
 from pathlib import Path
 import struct
+import subprocess
 import sys
 import threading
 import zlib
 
 from google.rpc import code_pb2
+from google.rpc import status_pb2
 import grpc
+from intrinsic.motion_planning.proto.v1 import motion_planner_service_pb2 as planner_pb
+from intrinsic.motion_planning.proto.v1 import motion_planning_error_pb2 as error_pb
 import numpy as np
 import pytest
 from robot_service import robot_service_pb2
 
 # Appended: container/services/robot_service.py must not shadow the generated package robot_service.
 sys.path.append(str(Path(__file__).resolve().parents[1] / "container/services"))
+from robot import calibration  # noqa: E402
 from robot import gripper  # noqa: E402
+from robot import motion  # noqa: E402
 from robot import ops  # noqa: E402
 from robot import png  # noqa: E402
 
@@ -62,6 +71,17 @@ class TestOperationTable:
     table.update(op, ops.EXECUTING, "late")
     assert (op.state, op.detail, op.response) == (ops.CANCELLED, "stopped", None)
 
+  def test_cancelled_while_planning_is_done_and_rejects_updates(self):
+    table = ops.OperationTable()
+    op = table.create("MoveToPose")
+    assert not op.done
+    table.fail(op, ops.ApiError(grpc.StatusCode.CANCELLED, "stopped while planning"))  # what Stop does
+    assert op.done and not op.worker_done.is_set()  # the worker may still be planning
+    assert table.update(op, ops.EXECUTING, "executing") is False  # so the worker raises CANCELLED
+    assert (op.state, op.detail) == (ops.CANCELLED, "stopped while planning")
+    running = table.create("MoveJoints")
+    assert table.update(running, ops.EXECUTING, "executing") is True and running.state == ops.EXECUTING
+
   def test_wait(self):
     table = ops.OperationTable()
     op = table.create("Home")
@@ -87,6 +107,120 @@ class TestOperationTable:
     table.create("Home")
     names = [o.name for o in table.list()]
     assert running.name in names and len(names) == 4  # running, 2 finished, the new one
+
+
+class TestArmChain:
+
+  def test_link_origins_at_zero(self):
+    chain = motion.ArmChain(Path(__file__).resolve().parents[1] / "assets/robots/franka/lula_franka_gen.urdf")
+    origins = chain.link_origins([0.0] * 7)
+    assert len(origins) == 8
+    # Franka at zero: link8 (the flange) 0.088 m forward, 0.333 + 0.316 + 0.384 - 0.107 = 0.926 m up.
+    assert np.allclose(origins[-1], (0.088, 0.0, 0.926), atol=1e-6)
+    turned = chain.link_origins([math.pi / 2] + [0.0] * 6)
+    assert np.allclose(turned[-1], (0.0, 0.088, 0.926), atol=1e-6)
+
+
+class _LinearError(grpc.RpcError):
+  """The planner's LINEAR failure: NOT_FOUND with the reached joints in grpc-status-details-bin."""
+
+  def __init__(self, reached):
+    error = error_pb.MotionPipelineError()
+    found = error.motion_planning_error.add(segment_id=[0])
+    found.linear_cartesian_path_planning_error.final_joint_positions.joints.extend(reached)
+    status = status_pb2.Status(code=5, message="Could not generate Cartesian linear path")
+    status.details.add(type_url="type.googleapis.com/linear_cartesian_path_planning_error",
+                       value=error.SerializeToString())
+    self._status = status
+
+  def code(self):
+    return grpc.StatusCode.NOT_FOUND
+
+  def details(self):
+    return self._status.message
+
+  def trailing_metadata(self):
+    return (("grpc-status-details-bin", self._status.SerializeToString()),)
+
+
+class _FakePlannerStub:
+  """Fails the first PlanTrajectory with a LINEAR error; ComputeFk returns `reached_pose`."""
+
+  def __init__(self, reached_pose: robot_service_pb2.Pose):
+    self.reached_pose = reached_pose
+    self.requests = []
+
+  def PlanTrajectory(self, request, timeout):
+    self.requests.append(type(request).FromString(request.SerializeToString()))
+    if len(self.requests) == 1:
+      raise _LinearError([0.1] * 7)
+    response = planner_pb.TrajectoryPlanningResponse()
+    response.discretized.state.add(position=[0.1] * 7)
+    return response
+
+  def ComputeFk(self, request, timeout):
+    return planner_pb.FkResponse(reference_t_target=motion.to_pose_proto(self.reached_pose))
+
+
+class TestLinearReplan:
+  TARGET = robot_service_pb2.Pose(x=0.4, y=0.1, z=0.3, qx=1.0)
+
+  def _plan(self, reached_pose):
+    planner = motion.Planner("localhost:1")
+    planner.stub = _FakePlannerStub(reached_pose)
+    waypoint = robot_service_pb2.Waypoint(pose=self.TARGET, motion=robot_service_pb2.LINEAR)
+    return planner, planner.plan([0.0] * 7, [motion.segment(waypoint, robot_service_pb2.TCP)])
+
+  def test_replans_when_reached_joints_are_at_the_pose(self):
+    near = robot_service_pb2.Pose(x=0.4003, y=0.1, z=0.3, qx=1.0)  # 0.3 mm off
+    planner, response = self._plan(near)
+    replanned = planner.stub.requests[1].motion_specification.motion_segments[0]
+    assert list(replanned.target.joint_position.joints) == [0.1] * 7
+    assert replanned.motion_type == motion.spec_pb.MotionSegment.LINEAR
+    assert len(response.discretized.state) == 1
+
+  def test_aborts_when_the_path_stopped_short(self):
+    short = robot_service_pb2.Pose(x=0.35, y=0.1, z=0.3, qx=1.0)  # blocked 5 cm before the target
+    with pytest.raises(ops.ApiError) as error:
+      self._plan(short)
+    assert error.value.code == grpc.StatusCode.ABORTED
+    assert "Could not generate Cartesian linear path" in error.value.message
+
+
+class TestCalibrationPoses:
+
+  CAMERA = (1.33, 0.0, 0.9)
+
+  def test_start_pose_points_flange_z_at_the_camera(self):
+    m = motion.pose_matrix(calibration.start_pose(self.CAMERA))
+    toward = np.subtract(self.CAMERA, calibration.START_FLANGE_M)
+    np.testing.assert_allclose(m[:3, 3], calibration.START_FLANGE_M)
+    np.testing.assert_allclose(m[:3, 2], toward / np.linalg.norm(toward), atol=1e-12)
+    assert abs(m[2, 0]) < 1e-12  # x has no world-z component
+
+  def test_sample_poses_round_trips_the_cli_json(self):
+    start = calibration.start_pose(self.CAMERA)
+    sent = {}
+
+    def fake_cli(args, input, **kwargs):  # pylint: disable=redefined-builtin
+      sent.update(json.loads(input))
+      out = {"poses": [{"position": [0.1, 0.2, 0.3], "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0]}]}
+      return subprocess.CompletedProcess(args, 0, json.dumps(out), "")
+
+    poses = calibration.sample_poses(start, robot_service_pb2.Pose(x=1.33, z=0.9, qw=1.0), run=fake_cli)
+    assert sent["count"] == 200 and sent["seed"] == 0 and sent["halfsize"] == [0.08, 0.12, 0.08]
+    assert sent["base_t_flange"]["position"] == [start.x, start.y, start.z]
+    assert sent["flange_t_board"]["position"] == [0.0, 0.0, 0.12]
+    assert [(p.x, p.y, p.z, p.qw) for p in poses] == [(0.1, 0.2, 0.3, 1.0)]
+
+  def test_sample_poses_cli_failure_is_internal_with_its_message(self):
+    def failing_cli(args, **kwargs):
+      return subprocess.CompletedProcess(args, 1, "", "sample_poses: count must be an integer >= 1\n")
+
+    with pytest.raises(ops.ApiError) as error:
+      calibration.sample_poses(robot_service_pb2.Pose(qw=1.0), robot_service_pb2.Pose(qw=1.0), run=failing_cli)
+    assert error.value.code == grpc.StatusCode.INTERNAL
+    assert "count must be an integer >= 1" in error.value.message
 
 
 class TestStallDetector:

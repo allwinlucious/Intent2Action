@@ -82,14 +82,16 @@ class OperationTable:
       del self._ops[name]
 
   def update(self, op: Operation, state: str | None = None, detail: str | None = None,
-             planned_duration_s: float | None = None) -> None:
+             planned_duration_s: float | None = None) -> bool:
+    """False (and no change) if the operation already ended, e.g. cancelled by Stop while planning."""
     with self._changed:
       if op.done:
-        return
+        return False
       op.state = state or op.state
       op.detail = op.detail if detail is None else detail
       op.planned_duration_s = op.planned_duration_s if planned_duration_s is None else planned_duration_s
       self._changed.notify_all()
+      return True
 
   def finish(self, op: Operation, response: _message.Message, detail: str = "done") -> None:
     with self._changed:

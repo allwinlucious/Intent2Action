@@ -16,6 +16,8 @@ RUN git clone --depth 1 --branch 1.1.0 https://github.com/ros-simulation/simulat
 RUN pip3 install --no-cache-dir absl-py==2.5.1
 
 COPY --from=zenoh /zenohd /opt/zenoh/zenohd
+# Storage for the Intrinsic KV store (kv_store/**), loaded via container/config/zenohd.json5.
+COPY --from=zenoh /libzenoh_plugin_storage_manager.so /opt/zenoh/
 COPY container/stage/bin /opt/intrinsic/bin
 COPY container/stage/lib /opt/intrinsic/lib
 COPY gen /opt/app/gen

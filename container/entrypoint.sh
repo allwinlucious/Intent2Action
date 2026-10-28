@@ -22,7 +22,7 @@ export ALLOWED_PUBSUB_IPv4=127.0.0.1  # Zenoh peer listeners bind loopback inste
 mkdir -p /var/lib/intrinsic/worlds
 echo "robot backend: $BACKEND"
 
-run zenohd       /opt/zenoh/zenohd --listen "$ZENOH" --no-multicast-scouting
+run zenohd       /opt/zenoh/zenohd -c "$CFG/zenohd.json5"  # listens on $ZENOH, kv_store/** storage
 run localcas     "$BIN/localcas" --port=18020 --objects_dir=/var/lib/intrinsic/cas --partial_dir=/var/lib/intrinsic/cas-partial
 run stubs        python3 /opt/app/container/services/platform_stubs.py --port=18010
 sleep 2
@@ -34,6 +34,7 @@ run planner      "$BIN/motion_planner_service_assetized_main" --runtime_context_
                    --world_service_address=localhost:18000 --geometry_service_address=localhost:18001 \
                    --zenoh_router="$ZENOH"
 python3 -m robot_model.load_franka || { echo "[loader] failed" >&2; exit 1; }
+python3 -m robot_model.load_camera || { echo "[camera_loader] failed" >&2; exit 1; }
 if [ "$BACKEND" = loopback ]; then
   run hwm        "$BIN/loopback_hardware_module_main" --module_config_file="$CFG/loopback_hwm.txtpb" --logger_connection_timeout=0s
   ICON_CFG="$CFG/icon_loopback.txtpb"
@@ -52,6 +53,8 @@ if [ "$BACKEND" = isaac ]; then
     RMW_IMPLEMENTATION=rmw_fastrtps_cpp FASTRTPS_DEFAULT_PROFILES_FILE=/opt/app/container/dds/fastdds.xml exec python3"
   run scene_sync bash -c "$FASTDDS /opt/app/container/services/scene_sync.py"
   run camera_sim bash -c "$FASTDDS /opt/app/container/services/camera_sim.py"
+  run calibration "$BIN/calibration_service_main" --runtime_context_file="$CFG/calibration.runtime.pb" \
+                   --zenoh_router="$ZENOH"
   # CycloneDDS for /clock (and the grasp planner later); the vendored ICON client is in /opt/app/vendor.
   run robot_service bash -c "set +u; source /opt/ros/humble/setup.bash; source /opt/ros_ext/setup.bash; set -u;
     RMW_IMPLEMENTATION=rmw_cyclonedds_cpp CYCLONEDDS_URI=file:///opt/app/container/dds/cyclonedds.xml \

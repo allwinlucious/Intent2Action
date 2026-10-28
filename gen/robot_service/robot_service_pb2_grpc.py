@@ -168,7 +168,7 @@ class RobotServiceStub:
                 _registered_method=True)
         self.GetPointCloud = channel.unary_unary(
                 '/robot.v1.RobotService/GetPointCloud',
-                request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+                request_serializer=robot__service_dot_robot__service__pb2.GetPointCloudRequest.SerializeToString,
                 response_deserializer=robot__service_dot_robot__service__pb2.GetPointCloudResponse.FromString,
                 _registered_method=True)
         self.CalibrateCamera = channel.unary_unary(
@@ -179,6 +179,16 @@ class RobotServiceStub:
         self.DetectObjects = channel.unary_unary(
                 '/robot.v1.RobotService/DetectObjects',
                 request_serializer=robot__service_dot_robot__service__pb2.DetectObjectsRequest.SerializeToString,
+                response_deserializer=google_dot_longrunning_dot_operations__pb2.Operation.FromString,
+                _registered_method=True)
+        self.GetOperation = channel.unary_unary(
+                '/robot.v1.RobotService/GetOperation',
+                request_serializer=google_dot_longrunning_dot_operations__pb2.GetOperationRequest.SerializeToString,
+                response_deserializer=google_dot_longrunning_dot_operations__pb2.Operation.FromString,
+                _registered_method=True)
+        self.WaitOperation = channel.unary_unary(
+                '/robot.v1.RobotService/WaitOperation',
+                request_serializer=google_dot_longrunning_dot_operations__pb2.WaitOperationRequest.SerializeToString,
                 response_deserializer=google_dot_longrunning_dot_operations__pb2.Operation.FromString,
                 _registered_method=True)
 
@@ -369,7 +379,8 @@ class RobotServiceServicer:
         raise NotImplementedError('Method not implemented!')
 
     def GetPointCloud(self, request, context):
-        """Take a point cloud from the depth camera.
+        """Take a point cloud from the depth camera: every stride-th pixel (default
+        4, at most 101 760 points, < 1.3 MB).
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -384,6 +395,22 @@ class RobotServiceServicer:
 
     def DetectObjects(self, request, context):
         """Detect objects and update the world model.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetOperation(self, request, context):
+        """State of a long-running call (from its Operation.name): done, error
+        (code and message) or result; metadata is OperationInfo.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def WaitOperation(self, request, context):
+        """Wait until a long-running call is done or the timeout (default and at
+        most 60 s) passes; returns its Operation either way.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -524,7 +551,7 @@ def add_RobotServiceServicer_to_server(servicer, server):
             ),
             'GetPointCloud': grpc.unary_unary_rpc_method_handler(
                     servicer.GetPointCloud,
-                    request_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+                    request_deserializer=robot__service_dot_robot__service__pb2.GetPointCloudRequest.FromString,
                     response_serializer=robot__service_dot_robot__service__pb2.GetPointCloudResponse.SerializeToString,
             ),
             'CalibrateCamera': grpc.unary_unary_rpc_method_handler(
@@ -535,6 +562,16 @@ def add_RobotServiceServicer_to_server(servicer, server):
             'DetectObjects': grpc.unary_unary_rpc_method_handler(
                     servicer.DetectObjects,
                     request_deserializer=robot__service_dot_robot__service__pb2.DetectObjectsRequest.FromString,
+                    response_serializer=google_dot_longrunning_dot_operations__pb2.Operation.SerializeToString,
+            ),
+            'GetOperation': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetOperation,
+                    request_deserializer=google_dot_longrunning_dot_operations__pb2.GetOperationRequest.FromString,
+                    response_serializer=google_dot_longrunning_dot_operations__pb2.Operation.SerializeToString,
+            ),
+            'WaitOperation': grpc.unary_unary_rpc_method_handler(
+                    servicer.WaitOperation,
+                    request_deserializer=google_dot_longrunning_dot_operations__pb2.WaitOperationRequest.FromString,
                     response_serializer=google_dot_longrunning_dot_operations__pb2.Operation.SerializeToString,
             ),
     }
@@ -1265,7 +1302,7 @@ class RobotService:
             request,
             target,
             '/robot.v1.RobotService/GetPointCloud',
-            google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+            robot__service_dot_robot__service__pb2.GetPointCloudRequest.SerializeToString,
             robot__service_dot_robot__service__pb2.GetPointCloudResponse.FromString,
             options,
             channel_credentials,
@@ -1320,6 +1357,60 @@ class RobotService:
             target,
             '/robot.v1.RobotService/DetectObjects',
             robot__service_dot_robot__service__pb2.DetectObjectsRequest.SerializeToString,
+            google_dot_longrunning_dot_operations__pb2.Operation.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetOperation(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/robot.v1.RobotService/GetOperation',
+            google_dot_longrunning_dot_operations__pb2.GetOperationRequest.SerializeToString,
+            google_dot_longrunning_dot_operations__pb2.Operation.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def WaitOperation(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/robot.v1.RobotService/WaitOperation',
+            google_dot_longrunning_dot_operations__pb2.WaitOperationRequest.SerializeToString,
             google_dot_longrunning_dot_operations__pb2.Operation.FromString,
             options,
             channel_credentials,

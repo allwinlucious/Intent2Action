@@ -7,6 +7,7 @@ poses are given relative to object `franka`. Tool frames: TCP = `franka_hand`/`t
 
 import logging
 import math
+from pathlib import Path
 
 from google.protobuf import duration_pb2
 from google.rpc import status_pb2
@@ -23,6 +24,8 @@ from intrinsic.motion_planning.proto.v1 import motion_planning_error_pb2 as erro
 from intrinsic.motion_planning.proto.v1 import motion_specification_pb2 as spec_pb
 from intrinsic.motion_planning.proto.v1 import robot_specification_pb2 as robot_pb
 from intrinsic.world.proto import object_world_refs_pb2 as refs_pb
+import numpy as np
+from robot_model import franka_scene_object as fso
 from robot_service import robot_service_pb2 as api
 
 from robot.ops import ApiError
@@ -34,6 +37,12 @@ TOOL_FRAMES = {api.TOOL_FRAME_UNSPECIFIED: ("franka_hand", "tcp"), api.TCP: ("fr
 DOF = 7
 PLAN_TIMEOUT_S = 60.0
 RPC_TIMEOUT_S = 10.0
+URDF_PATH = Path("/opt/app/assets/robots/franka/lula_franka_gen.urdf")
+SWEPT_EVERY = 10  # PlanOnly's swept volume uses every 10th discretized point (and the last)
+LINK_RADIUS_M = 0.08  # the swept bounds of the link origins are enlarged by this
+# A LINEAR replan to the reached joints is accepted only if they reach the requested pose this closely.
+LINEAR_REACHED_TOLERANCE = (1e-3, 0.5)  # m, deg
+KEPT_PLANNER_CODES = (grpc.StatusCode.INVALID_ARGUMENT, grpc.StatusCode.NOT_FOUND)
 log = logging.getLogger("robot_service")
 
 
@@ -74,6 +83,8 @@ def _object_node(name: str) -> refs_pb.TransformNodeReference:
 
 
 def _tool_node(tool: int) -> refs_pb.TransformNodeReference:
+  if tool not in TOOL_FRAMES:
+    raise ApiError(grpc.StatusCode.INVALID_ARGUMENT, f"unknown tool frame {tool} (use TCP or FLANGE)")
   object_name, frame = TOOL_FRAMES[tool]
   return refs_pb.TransformNodeReference(
       by_name=refs_pb.TransformNodeReferenceByName(
@@ -121,6 +132,68 @@ def _linear_reached(error: grpc.RpcError) -> tuple[int, list[float]] | None:
   return None
 
 
+def pose_matrix(pose: api.Pose) -> np.ndarray:
+  w, x, y, z = np.array([pose.qw, pose.qx, pose.qy, pose.qz]) / math.sqrt(
+      pose.qw ** 2 + pose.qx ** 2 + pose.qy ** 2 + pose.qz ** 2)
+  m = np.eye(4)
+  m[:3, :3] = [
+      [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+      [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+      [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
+  ]
+  m[:3, 3] = [pose.x, pose.y, pose.z]
+  return m
+
+
+def pose_error(a: np.ndarray, b: np.ndarray) -> tuple[float, float]:
+  """Position (m) and rotation (deg) between two 4x4 transforms."""
+  cos = (np.trace(a[:3, :3].T @ b[:3, :3]) - 1) / 2
+  return float(np.linalg.norm(a[:3, 3] - b[:3, 3])), math.degrees(math.acos(max(-1.0, min(1.0, cos))))
+
+
+def _rotation(axis: int, angle: float) -> np.ndarray:
+  c, s = math.cos(angle), math.sin(angle)
+  return np.array([[[1, 0, 0], [0, c, -s], [0, s, c]],
+                   [[c, 0, s], [0, 1, 0], [-s, 0, c]],
+                   [[c, -s, 0], [s, c, 0], [0, 0, 1]]][axis])
+
+
+def _origin_matrix(origin: fso.Origin) -> np.ndarray:
+  r, p, y = origin.rpy
+  m = np.eye(4)
+  m[:3, :3] = _rotation(2, y) @ _rotation(1, p) @ _rotation(0, r)
+  m[:3, 3] = origin.xyz
+  return m
+
+
+class ArmChain:
+  """Link origins of `franka` (panda_link1 … panda_link8) from the URDF the world model is built from.
+
+  The planner's ComputeFk only reaches objects and frames, and `franka` has frames only at the flange.
+  """
+
+  def __init__(self, urdf_path: Path = URDF_PATH):
+    urdf = fso.parse_urdf(urdf_path)
+    by_child = {j.child: j for j in urdf.joints.values()}  # the URDF has side branches; walk back from link8
+    self._joints, link = [], fso.ARM_LAST_LINK
+    while link != fso.ARM_ROOT_LINK:
+      joint = by_child[link]
+      revolute = joint.type == "revolute"
+      assert not revolute or tuple(joint.axis) == (0.0, 0.0, 1.0), f"{joint.name} does not turn about z"
+      self._joints.insert(0, (_origin_matrix(joint.origin), revolute))
+      link = joint.parent
+
+  def link_origins(self, q) -> list[np.ndarray]:
+    transform, origins, index = np.eye(4), [], 0
+    for origin, revolute in self._joints:
+      transform = transform @ origin
+      if revolute:
+        transform[:3, :3] = transform[:3, :3] @ _rotation(2, q[index])
+        index += 1
+      origins.append(transform[:3, 3].copy())
+    return origins
+
+
 def blending(waypoints) -> blend_pb.BlendingParameters | None:
   """The planner takes one blending setting per request: the largest blend_radius, Cartesian only."""
   radius = max((w.blend_radius for w in waypoints), default=0.0)
@@ -165,12 +238,22 @@ class Planner:
       except grpc.RpcError as error:
         if error.code() in (grpc.StatusCode.UNAVAILABLE, grpc.StatusCode.DEADLINE_EXCEEDED):
           raise ApiError(error.code(), f"motion planner: {error.details()}") from error
-        reached = _linear_reached(error)
+        reached = _linear_reached(error)  # arrives as NOT_FOUND
         segment_ = reached and request.motion_specification.motion_segments[reached[0]]
         if not segment_ or not segment_.target.HasField("cartesian_pose"):
+          code = error.code() if error.code() in KEPT_PLANNER_CODES and not reached else grpc.StatusCode.ABORTED
+          raise ApiError(code, f"planning failed: {error.details()}") from error
+        # The reached joints may be partway along a blocked line: accept them only at the requested pose.
+        target = segment_.target.cartesian_pose
+        reached_pose = self._call("ComputeFk", planner_pb.FkRequest(
+            world_id=WORLD, joints=joint_space_pb2.JointVec(joints=reached[1]), robot_reference=_robot(),
+            reference=_object_node(ROBOT), target=target.moving_frame)).reference_t_target
+        position, angle = pose_error(pose_matrix(from_pose_proto(reached_pose)),
+                                     pose_matrix(from_pose_proto(target.target_frame_offset)))
+        if position > LINEAR_REACHED_TOLERANCE[0] or angle > LINEAR_REACHED_TOLERANCE[1]:
           raise ApiError(grpc.StatusCode.ABORTED, f"planning failed: {error.details()}") from error
-        log.info("LINEAR segment %d: replanning to the reached joints %s", reached[0],
-                 [round(q, 4) for q in reached[1]])
+        log.info("LINEAR segment %d: replanning to the reached joints %s (%.2f mm / %.3f deg from the pose)",
+                 reached[0], [round(q, 4) for q in reached[1]], position * 1e3, angle)
         segment_.target.CopyFrom(_joint_target(reached[1]))
     if not response.discretized.state:
       raise ApiError(grpc.StatusCode.ABORTED, "planning failed: the planner returned an empty trajectory")
@@ -180,7 +263,8 @@ class Planner:
     try:
       return getattr(self.stub, method)(request, timeout=RPC_TIMEOUT_S)
     except grpc.RpcError as error:
-      code = error.code() if error.code() == grpc.StatusCode.UNAVAILABLE else grpc.StatusCode.ABORTED
+      kept = (grpc.StatusCode.UNAVAILABLE, *KEPT_PLANNER_CODES)
+      code = error.code() if error.code() in kept else grpc.StatusCode.ABORTED
       raise ApiError(code, f"motion planner {method}: {error.details()}") from error
 
   def ik(self, pose: api.Pose, tool: int, seed) -> list[float]:
@@ -211,6 +295,19 @@ class Planner:
         ),
     )
     return from_pose_proto(response.reference_t_target)
+
+  def swept_bounds(self, trajectory: joint_space_pb2.JointTrajectoryPVA, chain: ArmChain) -> tuple[api.Pose, api.Pose]:
+    """Approximate axis-aligned swept volume: TCP (ComputeFk) and arm link origins on every 10th point."""
+    last = len(trajectory.state) - 1
+    points = []
+    for i in sorted({*range(0, last, SWEPT_EVERY), last}):
+      q = list(trajectory.state[i].position)
+      tcp = self.fk(q, api.TCP)
+      points.append((tcp.x, tcp.y, tcp.z))
+      points.extend(chain.link_origins(q))
+    low = np.min(points, axis=0) - LINK_RADIUS_M
+    high = np.max(points, axis=0) + LINK_RADIUS_M
+    return (api.Pose(x=low[0], y=low[1], z=low[2], qw=1.0), api.Pose(x=high[0], y=high[1], z=high[2], qw=1.0))
 
   def check_collisions(self, values) -> tuple[bool, str]:
     response = self._call(

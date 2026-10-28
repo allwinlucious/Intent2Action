@@ -1,0 +1,17 @@
+// zenohd config (phase_4.md decision 4): the router plus an in-memory storage on kv_store/**, so the
+// Intrinsic KV store's Set reads back (CalibrationService.CaptureData waits up to 30 s for that).
+// Same layout as Intrinsic's k8s router (intrinsic/platform/pubsub/fds_core.yaml), memory volume instead of fs.
+{
+  mode: "router",
+  listen: { endpoints: ["tcp/127.0.0.1:7447"] },
+  scouting: { multicast: { enabled: false } },
+  plugins_loading: { enabled: true, search_dirs: ["/opt/zenoh"] },
+  plugins: {
+    storage_manager: {
+      __required__: true,
+      storages: {
+        kv: { key_expr: "kv_store/**", volume: "memory" },
+      },
+    },
+  },
+}

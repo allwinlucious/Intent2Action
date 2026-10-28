@@ -57,8 +57,7 @@ class Icon:
     try:
       return getattr(self.stub, method)(request, timeout=timeout_s)
     except grpc.RpcError as error:
-      code = error.code() if error.code() == grpc.StatusCode.UNAVAILABLE else grpc.StatusCode.INTERNAL
-      raise ApiError(code, f"ICON {method}: {_describe(error)}") from error
+      raise ApiError(error.code(), f"ICON {method}: {_describe(error)}") from error
 
   def status(self) -> icon_pb.GetStatusResponse:
     return self._call("GetStatus", icon_pb.GetStatusRequest())
@@ -170,10 +169,11 @@ class Icon:
       ) from error
 
   def jog(self, joint_index: int, normalized_velocity: float, keep_going: Callable[[], bool],
-          period_s: float = 0.1) -> None:
+          duration_s: float, period_s: float = 0.1) -> None:
     """JoggingService.JogRobot on `arm`: one command every period_s (wall) while keep_going(), then 0.
 
-    Commands start once the service answered the initial request (its jogging action is running).
+    Commands start once the service answered the initial request (its jogging action is running). The
+    stream has a deadline of duration_s + 10 s, so a stream ICON never closes cannot hold the arm.
     """
     started = threading.Event()
 
@@ -193,7 +193,7 @@ class Icon:
       yield self._jog_command(joint_index, 0.0)
 
     try:
-      for _ in self.jogging.JogRobot(requests()):
+      for _ in self.jogging.JogRobot(requests(), timeout=duration_s + RPC_TIMEOUT_S):
         started.set()
     except grpc.RpcError as error:
       raise ApiError(error.code(), f"ICON JogRobot: {error.details()}") from error

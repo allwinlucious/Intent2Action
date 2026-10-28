@@ -216,3 +216,27 @@ with its stated fix, plus these decisions:
 Regenerate stubs; extend `tests/test_robot_service.py` for the operation
 table's cancel/`done` semantics and the LINEAR replan acceptance check;
 rerun `phase3_cuj_check.py` (all pass).
+
+## Addendum A: camera image quality (after experiments c/d failed)
+
+Cause (phase_4_notes.md): Isaac renders the camera at half resolution and
+upscales it with DLSS, so markers are smeared. Decisions, applied in order
+until experiment (d) gives ≥ 16/20 `NO_ERRORS`:
+1.  **Native-resolution rendering:** `sim/run_scene.py` adds
+    `--/rtx/post/aa/op=4` (DLAA: anti-aliasing at native resolution, no
+    upscaling) to the SimulationApp `extra_args`. If Isaac rejects or
+    ignores it (log shows upscaling still active), use
+    `--/rtx/post/aa/op=2` (FXAA) instead. Rerun experiments (c) and (d).
+2.  **If still < 16/20:** raise the camera to 1280 × 720 (the D455's native
+    depth resolution and a supported colour resolution): `sim/scene.py`
+    resolution, and every place that hard-codes 848×480 or the 848×480
+    intrinsics (`tests/e2e/phase2_peer_io.py` `EXPECTED_K`,
+    `tests/e2e/phase3_*`, `camera_sim` sensor dimensions,
+    `robot_platform.md` G5 and GPU budget). Recompute `K` from the camera
+    (fx = fy = 1280 · focal_length / horizontal_aperture, principal point
+    at the image centre) and update the checks. Rerun phase 2 and 3
+    checks and experiments (c) and (d).
+3.  **If still < 16/20:** stop and record the detection counts per
+    distance; the lead decides next.
+Then continue with Steps 3–4 unchanged. Record render time per frame
+before and after in `phase_4_notes.md`.

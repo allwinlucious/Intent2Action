@@ -48,7 +48,7 @@ OBJECTS = {
     "hole_block": (_hole_block(), True, None, (0.3, 0.3, 0.3)),
     # The ChArUco board sim/scene.py attaches to the hand (same size and mass;
     # origin at the box centre like its prim, so /tf poses match).
-    "calib_board": (trimesh.creation.box(extents=(0.21, 0.15, 0.005)), False, 0.2, (1.0, 1.0, 1.0)),
+    "calib_board": (trimesh.creation.box(extents=(0.28, 0.20, 0.005)), False, 0.2, (1.0, 1.0, 1.0)),
     "obstacle": (_box(0.1, 0.1, 0.5), True, None, (0.5, 0.5, 0.5)),
 }
 

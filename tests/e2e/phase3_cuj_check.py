@@ -4,7 +4,8 @@ Syncs the repository to Windows, starts sim/run_scene.py and the container
 (ROBOT_BACKEND=isaac, container/run.sh), and prints PASS/FAIL per check
 (phase_3.md, Part 3):
   .venv/bin/python tests/e2e/phase3_cuj_check.py
-Every call goes to RobotService, SimService and Operations on 127.0.0.1:18100,
+Every call goes to RobotService and SimService on 127.0.0.1:18100 (operations are
+polled with RobotService.GetOperation / WaitOperation),
 except CUJ 5's fault trigger (SimLink.Reset on :18101). Stops the container
 and Isaac at the end.
 """
@@ -25,7 +26,6 @@ import phase3_hwm_check as hwm  # sets sys.path for gen/ and ICON's Python
 import phase1_check as p1
 import phase3_scene_check as scene
 from google.longrunning import operations_pb2  # noqa: E402
-from google.longrunning import operations_pb2_grpc  # noqa: E402
 from robot_model import franka_scene_object as fso  # noqa: E402
 from robot_service import robot_service_pb2 as api  # noqa: E402
 from robot_service import robot_service_pb2_grpc as api_grpc  # noqa: E402
@@ -33,7 +33,6 @@ from robot_service import robot_service_pb2_grpc as api_grpc  # noqa: E402
 ISAAC_LOG = harness.LOG_DIR / "phase3_cuj_isaac.log"
 CONTAINER_LOG = harness.LOG_DIR / "phase3_cuj_container.log"
 ADDRESS = "127.0.0.1:18100"
-MAX_MESSAGE_BYTES = 64 << 20  # GetPointCloud is ~5 MB
 CALL_TIMEOUT_S = 90
 READY_TIMEOUT_S = 60
 EMPTY = empty_pb2.Empty()
@@ -58,19 +57,16 @@ SPEED = 0.5
 SPEED_TOLERANCE = 0.10
 PAYLOAD_KG = 0.5
 WIDTH, HEIGHT = 848, 480
-CLOUD_MIN_POINTS = 100_000
+# Default stride 4: at most 848 * 480 / 4 = 101 760 points; every pixel sees the floor or the table.
+CLOUD_POINTS = (100_000, 101_760)
 # phase_3.md says (0.2, 4); the floor (1.65 m below the camera, pitched 45 deg) reaches 5.43 m at
 # the top image row (vertical FOV 59.5 deg).
 CLOUD_Z = (0.2, 6.0)
 UNREACHABLE = api.Pose(x=2.0, y=0.0, z=0.5, qw=1.0)
 
-_channel = grpc.insecure_channel(
-    ADDRESS,
-    options=[("grpc.max_receive_message_length", MAX_MESSAGE_BYTES)],
-)
+_channel = grpc.insecure_channel(ADDRESS)  # default 4 MB receive limit (GetPointCloud must fit)
 _robot = api_grpc.RobotServiceStub(_channel)
 _sim = api_grpc.SimServiceStub(_channel)
-_ops = operations_pb2_grpc.OperationsStub(_channel)
 
 
 def _call(stub, method: str, request=EMPTY):
@@ -226,7 +222,7 @@ def check_cuj4() -> str:
   time.sleep(1.0)
   _call(_robot, "Stop")
   operation = _call(
-      _ops, "GetOperation", operations_pb2.GetOperationRequest(name=operation.name)
+      _robot, "GetOperation", operations_pb2.GetOperationRequest(name=operation.name)
   )
   info = api.OperationInfo()
   operation.metadata.Unpack(info)
@@ -351,7 +347,7 @@ def check_obstacle() -> str:
       if _call(_robot, "CheckCollisions", api.CheckCollisionsRequest(joints=q)).in_collision:
         colliding.append(np.round(q.positions, 3).tolist())
     operation = _call(
-        _ops, "WaitOperation",
+        _robot, "WaitOperation",
         operations_pb2.WaitOperationRequest(name=operation.name),
     )
     _done(operation, api.MotionResult)
@@ -425,10 +421,11 @@ def check_misc() -> str:
     if decoded != (WIDTH, HEIGHT, *want) or (image.width, image.height) != (WIDTH, HEIGHT):
       raise RuntimeError(f"GetImage {api.ImageKind.Name(kind)}: PNG {decoded}")
   details.append(f"GetImage RGB/DEPTH {WIDTH}x{HEIGHT} PNG")
-  cloud = _call(_robot, "GetPointCloud")
+  cloud = _call(_robot, "GetPointCloud", api.GetPointCloudRequest())
   xyz = np.array(cloud.xyz, dtype=np.float32).reshape(-1, 3)
   z = xyz[:, 2]
-  if len(xyz) <= CLOUD_MIN_POINTS or not np.all((z > CLOUD_Z[0]) & (z < CLOUD_Z[1])):
+  if (not CLOUD_POINTS[0] <= len(xyz) <= CLOUD_POINTS[1]
+      or not np.all((z > CLOUD_Z[0]) & (z < CLOUD_Z[1]))):
     raise RuntimeError(f"GetPointCloud: {len(xyz)} points, z {z.min():.3f}..{z.max():.3f}")
   details.append(f"GetPointCloud {len(xyz)} points, z {z.min():.2f}..{z.max():.2f} m")
   return "; ".join(details)
