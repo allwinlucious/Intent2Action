@@ -39,10 +39,31 @@ def _side(dims: np.ndarray) -> np.ndarray:
   return _transform(np.cross(y, z), y, z, [-dims[0] / 2, 0, dims[2] / 2])
 
 
-def _grasp(object_t_tool: np.ndarray, quality=0.5) -> grasp.Grasp:
+def _grasp(object_t_tool: np.ndarray, quality=0.5, joints=None, pregrasp_joints=None) -> grasp.Grasp:
   pregrasp = object_t_tool.copy()
   pregrasp[:3, 3] -= 0.08 * object_t_tool[:3, 2]
-  return grasp.Grasp(quality=quality, object_t_tool=object_t_tool, object_t_pregrasp=pregrasp, joints=dict(JOINTS))
+  return grasp.Grasp(quality=quality, object_t_tool=object_t_tool, object_t_pregrasp=pregrasp,
+                     joints=dict(joints or JOINTS), pregrasp_joints=dict(pregrasp_joints or JOINTS))
+
+
+def _free(q) -> tuple[bool, str]:
+  return False, ""
+
+
+class _FakeChecker:
+  """Intrinsic's CheckCollisions stand-in: joint vectors starting with a value in `colliding` are in collision."""
+
+  def __init__(self, *colliding: float):
+    self.colliding, self.calls = colliding, []
+
+  def __call__(self, q) -> tuple[bool, str]:
+    self.calls.append(list(q))
+    hit = q[0] in self.colliding
+    return hit, "panda_link6 - table" if hit else ""
+
+
+def _joints(first: float) -> dict[str, float]:
+  return {**JOINTS, "panda_joint1": first}
 
 
 def _yaw(degrees: float, x=0.5, y=0.1, z=0.75) -> api.Pose:
@@ -78,21 +99,48 @@ def test_missing_ik_joint_is_internal():
 
 def test_finger_axis_extent_of_the_opening_is_kept():
   dims = np.array([0.075, 0.03, 0.05])
-  assert grasp.choose([_grasp(_top_down(dims, fingers=(1, 0, 0)))], dims).quality == 0.5
+  assert grasp.choose([_grasp(_top_down(dims, fingers=(1, 0, 0)))], dims, _free).quality == 0.5
   # Rotated 90° about the approach, the 0.075 side lies along the tool y axis expressed as -x.
-  assert grasp.choose([_grasp(_top_down(dims, fingers=(-1, 0, 0)))], dims).quality == 0.5
+  assert grasp.choose([_grasp(_top_down(dims, fingers=(-1, 0, 0)))], dims, _free).quality == 0.5
 
 
 def test_finger_axis_extent_beyond_the_opening_is_dropped():
   dims = np.array([0.076, 0.03, 0.05])
   with pytest.raises(ApiError) as e:
-    grasp.choose([_grasp(_top_down(dims, fingers=(1, 0, 0)))], dims)
+    grasp.choose([_grasp(_top_down(dims, fingers=(1, 0, 0)))], dims, _free)
   assert e.value.code == grpc.StatusCode.ABORTED and e.value.message == grasp.TOO_WIDE
   # The other horizontal direction fits; the best fitting grasp wins over a better one that does not fit.
   kept = grasp.choose([_grasp(_top_down(dims, fingers=(1, 0, 0)), quality=0.9),
                        _grasp(_top_down(dims, fingers=(0, 1, 0)), quality=0.4),
-                       _grasp(_top_down(dims, fingers=(0, -1, 0)), quality=0.3)], dims)
+                       _grasp(_top_down(dims, fingers=(0, -1, 0)), quality=0.3)], dims, _free)
   assert kept.quality == 0.4
+
+
+def test_grasps_in_collision_in_intrinsics_world_are_dropped():
+  checker = _FakeChecker(0.9, 0.8)
+  # Best: grasp joints collide. Second: pregrasp joints collide. Third: both free, chosen.
+  kept = grasp.choose([_grasp(_side(CUBE), quality=0.9, joints=_joints(0.9)),
+                       _grasp(_side(CUBE), quality=0.5, joints=_joints(0.5)),
+                       _grasp(_side(CUBE), quality=0.7, joints=_joints(0.7), pregrasp_joints=_joints(0.8))],
+                      CUBE, checker)
+  assert kept.quality == 0.5
+  # Best first: 0.9's grasp; 0.7's grasp and pregrasp; 0.5's grasp and pregrasp, in panda_joint1..7 order.
+  assert [q[0] for q in checker.calls] == [0.9, 0.7, 0.8, 0.5, 0.1]
+  assert checker.calls[3] == pytest.approx([0.5] + [i / 10 for i in range(2, 8)])
+
+
+def test_no_collision_free_grasp_is_aborted():
+  with pytest.raises(ApiError) as e:
+    grasp.choose([_grasp(_side(CUBE), joints=_joints(0.9))], CUBE, _FakeChecker(0.9))
+  assert e.value.code == grpc.StatusCode.ABORTED and e.value.message == grasp.NOT_COLLISION_FREE
+
+
+def test_width_is_filtered_before_collisions():
+  dims = np.array([0.076, 0.03, 0.05])
+  checker = _FakeChecker()
+  with pytest.raises(ApiError) as e:
+    grasp.choose([_grasp(_top_down(dims, fingers=(1, 0, 0)))], dims, checker)
+  assert e.value.message == grasp.TOO_WIDE and not checker.calls
 
 
 def test_plate_rejected_before_planning():
@@ -112,8 +160,9 @@ def test_graspable_catalog_objects():
 def test_static_top_at_the_base_plane_is_lowered():
   table = grasp.catalog_dims("table", CATALOG)
   assert grasp.catalog_static("table", CATALOG) and not grasp.catalog_static("red_cube", CATALOG)
-  assert grasp.lowered_m(True, -0.75, table) == 0.005
-  assert grasp.lowered_m(True, -0.746, table) == 0.005  # top 4 mm above the plane
+  assert grasp.lowered_m(True, -0.75, table) == 0.0005
+  assert grasp.lowered_m(True, -0.7496, table) == 0.0005  # top 0.4 mm above the plane
+  assert grasp.lowered_m(True, -0.749, table) == 0.0  # top 1 mm above the plane (Addendum B.1)
   assert grasp.lowered_m(True, -0.7, table) == 0.0
   assert grasp.lowered_m(False, -0.75, table) == 0.0
   assert grasp.lowered_m(True, 0.0, grasp.catalog_dims("hole_block", CATALOG)) == 0.0  # standing on the table

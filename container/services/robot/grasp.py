@@ -2,13 +2,14 @@
 
 robot_service applies `world`'s catalog objects to MoveIt's planning scene (/apply_planning_scene, in
 `base_link`), asks
-/grasp_planning/plan_grasps for box grasps of the target, keeps those the 0.075 m gripper can close on,
-moves each 2 cm deeper so the finger pads overlap the object, and returns the best one in the base frame
+/grasp_planning/plan_grasps for box grasps of the target, keeps those the 0.075 m gripper can close on and
+whose grasp and pregrasp joints are collision-free in Intrinsic's world (Addendum B.2), moves the grasp 2 cm deeper so the finger pads overlap the object, and returns the best one in the base frame
 (= world; the Franka stands at the origin).
 
 The helpers below need no ROS; GraspPlanner imports rclpy and the MoveIt messages when it is created.
 """
 
+from collections.abc import Callable
 import dataclasses
 import logging
 from pathlib import Path
@@ -31,9 +32,12 @@ WIDTH_TOLERANCE_M = 1e-9  # rotation round-off; an extent of exactly the opening
 MAX_DEPTH_M = 0.02
 DEPTH_MARGIN_M = 0.01
 TOO_WIDE = f"object wider than the gripper opening ({GRIPPER_OPENING_M} m) in every horizontal direction"
+NOT_COLLISION_FREE = "no grasp is collision-free in the robot's world model"
 ARM_JOINTS = [f"panda_joint{i}" for i in range(1, 8)]
 PLANNING_FRAME = "base_link"  # MoveIt's model frame; the Franka base is at the world origin (Addendum A.1)
-BASE_PLANE_MARGIN_M = 0.005  # Addendum A.2: static tops this close to z = 0 are lowered by this much in MoveIt
+# Addendum A.2/B.1: static tops this close to z = 0 are lowered by this much in MoveIt. The base link mesh dips
+# 0.03 mm below z = 0; MoveIt accepts poses up to this far inside the table.
+BASE_PLANE_MARGIN_M = 0.0005
 SCENE_TIMEOUT_S = 5.0
 SERVER_TIMEOUT_S = 10.0
 RESULT_TIMEOUT_S = 30.0
@@ -52,6 +56,7 @@ class Grasp:
   object_t_tool: np.ndarray
   object_t_pregrasp: np.ndarray
   joints: dict[str, float]
+  pregrasp_joints: dict[str, float]
 
 
 def _catalog_entry(catalog: str, catalog_dir: Path) -> tuple[Path, dict]:
@@ -97,12 +102,30 @@ def deepened(object_t_tool: np.ndarray, dims: np.ndarray) -> np.ndarray:
   return moved
 
 
-def choose(grasps: list[Grasp], dims: np.ndarray) -> Grasp:
-  """Decision 6.5 and 6.7: the best grasp whose object extent along the finger axis (tool y) fits."""
+def arm_positions(joints: dict[str, float]) -> list[float]:
+  """An IK solution's panda_joint1..7 positions."""
+  missing = [n for n in ARM_JOINTS if n not in joints]
+  if missing:
+    raise ApiError(grpc.StatusCode.INTERNAL, f"the grasp planner's IK solution lacks {missing}")
+  return [joints[n] for n in ARM_JOINTS]
+
+
+def choose(grasps: list[Grasp], dims: np.ndarray, check: Callable[[list[float]], tuple[bool, str]]) -> Grasp:
+  """Decision 6.5, Addendum B.2 and 6.7: the best grasp whose object extent along the finger axis (tool y) fits and
+  whose grasp and pregrasp joints are collision-free by `check` (Intrinsic's CheckCollisions: in_collision, debug)."""
   kept = [g for g in grasps if extent_along(dims, g.object_t_tool[:3, 1]) <= GRIPPER_OPENING_M + WIDTH_TOLERANCE_M]
   if not kept:
     raise ApiError(grpc.StatusCode.ABORTED, TOO_WIDE)
-  return max(kept, key=lambda g: g.quality)
+  # Checked best first, stopping at the first free one: the same choice as filtering all, with fewer calls.
+  for g in sorted(kept, key=lambda g: g.quality, reverse=True):
+    for what, joints in (("grasp", g.joints), ("pregrasp", g.pregrasp_joints)):
+      in_collision, debug = check(arm_positions(joints))
+      if in_collision:
+        log.info("plan_grasp grasp quality=%.4f dropped: %s joints in collision in world: %s", g.quality, what, debug)
+        break
+    else:
+      return g
+  raise ApiError(grpc.StatusCode.ABORTED, NOT_COLLISION_FREE)
 
 
 def matrix_pose(m: np.ndarray) -> api.Pose:
@@ -127,14 +150,11 @@ def matrix_pose(m: np.ndarray) -> api.Pose:
 
 def response(world_t_object: api.Pose, grasp: Grasp, dims: np.ndarray) -> api.PlanGraspResponse:
   """Decision 6.7: grasp and pregrasp TCP poses in the base frame, grasp joints panda_joint1..7."""
-  missing = [n for n in ARM_JOINTS if n not in grasp.joints]
-  if missing:
-    raise ApiError(grpc.StatusCode.INTERNAL, f"the grasp planner's IK solution lacks {missing}")
   world = pose_matrix(world_t_object)
   return api.PlanGraspResponse(
       grasp=matrix_pose(world @ deepened(grasp.object_t_tool, dims)),
       pregrasp=matrix_pose(world @ grasp.object_t_pregrasp),
-      grasp_joints=api.Joints(positions=[grasp.joints[n] for n in ARM_JOINTS]),
+      grasp_joints=api.Joints(positions=arm_positions(grasp.joints)),
   )
 
 
@@ -187,8 +207,8 @@ class GraspPlanner:
     executor.add_node(self.node)
     threading.Thread(target=executor.spin, daemon=True).start()
 
-  def plan_grasp(self, world, name: str) -> api.PlanGraspResponse:
-    """Decision 6 steps 1-7; `world` is robot_service's World."""
+  def plan_grasp(self, world, name: str, check: Callable[[list[float]], tuple[bool, str]]) -> api.PlanGraspResponse:
+    """Decision 6 steps 1-7; `world` is robot_service's World, `check` Intrinsic's CheckCollisions (Addendum B.2)."""
     catalog = object_catalog(world.get(name))
     if catalog is None:
       raise ApiError(grpc.StatusCode.NOT_FOUND, f"object {name!r} in world has no catalog entry (user_data {CATALOG_KEY!r})")
@@ -197,7 +217,7 @@ class GraspPlanner:
     with self.lock:
       self._apply_scene(world)
       grasps = self._plan(name, dims)
-    best = choose(grasps, dims)
+    best = choose(grasps, dims, check)
     result = response(world.pose(name), best, dims)
     log.info("plan_grasp object=%s grasps=%d quality=%.4f grasp=%s", name, len(grasps), best.quality,
              [round(v, 4) for v in (result.grasp.x, result.grasp.y, result.grasp.z)])
@@ -223,7 +243,7 @@ class GraspPlanner:
       pose = world.pose(o.name)
       lowered = lowered_m(catalog_static(catalog), pose.z, dims)
       if lowered and o.name not in self.lowered:
-        log.info("plan_grasp MoveIt box of %s lowered by %.3f m (its top is at the robot base plane)", o.name, lowered)
+        log.info("plan_grasp MoveIt box of %s lowered by %.4f m (its top is at the robot base plane)", o.name, lowered)
         self.lowered.add(o.name)
       box = CollisionObject(id=o.name, operation=CollisionObject.ADD, pose=_ros_pose(pose))
       box.header.frame_id = PLANNING_FRAME
@@ -281,5 +301,6 @@ class GraspPlanner:
                                               f"{wrapped.status}, MoveIt error code {wrapped.result.error_code.val}")
     return [Grasp(quality=r.grasp.grasp_quality, object_t_tool=_matrix(r.grasp.grasp_pose.pose),
                   object_t_pregrasp=_matrix(r.pre_grasp_pose.pose),
-                  joints=dict(zip(r.grasp_ik_solution.name, r.grasp_ik_solution.position)))
+                  joints=dict(zip(r.grasp_ik_solution.name, r.grasp_ik_solution.position)),
+                  pregrasp_joints=dict(zip(r.pregrasp_ik_solution.name, r.pregrasp_ik_solution.position)))
             for r in wrapped.result.ranked_grasps]

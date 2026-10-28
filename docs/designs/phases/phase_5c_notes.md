@@ -1,6 +1,97 @@
 # Phase 5c implementation notes
 
-Status: **stopped at Step 3 again, after Addendum A.** Addendum A is
+Status: **done after Addendum B.** `tests/e2e/phase5c_check.py` passes all
+six checks (cube 10/10, peg 10/10). The phase 3 and 4 checks and
+`pytest` pass (below). No container or Isaac process is left running.
+`intrinsic-core:dev` is built from the current tree (0.5 mm margin, B.2
+filter).
+
+Regression with Addendum B (`logs/phase5c_addB_regression_*.log`), all
+passing on the first run:
+
+- phase 3 hwm: 7/7
+- phase 3 scene: 5/5
+- phase 3 cuj: 8/8 (`obstacle` did not flake; `cuj4` "Stop 1 s into a
+  4.47 s MoveJoints → CANCELLED")
+- phase 4: 6/6 (calibration rms 0.219 mm / 0.137°, 0.61 mm / 0.012° from
+  Isaac's true pose)
+- `pytest tests/`: 52 passed
+
+Files changed in the Addendum B run:
+
+- `container/services/robot/grasp.py` (B.1, B.2)
+- `container/services/robot_service.py` (`PlanGrasp` passes
+  `planner.check_collisions`)
+- `tests/test_plan_grasp.py` (B.1 values, three B.2 tests, `Grasp` fixture
+  gains `pregrasp_joints`)
+- `docs/designs/phases/phase_5c_notes.md`
+
+`tests/e2e/phase5c_check.py` with Addendum B
+(`logs/phase5c_check_addB_run1.log`, container log
+`logs/phase5c_container.log`):
+
+| Check | Result |
+|---|---|
+| `planner_up` | PASS (server available 1 s after `robot_service` was ready) |
+| `cube` | PASS, 10/10 lifted (rose 99.6–100.0 mm, gripping at 50 mm) |
+| `peg` | PASS, 10/10 lifted (rose 99.6–100.0 mm, gripping at 20 mm) |
+| `too_wide` | PASS, `ABORTED` "object wider than the gripper opening (0.075 m) …" |
+| `logs` | PASS, 21 `rpc PlanGrasp` lines for 21 calls; 20 `goal` lines for 20 goals |
+| `errors` | PASS, `NOT_FOUND` for `nope`; `UNAVAILABLE` "grasp planner not running: …" with `GRASP_PLANNER=off` |
+
+## Addendum B changes
+
+- **B.1** (`container/services/robot/grasp.py`): `BASE_PLANE_MARGIN_M`
+  0.005 → 0.0005 (it is both the "top within … of z = 0" threshold and the
+  lowering). The log line now prints 4 decimals: "plan_grasp MoveIt box
+  of table lowered by 0.0005 m (its top is at the robot base plane)".
+  `test_static_top_at_the_base_plane_is_lowered` updated (0.4 mm above
+  the plane is lowered, 1 mm is not).
+- **B.2** (`grasp.py`, `robot_service.py`): `Grasp` gains
+  `pregrasp_joints` (from `pregrasp_ik_solution`). `choose(grasps, dims,
+  check)` applies the width filter (6.5) first, then walks the kept
+  grasps best quality first and returns the first whose `grasp_joints`
+  and pregrasp joints (`panda_joint1..7`) are both free by `check`. This
+  gives the same choice as filtering every grasp and then taking the best,
+  with fewer calls. `check` is `robot_service`'s
+  `self.r.planner.check_collisions` (Intrinsic's
+  `MotionPlannerService.CheckCollisions` in `world`, the same call
+  `RobotService.CheckCollisions` makes). Each dropped grasp logs
+  "plan_grasp grasp quality=… dropped: <grasp|pregrasp> joints in
+  collision in world: <debug>". None left → `ABORTED` "no grasp is
+  collision-free in the robot's world model". The joint-order and
+  missing-joint (`INTERNAL`) logic moved from `response` into
+  `arm_positions`, which both use.
+- **Unit tests** (`tests/test_plan_grasp.py`, fake checker): grasps
+  whose grasp or pregrasp joints collide are dropped and the best free one
+  is chosen (checking order and `panda_joint1..7` order asserted); none
+  free → `ABORTED` with the new message; the width filter runs before any
+  collision check. 21 cases in the file, all passing.
+- In the e2e run the B.2 filter dropped no grasp (no "dropped:" line in
+  the container log): with the 0.5 mm margin, MoveIt already rejects the
+  side peg grasps, as in the diagnostic. The filter is the guard for any
+  other disagreement between the two collision models.
+
+## Success rates and planning times (Addendum B)
+
+PlanGrasp time is measured by the client: the whole RPC, including the
+scene update and the collision checks. The planner's own time is
+`duration_s` in `grasp_planner.log`.
+
+| Object | Lifted | PlanGrasp median / max | Planner `duration_s` median / max |
+|---|---|---|---|
+| `red_cube` | 10/10 | 0.89 / 0.95 s | 0.59 / 0.64 s |
+| `peg` | 10/10 | 2.16 / 2.20 s | 1.88 / 1.92 s |
+
+Every trial's chosen grasp was top-down. Compared with the 0.5 mm
+diagnostic (cube 0.84 / 0.88 s, peg 2.09 / 2.12 s), PlanGrasp is about
+0.05–0.07 s slower. That fits the two extra CheckCollisions calls for the
+chosen grasp, but it is also within run-to-run spread (not measured
+separately).
+
+# Addendum A run (before Addendum B)
+
+Status then: **stopped at Step 3 again, after Addendum A.** Addendum A is
 applied. Blockers 1 and 2 are gone, and `cube` passes 10/10. `peg` fails
 5/10, and the cause is Addendum A.2's 5 mm margin itself (blocker 3). The
 fix changes a value that the addendum fixed, so it needs a design decision,

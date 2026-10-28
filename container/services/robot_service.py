@@ -690,7 +690,7 @@ class RobotService(api_grpc.RobotServiceServicer):
   MoveCompliant = _unimplemented("MoveCompliant", "5b")
 
   def PlanGrasp(self, request, context):
-    return self.r.grasps.plan_grasp(self.r.world, request.object)
+    return self.r.grasps.plan_grasp(self.r.world, request.object, self.r.planner.check_collisions)
 
   def CalibrateCamera(self, request, context):
     def work(op: Operation) -> None:
