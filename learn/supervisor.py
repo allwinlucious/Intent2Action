@@ -25,7 +25,10 @@ PAUSE = LOG / "PAUSE"
 STOP_GRACE_S = 150
 RETRIES = 2
 S1, BENCH, S2 = "logs/learn/stage1_train.jsonl", "logs/learn/stage1_bench.jsonl", "logs/learn/expert_train.jsonl"
-EPOCHS = os.environ.get("SFT_EPOCHS", "3")
+# The recipe's settings, on less data: one example takes ~33 s on the 3080 (6.5k-token prompts), so the
+# recipe's 3 epochs over everything (~70 h) are for the cloud. Here: SFT 600 examples x 1 epoch,
+# stage-2 SFT 400 turns (30 % stage-1 replay).
+EPOCHS = "1"
 
 
 def _py(*args: str) -> list[str]:
@@ -42,12 +45,12 @@ STEPS = [
     ("expert_eval", _py("learn/run.py", "--policy", "expert", "--split", "eval", "--count", "30", "--out", "expert_eval")),
     ("expert_train", _py("learn/run.py", "--policy", "expert", "--split", "train", "--count", "200", "--out", "expert_train")),
     *_policy_steps("qwen", "qwen"),
-    ("train_b_sft", _py("learn/train_trl.py", "sft", "--stage1", S1, "--epochs", EPOCHS, "--out", "runs/b_sft")),
+    ("train_b_sft", _py("learn/train_trl.py", "sft", "--stage1", S1, "--epochs", EPOCHS, "--limit", "600", "--out", "runs/b_sft")),
     *_policy_steps("b_sft", "lora:runs/b_sft"),
-    ("train_b_dpo", _py("learn/train_trl.py", "dpo", "--stage1", S1, "--init", "runs/b_sft", "--out", "runs/b_dpo")),
-    *_policy_steps("b_dpo", "lora:runs/b_dpo"),
+    # No local DPO: a pair takes ~225 s here (chosen + rejected, 6.5k tokens each), and with the recipe's lr 5e-7 and
+    # batch 16 the pairs we could afford give 4-12 optimizer steps, too few to change the model. DPO runs in the cloud.
     ("train_b_sft2", _py("learn/train_trl.py", "sft", "--stage1", S1, "--stage2", S2, "--init", "runs/b_sft",
-                         "--epochs", "1", "--out", "runs/b_sft2")),
+                         "--epochs", "1", "--limit", "400", "--out", "runs/b_sft2")),
     *_policy_steps("b_sft2", "lora:runs/b_sft2"),
     ("feat_s1", _py("learn/head.py", "featurize", "--stage1", S1, "--out", "runs/feat_s1.pt")),
     ("feat_s2", _py("learn/head.py", "featurize", "--stage2", S2, "--out", "runs/feat_s2.pt")),
@@ -56,9 +59,8 @@ STEPS = [
                      "--init", "runs/c1", "--out", "runs/c2")),
     *_policy_steps("c1", "head:runs/c1"),
     *_policy_steps("c2", "head:runs/c2"),
-    ("train_b_grpo", _py("learn/train_trl.py", "grpo", "--stage1", S1, "--init", "runs/b_sft", "--max-steps", "150",
-                         "--out", "runs/b_grpo")),
-    *_policy_steps("b_grpo", "lora:runs/b_grpo"),
+    # No local GRPO: one step (4 rollouts of a 6.5k-token prompt) takes ~500 s and 19 GiB here, and on single calls
+    # the 4 rollouts came out identical (no reward variance, zero loss). GRPO runs in the cloud on whole sim episodes.
 ]
 
 
@@ -135,8 +137,8 @@ def main() -> None:
         break
   log("queue finished")
   subprocess.run(_py("learn/report.py", "--runs", "expert_eval", *[f"eval_{n}" for n in
-                     ("qwen", "b_sft", "b_dpo", "b_sft2", "b_grpo", "c1", "c2")],
-                     "--benches", *[f"bench_{n}" for n in ("qwen", "b_sft", "b_dpo", "b_sft2", "b_grpo", "c1", "c2")]),
+                     ("qwen", "b_sft", "b_sft2", "c1", "c2")],
+                     "--benches", *[f"bench_{n}" for n in ("qwen", "b_sft", "b_sft2", "c1", "c2")]),
                  cwd=ROOT, stdout=open(LOG / "report.md", "w"))
   log("report written to logs/learn/report.md")
 

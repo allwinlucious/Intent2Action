@@ -38,7 +38,20 @@ GRPO = dict(learning_rate=1e-6, per_device_train_batch_size=4, num_generations=4
 TEMPLATE = {"enable_thinking": False}
 
 
+def _flat(messages: list[dict]) -> list[dict]:
+  """Tool-call arguments as JSON strings: Arrow cannot store differently shaped argument objects in one column, and
+  the chat template renders a string argument exactly as it renders the object (tojson)."""
+  out = []
+  for m in messages:
+    if m.get("tool_calls"):
+      m = {**m, "tool_calls": [{"type": "function", "function": {"name": c["function"]["name"],
+          "arguments": json.dumps(c["function"]["arguments"], ensure_ascii=False)}} for c in m["tool_calls"]]}
+    out.append(m)
+  return out
+
+
 def _turns(messages: list[dict], trained: list[int], tools: str) -> list[dict]:
+  messages = _flat(messages)
   return [{"prompt": messages[:i], "completion": [messages[i]], "tools": tools, "chat_template_kwargs": TEMPLATE}
           for i in trained]
 
@@ -62,8 +75,8 @@ def dpo_rows(stage1: str) -> list[dict]:
       continue
     examples = sft.stage1_examples(record)
     messages, trained = examples[0]
-    rows.append({"prompt": messages[:trained[0]], "chosen": [messages[trained[0]]],
-                 "rejected": [sft._assistant(wrong["name"], wrong["arguments"])],
+    messages = _flat(messages + [sft._assistant(wrong["name"], wrong["arguments"])])
+    rows.append({"prompt": messages[:trained[0]], "chosen": [messages[trained[0]]], "rejected": [messages[-1]],
                  "tools": tools, "chat_template_kwargs": TEMPLATE})
   return rows
 
@@ -112,6 +125,7 @@ def main() -> None:
   parser.add_argument("--limit", type=int, default=0)
   parser.add_argument("--epochs", type=float)
   parser.add_argument("--max-steps", type=int, default=-1)
+  parser.add_argument("--accum", type=int, help="override gradient accumulation (smoke tests only)")
   parser.add_argument("--out", required=True)
   args = parser.parse_args()
   rng = random.Random(42)  # the recipe's seed
@@ -130,7 +144,9 @@ def main() -> None:
     trainer_class = trl.SFTTrainer
   elif args.mode == "dpo":
     rows = dpo_rows(args.stage1)
-    config = trl.DPOConfig(**common, **DPO, max_length=None, use_liger_kernel=True)
+    # Reference log-probs in a pass before training: chosen + rejected + reference together exceed 10 GB.
+    config = trl.DPOConfig(**common, **DPO, max_length=None, use_liger_kernel=True, precompute_ref_log_probs=True,
+                           precompute_ref_batch_size=1)
     trainer_class = trl.DPOTrainer
   else:
     rows = grpo_rows(args.stage1, tokenizer)
@@ -138,6 +154,8 @@ def main() -> None:
     trainer_class = trl.GRPOTrainer
   if args.epochs is not None:
     config.num_train_epochs = args.epochs
+  if args.accum:
+    config.gradient_accumulation_steps = args.accum
   rng.shuffle(rows)
   if args.limit:
     rows = rows[:args.limit]

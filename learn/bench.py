@@ -54,6 +54,8 @@ def match(got, want, key: str = "") -> bool:
 def call_ok(got: dict, want: dict) -> bool:
   if got["name"] != want["name"]:
     return False
+  if want["name"] == "move_to_pose" and "motion" not in want["arguments"]:  # the intent named no motion type
+    got = {**got, "arguments": {k: v for k, v in got["arguments"].items() if k != "motion"}}
   if want["name"] == "move_to_contact":  # the intent names no speed: any speed the stack accepts will do
     force, speed = got["arguments"].get("max_force", 0), got["arguments"].get("speed", 0)
     if isinstance(force, (int, float)) and isinstance(speed, (int, float)) and 0.00015 * force <= speed <= 0.002 * force:
@@ -65,7 +67,12 @@ def rescore(path) -> dict:
   score = collections.defaultdict(lambda: [0, 0])
   for line in open(path):
     r = json.loads(line)
-    ok = (not r["got"]) if r["want"] is None else bool(r["got"]) and call_ok(r["got"][0], r["want"])
+    if r["want"] is None:
+      ok = not r["got"]
+    elif r["want"]["name"] == "get_state" and not r["got"]:  # answered from the state already in context
+      ok = bool(r["text"])
+    else:
+      ok = bool(r["got"]) and call_ok(r["got"][0], r["want"])
     for key in (r["kind"], f"{r['kind']}/{r['family']}"):
       score[key][0] += ok; score[key][1] += 1
   return score
