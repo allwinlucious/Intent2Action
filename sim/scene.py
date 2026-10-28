@@ -11,6 +11,7 @@ from isaacsim.core.utils.stage import add_reference_to_stage
 from isaacsim.sensors.camera import Camera
 import numpy as np
 from pxr import Gf
+from pxr import PhysxSchema
 from pxr import Sdf
 from pxr import Usd
 from pxr import UsdGeom
@@ -22,6 +23,12 @@ OBJECTS_ROOT = "/World/objects"
 CATALOG_ROOT = "C:/isaac-sim-work/repo/assets/objects"
 CHARUCO_PNG = "C:/isaac-sim-work/repo/assets/calib/charuco_7x5.png"
 ROBOT_PRIM = "/World/franka"
+FINGER_PRIMS = (
+    f"{ROBOT_PRIM}/panda_leftfinger",
+    f"{ROBOT_PRIM}/panda_rightfinger",
+)
+FINGER_MATERIAL = "/World/physics_materials/finger"
+FINGER_FRICTION = (1.2, 1.0)  # static, dynamic
 D455_PRIM = "/World/d455"
 CAMERA_PRIM = "/World/d455/RSD455/Camera_Pseudo_Depth"
 CAMERA_RESOLUTION = (1280, 720)
@@ -49,6 +56,7 @@ def build(stage: Usd.Stage, scene: dict, asset_root: str) -> Camera:
       ROBOT_PRIM,
   )
   SingleXFormPrim(ROBOT_PRIM, position=np.array(scene["robot"]["position"]))
+  _add_finger_material(stage)
   UsdGeom.Xform.Define(stage, OBJECTS_ROOT)
   _add_objects(stage, scene)
 
@@ -125,6 +133,36 @@ def detach_board(stage: Usd.Stage) -> tuple[bool, str]:
     return False, "not attached"
   stage.RemovePrim(BOARD_PRIM)
   return True, "detached"
+
+
+def _add_finger_material(stage: Usd.Stage) -> None:
+  """Grip friction on the finger colliders (phase_5b.md, Addendum C.1).
+
+  PhysX gives the "max" combine mode priority over the objects' "average", so
+  finger contacts use these values while object-object contacts are unchanged.
+  """
+  material = UsdShade.Material.Define(stage, FINGER_MATERIAL)
+  friction = UsdPhysics.MaterialAPI.Apply(material.GetPrim())
+  friction.CreateStaticFrictionAttr(FINGER_FRICTION[0])
+  friction.CreateDynamicFrictionAttr(FINGER_FRICTION[1])
+  PhysxSchema.PhysxMaterialAPI.Apply(
+      material.GetPrim()
+  ).CreateFrictionCombineModeAttr("max")
+  for path in FINGER_PRIMS:
+    finger = stage.GetPrimAtPath(path)
+    UsdShade.MaterialBindingAPI.Apply(finger).Bind(
+        material, UsdShade.Tokens.strongerThanDescendants, "physics"
+    )
+    for prim in Usd.PrimRange(finger, Usd.TraverseInstanceProxies()):
+      if prim.HasAPI(UsdPhysics.CollisionAPI):
+        bound, _ = UsdShade.MaterialBindingAPI(prim).ComputeBoundMaterial(
+            "physics"
+        )
+        print(
+            f"finger collider {prim.GetPath()} physics material"
+            f" {bound.GetPath()}",
+            flush=True,
+        )
 
 
 def _add_objects(stage: Usd.Stage, scene: dict) -> None:

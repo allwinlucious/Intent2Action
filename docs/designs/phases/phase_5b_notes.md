@@ -1,17 +1,20 @@
 # Phase 5b notes
 
-**Status: stopped at Step 3 again, after Addendum B** (run 4). `insert` is
-1/10 and `jam` fails. Both causes need design decisions (see "Run 4"
-below). Addendum B items 1–3 are applied, and B1 works: ICON now settles
-in contact. Step 4 and B4 were not done: `robot_platform.md` (CUJ 6, G8)
-is untouched, and the phase 3/4/5c checks were not rerun with the new
-velocity source and friction (B4 says to rerun them after the check
-passes). Decisions 1–8, Steps 1–2 and Addendum A are implemented.
+**Status: stopped at Addendum C.1** (run 5). The grip changes are applied
+and take effect in Isaac and ICON. The rerun of `phase5c_check.py` that
+C.1 requires fails: cube 0/10 and peg 0/10. The new grasp depth puts the
+hand in collision with the table (cube) or with the peg itself, so no
+grasp is reachable. A depth rule is a design decision (see "Run 5"
+below), so the C.2 sweep, the full `phase5b_check.py`, C.3 and Step 4
+were not run. `robot_platform.md` (CUJ 6, G8) is untouched. Decisions
+1–8, Steps 1–2 and Addenda A and B are implemented.
 
 ## Check results
 
 | Check | Result | Log |
 |-------|--------|-----|
+| `phase5c_check.py` after C.1 | planner_up PASS, cube FAIL 0/10, peg FAIL 0/10, too_wide PASS, logs PASS, errors PASS | `logs/phase5b_addC_phase5c_check.log` (Isaac and container: `logs/phase5b_addC_phase5c_{isaac,container}.log`) |
+| `pytest -q tests/` after C.1 | 78 passed | |
 | `phase5b_check.py` run 4 (Addendum B) | contact_table PASS, no_contact PASS, bad_speed PASS, insert FAIL 1/10, jam FAIL, logs PASS | `logs/phase5b_check_run4.log` |
 | `container/build_intrinsic.sh --test` (B1) | build OK; `ros2_hwm_logic_test` PASSED (3 new `VelocityEstimator` tests) | `logs/phase5b_addB_build.log` |
 | `pytest -q tests/` after run 4 | 77 passed | |
@@ -34,6 +37,70 @@ Fixes made between run 1 and run 2 (implementation bugs, not design):
    condition to be false, so the abort wins.
 3. Sequences that ICON ended had no `force` log line. `run_force` now
    logs one with `force_along_push_n=nan` before re-raising.
+
+## Run 5 (Addendum C)
+
+Applied (C.1, all three items):
+- `sim/scene.py`: `/World/physics_materials/finger`, friction 1.2 static
+  and 1.0 dynamic, `frictionCombineMode` "max". It is bound with purpose
+  "physics" and `strongerThanDescendants` to `panda_leftfinger` and
+  `panda_rightfinger`. Isaac logs the material each finger collider
+  resolves to, and the run shows it on both colliders
+  (`.../panda_leftfinger/geometry/panda_leftfinger`, and the same for the
+  right finger).
+- `container/config/icon.txtpb`: gripper `default_force` 60. `ros2_hwm`
+  logs `gripper command width=0.075 force=60`.
+- `container/services/robot/grasp.py`: `MAX_DEPTH_M` 0.04, so
+  d = min(0.04, extent along the approach − 0.01). `tests/test_plan_grasp.py`
+  now expects 0.04 for the cube, 0.04 for a box 0.08 m tall (the cap) and
+  0.015 for a box 0.025 m tall, and the side grasp 0.015 past the cube's
+  centre line.
+- Image rebuilt (`logs/phase5b_addC_docker_build.log`).
+
+### Finding 13 (for the lead): the new depth makes every grasp unreachable
+
+`phase5c_check.py`: `PlanGrasp` returns OK for every trial (red_cube about
+0.9 s, peg about 2.2 s). The check's `MoveToPose` to the deepened grasp
+then fails every time with `NOT_FOUND: planning failed: IK could not find
+a collision free configuration`. All 4 IK configurations reported collide:
+- red_cube (0.05 m, d = 0.04): `franka_hand.panda_hand` against
+  `table.base_link`, 3 collisions per configuration. The TCP is 1 cm above
+  the table. At d = 0.02 (TCP 3 cm above the table) 5c passed.
+- peg (0.08 m tall, top-down, d = 0.04): `franka_hand.panda_hand`
+  against `peg.base_link`, 1 collision per configuration. The peg top is
+  40 mm above the TCP. In run 4 (finding 10) the peg top reached the hand
+  when it was about 35 mm above the TCP: the TCP-to-peg-bottom distance
+  shrank from 59 mm to 45 mm before the force reached 13 N. So at this
+  depth the peg top is inside the hand.
+
+`PlanGrasp` does not catch this. Addendum B.2's collision check uses the
+planner's IK joints for the grasp before it is deepened. `MoveToPose`
+solves IK for the deepened pose and checks that.
+
+The C.2 sweep was not started because C.1's precondition failed. The
+tooling for it is ready:
+- `tests/e2e/phase5b_check.py --sweep` runs `jam`, then 5 `insert`
+  trials that need 4 to pass.
+- Every force call prints the peak `GetWrench` norm and the 10th/90th
+  percentile of the second half of the samples. These are the two levels
+  of an alternating wrench.
+- `sim/tools/build_catalog.py` has `COMPLIANT_DAMPING` (600) and prints
+  it per object.
+- The admittance inertia is `ADMITTANCE_INERTIA` in
+  `container/services/robot/force.py`, still 2 kg. Changing it needs an
+  image rebuild, which takes about 2 s since only the service layers change.
+
+Options (not applied), choose one:
+- Revert the depth to 0.02 and keep the finger friction and the 60 N grip.
+  Then rerun 5c and the sweep. Whether friction and force alone stop the
+  pivot is unknown.
+- A depth limited by hand clearance and table clearance, for example
+  d = min(0.03, extent − 0.02). That gives cube 0.03 (TCP 2 cm above the
+  table) and peg 0.03 (peg top about 5 mm below the hand by the run 4
+  estimate). Neither is verified against MoveIt's padding.
+- Let the peg grasp touch the hand on purpose (finding 10's option): the
+  planner would have to allow the target's contact with the hand, which
+  changes phase 5c decision 6.
 
 ## Run 4 (Addendum B)
 
@@ -420,6 +487,12 @@ Modified:
 - `tools/build_catalog_meshes.py`, `assets/objects/{peg,hole_block}/object.yaml`:
   friction keys (B2); `sim/tools/build_catalog.py` reads them
 - `assets/objects/{peg,hole_block}/model.usd`: regenerated (B2)
+- Run 5 (C.1): `sim/scene.py` (finger material), `container/config/icon.txtpb`
+  (`default_force` 60), `container/services/robot/grasp.py` (`MAX_DEPTH_M`
+  0.04), `tests/test_plan_grasp.py` (depth expectations)
+- Run 5 (C.2 tooling, unused): `tests/e2e/phase5b_check.py` (`--sweep`,
+  wrench percentiles), `sim/tools/build_catalog.py` (`COMPLIANT_DAMPING`
+  constant, still 600; USDs not regenerated)
 
 Regenerated `gen/`:
 - `intrinsic/icon/actions/{force_primitive,cartesian_admittance_action,cartesian_impedance,cartesian_impedance_reference_generators}_pb2*`

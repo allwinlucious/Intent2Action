@@ -42,7 +42,7 @@ realtime_control_config {
           default_release_width: 0.075 # Isaac's open fingers reach 0.0762
           min_width: 0.0
           max_width: 0.08
-          default_force: 30.0
+          default_force: 60.0
           min_force: 0.0
           max_force: 70.0
           default_speed: 0.1

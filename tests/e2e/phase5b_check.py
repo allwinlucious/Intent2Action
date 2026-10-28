@@ -2,7 +2,8 @@
 
 Syncs the repository to Windows, starts sim/run_scene.py and the container
 (ROBOT_BACKEND=isaac, container/run.sh), and prints PASS/FAIL per check, in order:
-  .venv/bin/python tests/e2e/phase5b_check.py
+  .venv/bin/python tests/e2e/phase5b_check.py [--sweep]
+--sweep runs only `jam` and 5 `insert` trials (need 4), one combination of the Addendum C.2 sweep.
 ResetScene runs before every check and every insert trial. Stops the container and Isaac at the end.
 """
 
@@ -52,6 +53,7 @@ MIN_DEPTH_M = 0.025
 TOP_FACE_TOLERANCE_M = 0.003
 PAYLOAD_KG = 0.05
 TRIALS, MIN_SUCCESSES = 10, 9
+SWEEP_TRIALS, SWEEP_MIN_SUCCESSES = 5, 4  # Addendum C.2
 FORCE_METHODS = ("MoveToContact", "MoveCompliant")
 TIMESTAMP = re.compile(r"\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d{3} ")
 TIMESTAMP_LEN = 23
@@ -60,10 +62,10 @@ _log_start = [""]  # timestamp of the last robot_service line before the checks
 
 
 class _PeakForce:
-  """Largest GetWrench force norm seen while the block runs (polled every ~10 ms wall; may miss short spikes)."""
+  """GetWrench force norms while the block runs (polled every ~10 ms wall; may miss short spikes)."""
 
   def __enter__(self):
-    self.peak, self._done = 0.0, threading.Event()
+    self.norms, self._done = [], threading.Event()
     self._thread = threading.Thread(target=self._poll, daemon=True)
     self._thread.start()
     return self
@@ -71,11 +73,18 @@ class _PeakForce:
   def _poll(self) -> None:
     while not self._done.wait(0.01):
       w = cuj._call(cuj._robot, "GetWrench")
-      self.peak = max(self.peak, float(np.linalg.norm([w.fx, w.fy, w.fz])))
+      self.norms.append(float(np.linalg.norm([w.fx, w.fy, w.fz])))
 
   def __exit__(self, *_):
     self._done.set()
     self._thread.join()
+
+  def summary(self) -> str:
+    """Peak, and the 10th/90th percentiles of the second half (the two levels of an alternating wrench)."""
+    if not self.norms:
+      return "no GetWrench samples"
+    low, high = np.percentile(self.norms[len(self.norms) // 2:], [10, 90])
+    return f"peak GetWrench {max(self.norms):.1f} N, second half p10/p90 {low:.1f}/{high:.1f} N"
 
 
 class _OperationError(grpc.RpcError):
@@ -113,13 +122,13 @@ def _force(method: str, **fields) -> str:
   except grpc.RpcError as error:
     # INVALID_ARGUMENT and FAILED_PRECONDITION are replies before any operation starts.
     _calls["op"] += error.code() not in (grpc.StatusCode.INVALID_ARGUMENT, grpc.StatusCode.FAILED_PRECONDITION)
-    print(f"    {method} -> {cuj._code(error)}; peak GetWrench {peak.peak:.1f} N", flush=True)
+    print(f"    {method} -> {cuj._code(error)}; {peak.summary()}", flush=True)
     raise
   _calls["op"] += 1
   cuj._done(operation, api.MotionResult)
   info = api.OperationInfo()
   operation.metadata.Unpack(info)
-  print(f"    {method} -> OK {info.detail!r}; peak GetWrench {peak.peak:.1f} N", flush=True)
+  print(f"    {method} -> OK {info.detail!r}; {peak.summary()}", flush=True)
   return info.detail
 
 
@@ -252,18 +261,18 @@ def _insert_trial() -> str:
   return "; ".join(facts)
 
 
-def check_insert() -> str:
+def check_insert(trials: int = TRIALS, min_successes: int = MIN_SUCCESSES) -> str:
   successes = 0
-  for i in range(TRIALS):
+  for i in range(trials):
     try:
       detail = _insert_trial()
       successes += 1
       print(f"  insert trial {i + 1}: ok, {detail}", flush=True)
     except (grpc.RpcError, RuntimeError) as error:
       print(f"  insert trial {i + 1}: FAILED {p1._describe(error)}", flush=True)
-  if successes < MIN_SUCCESSES:
-    raise RuntimeError(f"{successes}/{TRIALS} inserted (need {MIN_SUCCESSES})")
-  return f"{successes}/{TRIALS} inserted >= {MIN_DEPTH_M * 1e3:.0f} mm"
+  if successes < min_successes:
+    raise RuntimeError(f"{successes}/{trials} inserted (need {min_successes})")
+  return f"{successes}/{trials} inserted >= {MIN_DEPTH_M * 1e3:.0f} mm"
 
 
 def check_jam() -> str:
@@ -301,6 +310,7 @@ def check_logs() -> str:
 
 
 def main() -> int:
+  sweep = "--sweep" in sys.argv[1:]
   start = time.monotonic()
   harness.sync_isaac()
   hwm.CONTAINER_LOG = CONTAINER_LOG
@@ -314,14 +324,17 @@ def main() -> int:
     cuj._wait_ready()
     print(f"robot_service ready after {time.monotonic() - start:.1f} s", flush=True)
     _log_start[0] = _log_lines()[-1][:TIMESTAMP_LEN]
-    checks = (
+    checks = ((
+        ("jam", check_jam),
+        ("insert", lambda: check_insert(SWEEP_TRIALS, SWEEP_MIN_SUCCESSES)),
+    ) if sweep else (
         ("contact_table", check_contact_table),
         ("no_contact", check_no_contact),
         ("bad_speed", check_bad_speed),
         ("insert", check_insert),
         ("jam", check_jam),
         ("logs", check_logs),
-    )
+    ))
     results = [hwm._run_check(name, check) for name, check in checks]
   except Exception as error:  # pylint: disable=broad-except
     print(f"FAIL setup: {p1._describe(error)}", flush=True)

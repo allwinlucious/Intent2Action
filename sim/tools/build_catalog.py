@@ -31,6 +31,7 @@ import trimesh  # noqa: E402  pylint: disable=g-import-not-at-top
 import yaml  # noqa: E402  pylint: disable=g-import-not-at-top
 
 OBJECTS_DIR = Path(r"C:\isaac-sim-work\repo\assets\objects")
+COMPLIANT_DAMPING = 600.0  # N·s/m
 
 
 def write_model(directory: Path) -> None:
@@ -72,7 +73,7 @@ def write_model(directory: Path) -> None:
   )
   physx_material = PhysxSchema.PhysxMaterialAPI.Apply(material.GetPrim())
   physx_material.CreateCompliantContactStiffnessAttr(60000.0)
-  physx_material.CreateCompliantContactDampingAttr(600.0)
+  physx_material.CreateCompliantContactDampingAttr(COMPLIANT_DAMPING)
   UsdShade.MaterialBindingAPI.Apply(geom.GetPrim()).Bind(
       material, UsdShade.Tokens.weakerThanDescendants, "physics"
   )
@@ -83,7 +84,8 @@ def write_model(directory: Path) -> None:
   stage.GetRootLayer().Save()
   print(
       f"CATALOG {directory.name}: {len(mesh.faces)} faces,"
-      f" static {description['static']}, collision {description['collision']}",
+      f" static {description['static']}, collision {description['collision']},"
+      f" compliant damping {COMPLIANT_DAMPING}",
       flush=True,
   )
 

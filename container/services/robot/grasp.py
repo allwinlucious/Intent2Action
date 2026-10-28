@@ -3,7 +3,7 @@
 robot_service applies `world`'s catalog objects to MoveIt's planning scene (/apply_planning_scene, in
 `base_link`), asks
 /grasp_planning/plan_grasps for box grasps of the target, keeps those the 0.075 m gripper can close on and
-whose grasp and pregrasp joints are collision-free in Intrinsic's world (Addendum B.2), moves the grasp 2 cm deeper so the finger pads overlap the object, and returns the best one in the base frame
+whose grasp and pregrasp joints are collision-free in Intrinsic's world (Addendum B.2), moves the grasp up to 4 cm deeper so the finger pads overlap the object, and returns the best one in the base frame
 (= world; the Franka stands at the origin).
 
 The helpers below need no ROS; GraspPlanner imports rclpy and the MoveIt messages when it is created.
@@ -29,7 +29,7 @@ CATALOG_DIR = Path("/opt/app/assets/objects")
 CATALOG_KEY = "catalog"  # world user_data written by scene_sync (decision 5)
 GRIPPER_OPENING_M = 0.075  # ICON's release width
 WIDTH_TOLERANCE_M = 1e-9  # rotation round-off; an extent of exactly the opening is kept
-MAX_DEPTH_M = 0.02
+MAX_DEPTH_M = 0.04  # phase_5b.md Addendum C.1: a shorter lever arm from the fingers to the object's far end
 DEPTH_MARGIN_M = 0.01
 TOO_WIDE = f"object wider than the gripper opening ({GRIPPER_OPENING_M} m) in every horizontal direction"
 NOT_COLLISION_FREE = "no grasp is collision-free in the robot's world model"

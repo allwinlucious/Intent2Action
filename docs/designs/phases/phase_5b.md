@@ -220,3 +220,11 @@ Then Steps 3–4.
     and alternating wrench, insert depth) in `phase_5b_notes.md`. If none
     qualifies, stop and record.
 3.  Then Step 4 and the phase 3, 4, 5c regression checks.
+
+## Addendum D (after run 5)
+
+Revert the grasp depth to phase 5c's rule `d = min(0.02, extent along the
+approach − 0.01)` (`MAX_DEPTH_M` back to 0.02; restore the unit test
+expectations). Keep the finger friction material and the 60 N grasp
+force from Addendum C.1. Then rerun `phase5c_check.py` (≥ 9/10 each) and
+continue with Addendum C.2 (the sweep), C.3 and Step 4 unchanged.
