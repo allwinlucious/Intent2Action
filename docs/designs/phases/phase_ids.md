@@ -116,3 +116,89 @@ No `git commit`; Docker via `sg docker -c`; no `pkill -f`; Windows
 processes via `taskkill.exe /PID`; `~/intrinsic-core` untouched except
 the `ext` symlink; Bazel only via `container/build_intrinsic.sh`.
 Observability applies. If a decision is impossible, stop and record it.
+
+## Addendum A (stage-9 review; these override the sections above where they differ)
+
+1.  **ID draw:** a pure class `IdAllocator` in `container/services/scene_ids.py`
+    (Create): `draw(prims) -> dict[prim, id]` takes k from 10–99 without
+    replacement, **excluding every k used in the previous map**, so no
+    object keeps its ID across a reset. Unit tests in
+    `tests/test_scene_ids.py` (Create): uniqueness within a map,
+    disjointness from the previous map over 50 draws, format `obj_\d{2}`.
+2.  **Done criteria, exact:** every `WorldObject.id` matches
+    `^obj_\d{2}$` and none equals a key of `sim/scenes/default.yaml`;
+    `category` may (e.g. `plate`). IDs are unique within a scene, and
+    after each of 5 resets no object keeps its previous ID.
+3.  **Key spaces in `scene_sync`:** every internal structure (`known`,
+    `last_seen`, `attached`, `catalogs`, `ros.poses`) stays keyed by
+    **Isaac prim name** (= `/tf` frame). The ID is used only at two
+    boundaries: (a) the world service: objects are created, updated and
+    deleted under name = ID, with `user_data["prim"]` = prim name;
+    `_delete_stale` compares `user_data["prim"]`, not the world name;
+    (b) SimLink: request fields carrying an object are IDs, translated to
+    the prim via the map (unknown → `NOT_FOUND` with the standard
+    message); `GetTruePose` also accepts the pass-through frames
+    `panda_hand` and `Camera_Pseudo_Depth`; `calib_board` is accepted by
+    name in `SetAttached`, `Delete` and `GetTruePose` (internal, never
+    listed).
+4.  **Reset:** `Sync` has a lock held by the sync thread for each `/tf`
+    processing pass. `SimLink.Reset` (also when called directly, e.g.
+    CUJ 5) takes the lock, calls `/sim/reset`, waits for the new epoch,
+    deletes every object with `user_data["source"] == "ground_truth"` from
+    both worlds, clears the prim structures, draws a new map, releases the
+    lock and returns. The sync thread re-creates objects from the next
+    `/tf`. `robot_service.ResetScene` then waits (timeout 10 s) until
+    every ID in `SimLink.ListTrue` exists in `world` (`GROUND_TRUTH`) or in
+    `sim_world` (`PERCEPTION`).
+5.  **Start-up with persisted worlds** (D10: IDs persist while an object
+    stays put): at start-up `scene_sync` reads existing ground-truth
+    objects in `world` and adopts their ID for their `user_data["prim"]`;
+    only prims without an ID get a fresh draw. A container restart
+    therefore keeps IDs; only resets change them.
+6.  **Errors:** one helper `unknown_object(id)` in
+    `container/services/robot/__init__.py` builds `NOT_FOUND` "no object
+    with id X; list_objects shows the current ids", used by `World.get`
+    and `grasp.py`. `franka`, `franka_hand`, `d455` and `calib_board`
+    passed as an object argument give the same `NOT_FOUND`.
+7.  **Protos in full** (old fields `reserved`):
+    *   `WorldObject { string id = 1; string source = 2; Pose pose = 3; string attached_to = 4; string category = 5; string color = 6; double size_x = 7; double size_y = 8; double size_z = 9; }`
+        — comment: "`pose` is the bottom centre of the object; its
+        bounding box (`size_*`, m) extends upward from it in the object's
+        frame".
+    *   `ObjectRequest { string id = 1; }`; `PlanGraspRequest { string object_id = 1; }`.
+    *   `DetectObjectsRequest { reserved 1; repeated string categories = 3; bool wait = 2; }`;
+        `Detection { string object_id = 1; Pose pose = 2; double score = 3; string category = 4; }`.
+    *   `AddObjectRequest { string catalog = 1; reserved 2; Pose pose = 3; }`,
+        `AddObjectResponse { string id = 1; }`; `GetTruePoseRequest { string frame = 1; }`;
+        `TrueObject { string id = 1; string catalog = 2; string prim = 3; Pose pose = 4; }`,
+        `TrueObjects { repeated TrueObject objects = 1; }`.
+    *   SimLink: `SpawnRequest { string catalog = 1; reserved 2; robot.v1.Pose pose = 3; }`,
+        `SpawnResponse { string id = 1; }`, `IdRequest { string id = 1; }`
+        (replaces `NameRequest` for `Delete`), `SetAttachedRequest { string id = 1; bool attached = 2; }`,
+        `ListTrue(google.protobuf.Empty) returns (robot.v1.TrueObjects)`.
+8.  **Terms:** `category` and `color` (a word) in the API and docs;
+    catalog `object.yaml` keeps `color` (RGB) and gains `category` and
+    `color_name`. Add the two keys by editing the 7 `object.yaml` files
+    and `tools/build_catalog_meshes.py` so a rebuild writes them; **do not
+    regenerate meshes**. `scene_sync` reads `object.yaml` for them.
+9.  **Tests:** the helper is `ids(sim) -> dict[str, str]` (prim name →
+    ID, from `ListTrueObjects`) in `tests/e2e/phase3_cuj_check.py` (next
+    to `_sim`); every check calls it after each reset and container
+    restart. Files to modify: `phase3_cuj_check.py` (incl. `check_misc`:
+    every listed object has an `obj_\d{2}` ID and the default prims map
+    to listed IDs), `phase3_scene_check.py` (compare world objects with
+    `/tf` through `user_data["prim"]`; the spawned second cube is found
+    by the ID `Spawn` returns), `phase4_check.py`, `phase5b_check.py`,
+    `phase5c_check.py` (incl. its `GRASP_PLANNER=off` restart),
+    `phase6_check.py`, `phase6_cuj1.py`. `tests/e2e/ids_check.py`
+    (Create) calls `PlanGrasp`, `AttachObject`, `DetachObject`,
+    `RemoveObject` and `GetTruePose` with `obj_00` (never drawn: k ≥ 10)
+    and expects the `NOT_FOUND` message; runs 5 resets for criterion 2;
+    checks `AddObject` returns an ID that appears in `list_objects`.
+10. **Docs:** `robot_platform.md`: RobotService table rows for objects,
+    the SimService table, "Ground truth and belief", and D10's wording
+    (`category`, `color`, `obj_<k>`); `model_learning.md`: remove
+    `find_objects` (lines on object identity and phase L−1).
+    `mcp_server/server.py` (Modify): the instructions' pick sequence
+    becomes "`list_objects`, choose the id whose category, color, size and
+    pose match the request, then `plan_grasp(object_id)` → …".
