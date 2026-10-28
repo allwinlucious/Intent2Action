@@ -171,3 +171,27 @@ Bazel only via `container/build_intrinsic.sh`; Observability). Files:
 4.  **Checks poll** (finding 5): long calls in `phase5b_check.py` use
     `wait=false` + `WaitOperation` (timeout 120 s).
 Then Steps 3–4.
+
+## Addendum B (after run 3, phase_5b_notes.md findings 6–9)
+
+1.  **Joint velocity from positions** (finding: phantom joint-7 velocity
+    under contact while the position holds to 1e-5 rad): `ext/ros2_hwm`
+    (Modify) writes `joint_velocity_state` = finite difference of
+    consecutive `/joint_states` positions over their stamp difference,
+    low-pass filtered (v ← 0.5·v + 0.5·v_fd); Isaac's reported velocity is
+    no longer used. Reset the filter on an epoch change. Logic in
+    `ros2_hwm_logic` with a unit test (constant position → 0; ramp →
+    slope). Rebuild with `container/build_intrinsic.sh` (+ `--test`).
+2.  **Search geometry:** sliding needs offset > μ·Δz regardless of
+    stiffness. `MoveCompliant` search target = hole axis in x/y, **0.002 m**
+    below the contact TCP z, stiffness **2000**, max_force 30 (normal
+    ≈ 4 N, lateral ≈ 6 N at 3 mm). `peg` and `hole_block` friction
+    static/dynamic **0.3/0.25** (`sim/tools/build_catalog.py` per-object
+    material from `object.yaml` keys `friction_static`, `friction_dynamic`;
+    default 0.5/0.4 for others) → stall offset ≈ 0.6 mm < 1 mm clearance.
+    Then `MoveToContact((0,0,−1), 15, 0.01)` to the hole bottom as before.
+3.  **`jam`:** `MoveCompliant(target 0.03 m below contact, stiffness 1000,
+    max_force 60)` (spring 30 N plus the measured overshoot ≈ 43 N stays
+    below 60) → `ABORTED` "settled before reaching the target".
+4.  After the check passes, rerun the phase 3, 4 and 5c checks (the new
+    contact materials and velocity source affect them) and do Step 4.

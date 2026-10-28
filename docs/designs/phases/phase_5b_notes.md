@@ -1,16 +1,19 @@
 # Phase 5b notes
 
-**Status: stopped at Step 3** (plan: "If `insert` is below 9/10, record per
-trial … and stop (the lead decides parameters)"). `insert` was 0/10.
-`contact_table` and `jam` also fail, for physics and parameter reasons
-rather than wiring (see below). Step 4 was not done, so decision 9
-(`robot_platform.md`) is untouched. Decisions 1–8 and Steps 1–2 are
-implemented.
+**Status: stopped at Step 3 again, after Addendum A** (run 3). `insert` is
+0/10 and `jam` fails, and the causes need design decisions (see "Run 3"
+below). Addendum A items 1–4 are applied. Compliant contact removed the
+impact spikes, and `contact_table` now passes. Step 4 was not done:
+`robot_platform.md` (CUJ 6, G8) is untouched, and the phase 3/4/5c checks
+were not rerun with the new catalog materials. Decisions 1–8 and Steps 1–2
+are implemented.
 
 ## Check results
 
 | Check | Result | Log |
 |-------|--------|-----|
+| `phase5b_check.py` run 3 (Addendum A) | contact_table PASS, no_contact PASS, bad_speed PASS, insert FAIL 0/10, jam FAIL, logs FAIL (check bug, fixed after the run) | `logs/phase5b_check_run3.log` |
+| `pytest -q tests/` after run 3 | 77 passed | |
 | `phase5b_check.py` run 2 (final code) | contact_table FAIL, no_contact PASS, bad_speed PASS, insert FAIL 0/10, jam FAIL, logs PASS | `logs/phase5b_check_run2.log` |
 | `phase5b_check.py` run 1 (before the three fixes below) | contact_table, insert 0/10, jam, logs FAIL | `logs/phase5b_check_run1.log` |
 | phase 3 hwm / scene / cuj, phase 4, phase 5c (with phase 5b code) | all PASS on first run | `logs/phase5b_regress_*.log` |
@@ -28,6 +31,127 @@ Fixes made between run 1 and run 2 (implementation bugs, not design):
    condition to be false, so the abort wins.
 3. Sequences that ICON ended had no `force` log line. `run_force` now
    logs one with `force_along_push_n=nan` before re-raising.
+
+## Run 3 (Addendum A)
+
+Applied:
+- **A1:** `sim/tools/build_catalog.py` binds a physics material
+  (`/Object/physics_material`) to every catalog mesh: `compliantContactStiffness`
+  60000, `compliantContactDamping` 600, and friction 0.5 static, 0.4 dynamic.
+  All 7 `model.usd` files were regenerated (`logs/phase5b_build_catalog_a.log`).
+  This includes `table`, which is a catalog object.
+- **A2:** the insert trial is now: `MoveToContact` on the face, then
+  `MoveCompliant` to the axis 5 mm lower (1000 N/m, 30 N), then
+  `MoveToContact` to the hole bottom. The face-contact force (12–18 N) and
+  top-face checks are kept from the original `insert` row.
+- **A3:** `jam` runs `MoveToContact(10 N)`, then `MoveCompliant` 3 cm below
+  the contact pose (1000 N/m, 40 N).
+- **A4:** force calls use `wait=false` plus repeated `WaitOperation`, 120 s
+  wall in total. This worked: operations of 62 s sim (about 93 s wall)
+  ended with their own status.
+
+### Insert, run 3, per trial
+
+Columns: start offset = true peg position minus the hole axis before
+contact. Final force = along the push, from the operation message.
+Peak = largest `GetWrench` norm (10 ms sampler).
+
+| # | Start off axis (mm), height | MoveToContact (face) | Final force / peak (N) | x/y off axis at contact (mm) | MoveCompliant (search) | Depth |
+|---|---|---|---|---|---|---|
+| 1 | +2.66, −0.27; 19.2 mm | DEADLINE_EXCEEDED at 62.08 s sim | 15.7 / 16.4 | – | not run | on the face |
+| 2 | +2.98, −0.20; 19.6 mm | DEADLINE_EXCEEDED 62.07 s | 13.7 / 14.3 | – | not run | on the face |
+| 3 | +3.06, −0.25; 19.6 mm | DEADLINE_EXCEEDED 62.08 s | 13.7 / 14.2 | – | not run | on the face |
+| 4 | +2.60, −0.30; 19.1 mm | DEADLINE_EXCEEDED 62.06 s | 13.5 / 14.2 | – | not run | on the face |
+| 5 | +3.30, −0.23; 19.7 mm | DEADLINE_EXCEEDED 62.08 s | 14.8 / 15.9 | – | not run | on the face |
+| 6 | +2.91, −0.20; 19.5 mm | DEADLINE_EXCEEDED 62.08 s | 13.8 / 14.0 | – | not run | on the face |
+| 7 | +2.61, −0.29; 19.1 mm | DEADLINE_EXCEEDED 62.08 s | 13.7 / 14.1 | – | not run | on the face |
+| 8 | +2.84, −0.05; 19.7 mm | done 6.96 s | 14.3 (GetWrench 14.44) / 14.7 | +3.00, +0.21 (peg bottom z 0.0500) | DEADLINE_EXCEEDED at 32.05 s sim, 7.5 N, peak 14.8 | on the face |
+| 9 | +2.64, −0.24; 19.2 mm | DEADLINE_EXCEEDED 62.08 s | 13.7 / 15.1 | about +2.7, −0.4 (probe; z 0.0495) | not run | 0.5 mm |
+| 10 | +2.96, −0.16; 19.6 mm | DEADLINE_EXCEEDED 62.08 s | 13.9 / 14.3 | about +3.0, −0.4 (probe; z 0.0496) | not run | 0.4 mm |
+
+The check printed no final depth for failed trials; this is fixed now.
+For trials 9–10, a read-only probe (ICON `GetStatus` and `GetTruePose`
+every 0.5 s) recorded the peg on the face, and the others ended at the
+same stage. No trial faulted ICON. The second `MoveToContact` was never
+reached.
+
+`jam`: `MoveToContact(10 N)` done after 7.26 s, 9.7 N. `MoveCompliant`
+returned ABORTED "force limit reached" after 0.09 s (2.09 s including the
+stop wait), with a peak of 40.1 N.
+
+`logs` showed 0 lines: a check bug. The `GetWrench` sampler logs about 100
+RPC lines a second, which rotated `robot_service.log` (10 MB) during the
+run, and the check counted lines from an index into the old file. The check
+now reads the rotated files too and filters by timestamp. This is untested
+against a live run.
+
+### Findings 6–9 (for the lead)
+
+6. **Compliant contact works.** Peaks are 14–16 N where run 2 saw 40–136 N.
+   `contact_table` passes: 15.04 N, done after 14.41 s.
+7. **ICON never sees the arm as settled when the peg is pressed on the
+   face.** This causes the 8/10 face timeouts and probably the search
+   timeout. During the stall the probe read:
+   - arm joint positions constant to 1e-5 rad, the true peg pose constant
+     to 0.1 mm, and commanded velocities 0;
+   - joint 7 (coaxial with the peg) sensed velocity a steady 0.060–0.063
+     rad/s, and joints 2–6 between 0.001 and 0.005 rad/s.
+
+   At 0.06 rad/s, joint 7 would turn 0.36 rad in 6 s, yet its position did
+   not change. So the reported velocity is not real motion; it is most
+   likely a PhysX solver residual with the stock Franka's iteration counts,
+   but that is not verified. ICON's `IsSettledCriterion`
+   (`is_settled_criterion.cc`) uses the sensed joint velocities and
+   settles only when their norm stays below about 0.026 rad/s. So the
+   final `intrinsic.stop` never reports `is_settled`, and decision 4's
+   success condition never fires. Without the peg (`contact_table`) it
+   settled after roughly 8 s (14.41 s in total, for a 3 cm approach at
+   1 cm/s and a stabilize phase of at most 2 s), so run 2's 7–24 s durations were probably the
+   same effect, only milder. `intrinsic.settled_for_seconds` (decision 5's
+   jam test) probably comes from the same signal; that was not checked.
+8. **The search cannot reach the hole with an isotropic spring.** The
+   target is d off axis and h = 5 mm below the face. The normal force is
+   about k·h and the lateral pull about k·d, so the peg slides only while
+   d > μ·h: 2.5 mm static, 2.0 mm dynamic. This holds for any k. The peg
+   must get within the 1 mm clearance to drop in. In trial 8 it stayed at
+   +3.00 mm (3 N pull against 2.5 N of static friction). Even without
+   finding 7, the search would stall about 2–2.5 mm off axis, and the jam
+   abort it would then need also depends on settling.
+9. **Jam overshoot.** The admittance is 2 kg with critical damping for
+   1000 N/m (about 89 N·s/m), and it acts in series with the 60 kN/m
+   contact. That gives a damping ratio of about 0.13 and about 65 %
+   overshoot. Stepping from 10 N to the 30 N spring force predicts a
+   peak near 43 N, which is above the 40 N `max_force`. Measured: 40.1 N,
+   aborted as "force limit reached".
+
+Options, one decision per finding (not applied):
+- (7) Choose one:
+  - Sim: raise the Franka articulation's `solverVelocityIterationCount`
+    (`PhysxArticulationAPI`), or publish joint velocities as
+    differences of joint positions in `sim/graphs.py`. Either needs the
+    phase 3/4/5c checks rerun.
+  - Server: end `MoveToContact` when the stop is settled *or* has run
+    for about 0.5 s, and detect the jam from sensed TCP motion
+    (< 0.5 mm in 1 s) instead of `settled_for_seconds`. This changes
+    decisions 4–5 and needs an image rebuild.
+- (8) Choose one:
+  - Put the search target past the axis, for example 3 mm beyond it, so
+    the pull stays ≥ k·3 mm at the hole edge.
+  - Use h ≤ 1.5 mm, so that μ·h < 0.8 mm.
+  - Use anisotropic stiffness (lateral much stiffer than normal). This
+    changes the `MoveCompliant` API or decision 2.
+  - Use a scripted lateral search with `MoveToPose` steps.
+- (9) Choose one:
+  - Raise the jam `max_force` to about 60 N.
+  - Lower the stiffness to about 500 N/m (spring about 15 N).
+  - Set admittance damping for the contact, about 500 N·s/m, instead of
+    "unset (critical)". This changes decision 2.
+
+### Probe
+
+`/tmp/probe5b.py` (not in the repo) read ICON `GetStatus` (port 18003)
+and `SimService.GetTruePose` while the check ran. It is read-only; the
+check owned Isaac and the container.
 
 ## Insert, run 2, per trial
 
@@ -150,8 +274,11 @@ Modified:
 - `container/services/robot_service.py`: `flange_t_tcp`, `run_force`,
   `MoveToContact`, `MoveCompliant`
 - `robot_service/robot_service.proto`: comments
-- `sim/tools/build_catalog.py`: `PhysxCollisionAPI` offsets
-- `assets/objects/*/model.usd`: all 7 regenerated
+- `sim/tools/build_catalog.py`: `PhysxCollisionAPI` offsets; compliant
+  physics material (Addendum A1)
+- `assets/objects/*/model.usd`: all 7 regenerated (again for A1)
+- `tests/e2e/phase5b_check.py` (run 3): Addendum A2–A4, failed trials
+  report depth, `logs` reads the rotated log files
 
 Regenerated `gen/`:
 - `intrinsic/icon/actions/{force_primitive,cartesian_admittance_action,cartesian_impedance,cartesian_impedance_reference_generators}_pb2*`
@@ -160,6 +287,6 @@ Regenerated `gen/`:
 - `robot_service/robot_service_pb2_grpc.py` (docstrings only)
 
 Other logs:
-- `logs/phase5b_build_catalog.log`
+- `logs/phase5b_build_catalog.log`, `logs/phase5b_build_catalog_a.log`
 - `logs/phase5b_docker_build.log`
 - `logs/phase5b_robot_service.log`

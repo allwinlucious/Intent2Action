@@ -13,6 +13,7 @@ import threading
 import time
 
 import grpc
+from google.protobuf import duration_pb2
 import numpy as np
 
 import harness
@@ -20,6 +21,7 @@ import phase3_hwm_check as hwm  # sets sys.path for gen/ and ICON's Python
 import phase1_check as p1
 import phase3_cuj_check as cuj
 import phase5c_check as p5c
+from google.longrunning import operations_pb2  # noqa: E402
 from robot_service import robot_service_pb2 as api  # noqa: E402
 
 ISAAC_LOG = harness.LOG_DIR / "phase5b_isaac.log"
@@ -31,9 +33,13 @@ TABLE_XY = (0.45, -0.05)
 CONTACT_START_Z = 0.03
 NO_CONTACT_Z = 0.30
 JAM_START_Z = 0.02
-JAM_TARGET_Z = -0.03  # 3 cm below the table top (z = 0)
+JAM_CONTACT_FORCE_N = 10.0
+JAM_DOWN_M = 0.03  # MoveCompliant target below the contact TCP pose
+JAM_STIFFNESS, JAM_MAX_FORCE_N = 1000.0, 40.0  # spring about 30 N < 40
 JAM_MAX_SIM_S = 10.0
-STIFFNESS, MAX_FORCE = 200.0, 20.0
+SEARCH_DOWN_M = 0.005  # MoveCompliant target below the contact TCP pose, on the hole axis
+SEARCH_STIFFNESS, SEARCH_MAX_FORCE_N = 1000.0, 30.0  # about 5 N normal, 3 N lateral pull
+OPERATION_TIMEOUT_S = 120.0  # wall; WaitOperation is repeated since the server caps one wait at 60 s
 PEG, BLOCK = "peg", "hole_block"
 BLOCK_TOP_Z = 0.05
 LIFT_M = 0.10
@@ -41,15 +47,15 @@ ABOVE_M = 0.02  # peg bottom above the block top before MoveToContact
 OFF_AXIS_M = 0.003  # +x
 PLACE_MOVES = 3
 PLACE_TOLERANCE_M = 0.0003
-INSERT_DOWN_M = 0.03
 MIN_DEPTH_M = 0.025
 TOP_FACE_TOLERANCE_M = 0.003
 PAYLOAD_KG = 0.05
 TRIALS, MIN_SUCCESSES = 10, 9
 FORCE_METHODS = ("MoveToContact", "MoveCompliant")
+TIMESTAMP = re.compile(r"\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d{3} ")
+TIMESTAMP_LEN = 23
 _calls = {"rpc": 0, "op": 0}
-_log_start = [0]
-_trials: list[str] = []
+_log_start = [""]  # timestamp of the last robot_service line before the checks
 
 
 class _PeakForce:
@@ -71,12 +77,38 @@ class _PeakForce:
     self._thread.join()
 
 
+class _OperationError(grpc.RpcError):
+  """A failed operation, with the code() and details() of the RpcError a wait=true call raises."""
+
+  def __init__(self, code: grpc.StatusCode, message: str):
+    super().__init__(message)
+    self._code, self._message = code, message
+
+  def code(self) -> grpc.StatusCode:
+    return self._code
+
+  def details(self) -> str:
+    return self._message
+
+
+def _wait(operation):
+  """WaitOperation until `operation` is done (at most OPERATION_TIMEOUT_S wall); raises _OperationError if it failed."""
+  deadline = time.monotonic() + OPERATION_TIMEOUT_S
+  while not operation.done and (left := deadline - time.monotonic()) > 0:
+    operation = cuj._call(cuj._robot, "WaitOperation", operations_pb2.WaitOperationRequest(
+        name=operation.name, timeout=duration_pb2.Duration(seconds=int(left) + 1)))
+  if operation.done and operation.HasField("error"):
+    code = next(c for c in grpc.StatusCode if c.value[0] == operation.error.code)
+    raise _OperationError(code, operation.error.message)
+  return operation
+
+
 def _force(method: str, **fields) -> str:
-  """A force RPC with wait=true; prints its status, message and peak force and returns the operation detail."""
+  """A force RPC (wait=false, then WaitOperation); prints status, message and peak force; returns the detail."""
   _calls["rpc"] += 1
   try:
     with _PeakForce() as peak:
-      operation = cuj._call(cuj._robot, method, getattr(api, f"{method}Request")(wait=True, **fields))
+      operation = _wait(cuj._call(cuj._robot, method, getattr(api, f"{method}Request")(wait=False, **fields)))
   except grpc.RpcError as error:
     # INVALID_ARGUMENT and FAILED_PRECONDITION are replies before any operation starts.
     _calls["op"] += error.code() not in (grpc.StatusCode.INVALID_ARGUMENT, grpc.StatusCode.FAILED_PRECONDITION)
@@ -181,30 +213,37 @@ def _insert_trial() -> str:
   facts = [f"start off axis ({(peg.x - hole.x) * 1e3:+.2f}, {(peg.y - hole.y) * 1e3:+.2f}) mm, "
            f"{(peg.z - BLOCK_TOP_Z) * 1e3:.1f} mm above"]
   cuj._call(cuj._robot, "TareWrench")
+  step = "MoveToContact (top face)"
   try:
     _force("MoveToContact", dz=-1.0, max_force=FORCE_N, speed=SPEED)
     along, contact, peg = _push_force(), cuj._state().tool_pose, _true(PEG)
+    on_face = abs(peg.z - BLOCK_TOP_Z) <= TOP_FACE_TOLERANCE_M
     facts.append(f"contact {along:.2f} N, peg bottom z {peg.z:.4f}, x/y off axis "
                  f"({(peg.x - hole.x) * 1e3:+.2f}, {(peg.y - hole.y) * 1e3:+.2f}) mm")
-    target = cuj._at(contact, contact.x + hole.x - peg.x, contact.y + hole.y - peg.y, contact.z - INSERT_DOWN_M)
-    try:
-      outcome = "done: " + _force("MoveCompliant", pose=target, stiffness=STIFFNESS, max_force=MAX_FORCE)
-    except grpc.RpcError as error:
-      outcome = cuj._code(error)
-    depth, state = BLOCK_TOP_Z - _true(PEG).z, cuj._state()
-    facts.append(f"depth {depth * 1e3:.1f} mm, MoveCompliant {outcome}, faulted {state.faulted}")
+    # Search: a stiff spring to the hole axis, slightly below the face, slides the peg over the hole.
+    target = cuj._at(contact, contact.x + hole.x - peg.x, contact.y + hole.y - peg.y, contact.z - SEARCH_DOWN_M)
+    step = "MoveCompliant (search)"
+    _force("MoveCompliant", pose=target, stiffness=SEARCH_STIFFNESS, max_force=SEARCH_MAX_FORCE_N)
+    peg = _true(PEG)
+    facts.append(f"after MoveCompliant peg bottom z {peg.z:.4f}, x/y off axis "
+                 f"({(peg.x - hole.x) * 1e3:+.2f}, {(peg.y - hole.y) * 1e3:+.2f}) mm")
+    step = "MoveToContact (hole bottom)"
+    _force("MoveToContact", dz=-1.0, max_force=FORCE_N, speed=SPEED)
+    facts.append(f"bottom contact {_push_force():.2f} N")
   except grpc.RpcError as error:
-    facts.append(f"MoveToContact {cuj._code(error)}")
-    raise RuntimeError("; ".join(facts)) from error
-  finally:
-    _trials.append("; ".join(facts))
+    facts.append(f"{step} {cuj._code(error)}")
+    failed = error
+  else:
+    failed = None
+  depth, state = BLOCK_TOP_Z - _true(PEG).z, cuj._state()
+  facts.append(f"depth {depth * 1e3:.1f} mm, faulted {state.faulted}")
+  if failed is not None:
+    raise RuntimeError("; ".join(facts)) from failed
   problems = []
   if not FORCE_RANGE_N[0] <= along <= FORCE_RANGE_N[1]:
     problems.append(f"contact force outside {FORCE_RANGE_N}")
-  if abs(peg.z - BLOCK_TOP_Z) > TOP_FACE_TOLERANCE_M:
+  if not on_face:
     problems.append("contact not on the top face")
-  if not outcome.startswith("done"):
-    problems.append("MoveCompliant not done")
   if depth < MIN_DEPTH_M or state.faulted:
     problems.append(f"depth < {MIN_DEPTH_M * 1e3:.0f} mm or faulted")
   if problems:
@@ -228,18 +267,28 @@ def check_insert() -> str:
 
 def check_jam() -> str:
   _reset()
-  start = _closed_at(JAM_START_Z)
+  _closed_at(JAM_START_Z)
   cuj._call(cuj._robot, "TareWrench")
-  error = _force_error("MoveCompliant", pose=cuj._at(start, start.x, start.y, JAM_TARGET_Z), stiffness=STIFFNESS,
-                       max_force=MAX_FORCE)
+  _force("MoveToContact", dz=-1.0, max_force=JAM_CONTACT_FORCE_N, speed=SPEED)
+  contact = cuj._state().tool_pose
+  error = _force_error("MoveCompliant", pose=cuj._at(contact, contact.x, contact.y, contact.z - JAM_DOWN_M),
+                       stiffness=JAM_STIFFNESS, max_force=JAM_MAX_FORCE_N)
   took = _sim_seconds(error.details()) if error.code() == grpc.StatusCode.ABORTED else None
   if took is None or "settled before reaching the target" not in error.details() or took > JAM_MAX_SIM_S:
     raise RuntimeError(f"MoveCompliant into the table -> {cuj._code(error)}")
   return f"MoveCompliant into the table -> {cuj._code(error)}"
 
 
+def _log_lines() -> list[str]:
+  """robot_service lines from the current and rotated files (the GetWrench sampler rotates it at 10 MB)."""
+  out = subprocess.run(harness.docker(f"docker exec intrinsic sh -c 'cat {p5c.LOGS}/robot_service.log.* "
+                                      f"{p5c.LOGS}/robot_service.log 2>/dev/null'"),
+                       capture_output=True, text=True, errors="replace").stdout
+  return sorted(line for line in out.splitlines() if TIMESTAMP.match(line))
+
+
 def check_logs() -> str:
-  lines = p5c._log_lines("robot_service")[_log_start[0]:]
+  lines = [line for line in _log_lines() if line[:TIMESTAMP_LEN] > _log_start[0]]
   rpc = [line for line in lines if any(f"rpc {m} " in line for m in FORCE_METHODS) and "status=" in line and "ms=" in line]
   forced = [line for line in lines if re.search(r"force Move(ToContact|Compliant) .* status=\w+ duration_s=[0-9.]+ "
                                                 r"force_along_push_n=([0-9.]+|nan)", line)]
@@ -263,7 +312,7 @@ def main() -> int:
     hwm._require_state("ENABLED", hwm.ENABLED_TIMEOUT_S)
     cuj._wait_ready()
     print(f"robot_service ready after {time.monotonic() - start:.1f} s", flush=True)
-    _log_start[0] = len(p5c._log_lines("robot_service"))
+    _log_start[0] = _log_lines()[-1][:TIMESTAMP_LEN]
     checks = (
         ("contact_table", check_contact_table),
         ("no_contact", check_no_contact),

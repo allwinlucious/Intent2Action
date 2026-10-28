@@ -25,6 +25,7 @@ from pxr import Sdf
 from pxr import Usd
 from pxr import UsdGeom
 from pxr import UsdPhysics
+from pxr import UsdShade
 from pxr import Vt
 import trimesh  # noqa: E402  pylint: disable=g-import-not-at-top
 import yaml  # noqa: E402  pylint: disable=g-import-not-at-top
@@ -61,6 +62,16 @@ def write_model(directory: Path) -> None:
   physx = PhysxSchema.PhysxCollisionAPI.Apply(geom.GetPrim())
   physx.CreateContactOffsetAttr(0.001)
   physx.CreateRestOffsetAttr(0.0)
+  # Compliant contact at MakeContact's MEDIUM environment stiffness (60 kN/m): rigid PhysX contact spikes past 85 N.
+  material = UsdShade.Material.Define(stage, "/Object/physics_material")
+  UsdPhysics.MaterialAPI.Apply(material.GetPrim()).CreateStaticFrictionAttr(0.5)
+  UsdPhysics.MaterialAPI(material.GetPrim()).CreateDynamicFrictionAttr(0.4)
+  physx_material = PhysxSchema.PhysxMaterialAPI.Apply(material.GetPrim())
+  physx_material.CreateCompliantContactStiffnessAttr(60000.0)
+  physx_material.CreateCompliantContactDampingAttr(600.0)
+  UsdShade.MaterialBindingAPI.Apply(geom.GetPrim()).Bind(
+      material, UsdShade.Tokens.weakerThanDescendants, "physics"
+  )
 
   if not description["static"]:
     UsdPhysics.RigidBodyAPI.Apply(root)
