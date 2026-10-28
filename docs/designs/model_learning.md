@@ -110,9 +110,12 @@ loopback hardware module, no Isaac):
 ### 5. Stage-2 data: sequences in the sim
 
 *   Physics-only Isaac runs the train tasks.
-*   Trajectories come from two sources: the frontier model (the teacher, about 3 runs per
-    task) and the model's own rollouts after stage 1, keeping only
-    successful, low-error episodes (rejection sampling).
+*   Trajectories come from two sources: the **coding agent** (`coding-agent`,
+    already installed and logged in, run headless with this MCP server as
+    its only tool source; the teacher, about 3 runs per task) and the
+    model's own rollouts after stage 1, keeping only successful, low-error
+    episodes (rejection sampling). The agent's transcripts are converted to
+    the recorder's JSONL format.
 *   About 1 000 episodes. At about 1 minute each without rendering, roughly
     one to two days of unattended sim time.
 
@@ -187,8 +190,8 @@ one training or one sim run at a time on the 3080.
     comparison, slower), or Ollama for A and `transformers` for B/C?
 2.  **Qwen3 thinking mode:** on or off? On usually helps tool use but costs
     tokens and time per step.
-3.  **Teacher data:** is it acceptable to use the frontier model's trajectories as
-    stage-2 training data, or only the model's own filtered rollouts?
+3.  **Teacher:** decided: the coding agent produces the stage-2 teacher
+    trajectories. Open: which model it uses as teacher.
 4.  **Action head output for free text:** is "the frozen model writes the
     text when the head says finished/cannot do" right, or should C be
     calls-only?
