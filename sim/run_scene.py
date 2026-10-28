@@ -12,6 +12,12 @@ import sys
 import time
 
 REPO = r"C:\isaac-sim-work\repo"
+# --gui: open the viewer window, render ~30 fps and save viewer frames to
+# GUI_FRAMES (for demo videos). Slower than headless; not used by the checks.
+GUI = "--gui" in sys.argv
+GUI_FRAMES = r"C:\isaac-sim-work\viewer_frames"
+GUI_RENDER_PERIOD_S = 1 / 30
+GUI_FRAME_PERIOD_S = 0.2
 sys.path += [REPO, r"C:\isaac-sim\exts\omni.pip.compute\pip_prebundle"]
 
 # The bridge needs these before SimulationApp starts (phase_0_5_inventory.md §1.5).
@@ -26,7 +32,7 @@ from isaacsim import SimulationApp  # noqa: E402  pylint: disable=g-import-not-a
 # Synchronous rendering: a render shows the current physics state (Inv §4.4).
 simulation_app = SimulationApp(
     {
-        "headless": True,
+        "headless": not GUI,
         # /rtx/post/aa/op = 4 (DLAA): anti-aliasing at native resolution; DLSS
         # upscaling smears the ChArUco markers (phase_4.md, Addendum A).
         # SimulationApp sets this setting from its config after start-up, so
@@ -207,6 +213,35 @@ def wait_for_command(
   return True
 
 
+_frame_state = {"next": 0.0, "index": 0}
+
+
+def _setup_viewer() -> None:
+  """Points the viewer at the work area and clears old frames."""
+  import glob  # pylint: disable=g-import-not-at-top
+
+  from isaacsim.core.utils.viewports import set_camera_view  # pylint: disable=g-import-not-at-top
+
+  set_camera_view(eye=[1.35, 1.05, 0.85], target=[0.45, 0.05, 0.05])
+  os.makedirs(GUI_FRAMES, exist_ok=True)
+  for path in glob.glob(os.path.join(GUI_FRAMES, "*.png")):
+    os.remove(path)
+
+
+def _save_viewer_frame() -> None:
+  """Saves the viewer image every GUI_FRAME_PERIOD_S of wall time."""
+  now = time.perf_counter()
+  if now < _frame_state["next"]:
+    return
+  _frame_state["next"] = now + GUI_FRAME_PERIOD_S
+  from omni.kit.viewport.utility import capture_viewport_to_file  # pylint: disable=g-import-not-at-top
+  from omni.kit.viewport.utility import get_active_viewport  # pylint: disable=g-import-not-at-top
+
+  path = os.path.join(GUI_FRAMES, f"frame_{_frame_state['index']:05d}.png")
+  capture_viewport_to_file(get_active_viewport(), path)
+  _frame_state["index"] += 1
+
+
 def main() -> None:
   s = Scene()
   timing, sim, robot, graphs = s.timing, s.sim, s.robot, s.graphs
@@ -216,6 +251,8 @@ def main() -> None:
   node.create_service(Trigger, "/sim/reset", s.on_reset)
   node.create_service(Trigger, "/sim/attach_board", s.on_attach)
   node.create_service(Trigger, "/sim/detach_board", s.on_detach)
+  if GUI:
+    _setup_viewer()
   print(f"READY pid={os.getpid()}", flush=True)
 
   free_running = False
@@ -309,8 +346,12 @@ def main() -> None:
     if pending_request is not None and t >= pending_request - tolerance_s:
       pending_request = None
       render(timing["camera_request_renders"], publish_images=True)
-    elif time.perf_counter() - last_render >= timing["render_period_wall_s"]:
+    elif time.perf_counter() - last_render >= (
+        GUI_RENDER_PERIOD_S if GUI else timing["render_period_wall_s"]
+    ):
       render(1, publish_images=False)
+      if GUI:
+        _save_viewer_frame()
 
     rclpy.spin_once(node, timeout_sec=0)
 
