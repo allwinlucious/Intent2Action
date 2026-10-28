@@ -22,6 +22,7 @@ LOG = ROOT / "logs/learn"
 PY = str(ROOT / ".venv-ml/bin/python")
 BLOCKED_HOURS = range(17, 24)  # the owner uses the computer 17:00-00:00
 PAUSE = LOG / "PAUSE"
+GO = LOG / "GO"  # contains today's date (YYYY-MM-DD): the owner freed the computer early, no window today
 STOP_GRACE_S = 150
 RETRIES = 2
 S1, BENCH, S2 = "logs/learn/stage1_train.jsonl", "logs/learn/stage1_bench.jsonl", "logs/learn/expert_train.jsonl"
@@ -66,7 +67,9 @@ def log(message: str) -> None:
 
 
 def blocked() -> bool:
-  return datetime.datetime.now().hour in BLOCKED_HOURS or PAUSE.exists()
+  now = datetime.datetime.now()
+  released = GO.exists() and GO.read_text().strip() == f"{now:%Y-%m-%d}"
+  return PAUSE.exists() or (now.hour in BLOCKED_HOURS and not released)
 
 
 def _gpu() -> str:
