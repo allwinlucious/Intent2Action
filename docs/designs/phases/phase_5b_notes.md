@@ -1,6 +1,14 @@
 # Phase 5b notes
 
-**Status: stopped at Addendum E.3** (run 7). Addendum E.1 and E.2 are
+**Status: done** (run 8, Addendum F). `phase5b_check.py` passes every
+criterion: `contact_face` (14.04 N), `no_contact`, `bad_speed`, `insert`
+9/10, `jam` (ABORTED "settled before reaching the target" after 1.55 s of
+sim time) and `logs`. The phase 3 (hwm, scene, cuj), phase 4 and phase 5c
+checks pass on their first run, and `pytest` passes (81). Step 4 is done:
+CUJ 6 and G8 in `robot_platform.md` describe the search-then-insert flow
+and name the checks.
+
+**Previous status (run 7): stopped at Addendum E.3.** Addendum E.1 and E.2 are
 applied: admittance inertia 5 kg, compliant damping 2000 (all 7 USDs
 regenerated), and `jam` uses the grasped peg on the block face. The full
 `phase5b_check.py` passes `insert` 9/10, `no_contact`, `bad_speed` and
@@ -28,6 +36,9 @@ material and the 60 N grip) and D are implemented.
 
 | Check | Result | Log |
 |-------|--------|-----|
+| `phase5b_check.py` run 8 (Addendum F) | all PASS: contact_face (14.04 N), no_contact, bad_speed, insert 9/10, jam (ABORTED settled, 1.55 s), logs (34 rpc / 33 force lines) | `logs/phase5b_check_run8.log` (Isaac, container, service: `logs/phase5b_{isaac,container,robot_service}.log`) |
+| phase 3 hwm / scene / cuj, phase 4, phase 5c (Addendum F tree) | all PASS on first run; 5c cube 10/10, peg 10/10 | `logs/phase5b_addF_regress_{phase3_hwm,phase3_scene,phase3_cuj,phase4,phase5c}_check.log` |
+| `pytest -q tests/` (Addendum F) | 81 passed (4 new `TestJamDetector`) | |
 | `phase5b_check.py` run 7 (Addendum E) | contact_table FAIL (5.18 N), no_contact PASS, bad_speed PASS, insert PASS 9/10, jam FAIL (DEADLINE_EXCEEDED), logs PASS | `logs/phase5b_check_run7.log` (Isaac, container, service: `logs/phase5b_{isaac,container,robot_service}.log`) |
 | `pytest -q tests/` (Addendum E) | 77 passed | |
 | `phase5c_check.py` after D | all PASS: planner_up, cube 10/10, peg 10/10, too_wide, logs, errors | `logs/phase5b_addD_phase5c_check.log` (Isaac and container: `logs/phase5b_addD_phase5c_{isaac,container}.log`) |
@@ -58,6 +69,101 @@ Fixes made between run 1 and run 2 (implementation bugs, not design):
    condition to be false, so the abort wins.
 3. Sequences that ICON ended had no `force` log line. `run_force` now
    logs one with `force_along_push_n=nan` before re-raising.
+
+## Run 8 (Addendum F)
+
+Applied:
+- **F.1:** `check_contact_table` is replaced by `check_contact_face`. It
+  uses `_peg_above_block(FACE_OFF_AXIS_M)` (20 mm off the axis in +x, 2 cm
+  above the top; grasp, `AttachObject`, `SetPayload(0.05)`), then
+  `TareWrench` and `MoveToContact(down, 15 N, 0.01)`, and it requires
+  `GetWrench` along the push in 12–18 N. `JAM_OFF_AXIS_M` is renamed
+  `FACE_OFF_AXIS_M` and shared with `jam`. `_closed_at` and
+  `CONTACT_START_Z` are removed.
+- **F.2:** `force.JamDetector(target)` (`container/services/robot/force.py`)
+  follows `gripper.StallDetector`. `due(t)` asks for a sample every 0.1 s of
+  sim time. `update(t, position)` keeps a 1.0 s window and is true when the
+  window is full, the samples' bounding box diagonal is < 0.5 mm, and the
+  newest position is more than 1 mm from the target. `Icon.run_sequence`
+  gained `watch()`, polled with the flags every 20 ms wall. A message from
+  it starts the stop action from the client, as timeout and cancel do, and
+  becomes the outcome. `MoveCompliant`'s `watch` reads ICON `GetStatus`
+  `base_t_tip_sensed` and maps it to the TCP with `tip_t_tcp`, which is
+  taken once at the start from the same `GetStatus` and the planner's TCP
+  FK. On a jam it returns `JAMMED`, so `explain` adds the FK position
+  error as before. The ICON `settled_for_seconds` abort stays.
+  `tests/test_force.py` has 4 new tests: moving → no jam, still for 1 s → jam
+  from the sample that completes the window, still at the target → no jam,
+  sample period.
+- Image rebuilt (`logs/phase5b_addF_docker_build.log`; the image's
+  `force.py` and `robot_service.py` were checked to have `JamDetector`).
+
+Rulings (plan silent):
+- **"Target reached"** = TCP within 1 mm of the target, which is ICON's
+  default admittance `position_error_threshold` (its `is_done`,
+  `cartesian_admittance_action.cc`).
+- **"Moved < 0.5 mm"** = the diagonal of the bounding box of the samples
+  in the window, so an oscillation of more than 0.5 mm is not a jam.
+
+### Insert, run 8, per trial
+
+Same columns as run 7. Bottom = the hole-bottom `MoveToContact` (final
+force in the operation message, `GetWrench` in brackets).
+
+| # | Start off axis (mm), height | Face | Contact (N) | Off axis at contact (mm), peg bottom z | Search (`MoveCompliant`) → off axis after (mm) | Bottom | Depth |
+|---|---|---|---|---|---|---|---|
+| 1 | +2.85, −0.23; 19.1 | 5.81 s, 16.4 N | 12.39 | +2.95, −0.26; 0.0497 | done 1.18 s → +0.44, −0.30 | 6.27 s, 12.4 N (13.05) | 35.5 mm |
+| 2 | +2.85, −0.13; 19.4 | 5.71 s, 13.3 N | 13.12 | +2.89, −0.03; 0.0500 | done 1.22 s → −0.70, −0.43 | 4.84 s, 14.1 N (14.32) | 33.3 mm |
+| 3 | +2.48, −0.40; 18.7 | 5.84 s, 13.6 N | 13.66 | +2.58, −0.41; 0.0496 | done 1.11 s → +0.43, −0.28 | 6.36 s, 12.9 N (12.93) | 34.2 mm |
+| 4 | +3.03, −0.09; 19.6 | 5.79 s, 12.8 N | 12.83 | +2.86, −0.31; 0.0497 | done 1.13 s → +0.37, −0.41 | 6.17 s, 12.6 N (12.52) | 34.1 mm |
+| 5 | +2.73, −0.21; 19.2 | 5.77 s, 13.0 N | 13.15 | +2.75, −0.31; 0.0496 | done 1.30 s → +0.50, −0.38 | 6.39 s, 12.6 N (12.54) | 34.1 mm |
+| 6 | +2.70, −0.33; 18.9 | 5.82 s, 13.8 N | 13.84 | +2.78, −0.31; 0.0496 | done 1.25 s → +0.54, −0.29 | 6.38 s, 12.4 N (12.49) | 34.0 mm |
+| 7 | +2.77, −0.22; 19.4 | 5.81 s, 13.8 N | 13.83 | +2.83, −0.31; 0.0497 | done 2.32 s → +0.67, −0.31 | 6.22 s, 12.7 N (12.81) | 34.3 mm |
+| 8 | +2.78, −0.03; 19.4 | 5.74 s, 13.1 N | 13.25 | +2.73, −0.06; 0.0500 | done 1.29 s → −0.52, −0.46 | 4.96 s, 14.5 N (14.92) | 33.3 mm |
+| 9 | +2.82, −0.43; 18.6 | 5.70 s, 13.1 N | 13.30 | +2.83, −0.37; 0.0497 | done 1.94 s → +0.74, −0.52 | 6.18 s, 12.3 N (12.16) | 34.2 mm |
+| 10 | +2.89, −0.14; 19.5 | 5.76 s, 13.9 N | 13.84 | +2.90, −0.29; 0.0497 | ABORTED "settled before reaching the target (position error 0.0018 m)" 2.26 s, 3.7 N | – | **1.0 mm (fail)** |
+
+No trial faulted ICON. Every face contact was on the top face at
+12.39–13.84 N (`GetWrench`).
+
+### `contact_face` and `jam`, run 8
+
+- `contact_face`: the peg started at (+19.67, −0.25) mm and 19.2 mm up.
+  `MoveToContact(down, 15 N, 0.01)` was done after 5.75 s with 13.7 N.
+  `GetWrench` along the push was 14.04 N, the peak 14.7 N, and the peg
+  bottom at z 0.0500 (on the face).
+- `jam`: the peg started at (+19.52, −0.34) mm and 18.9 mm up.
+  `MoveToContact(10 N)` was done after 6.85 s with 8.3 N (`GetWrench`
+  8.43 N). `MoveCompliant` (3 cm down, 1000 N/m, 60 N) returned ABORTED
+  "settled before reaching the target (position error 0.0293 m)" after
+  1.55 s of sim time, at 31.4 N with a peak of 37.9 N.
+
+### Findings 21–23 (observations, no decision needed)
+
+21. **Which detector fired is not logged.** The server-side detector and
+    ICON's `settled_for_seconds` abort give the same message. The jam
+    ended after 1.55 s, which fits the 1 s server window plus the initial
+    motion. In run 7 the ICON condition never fired in 30 s, so the
+    server detector most likely ended it, but that is not verified.
+22. **The search stall now ends as a jam instead of the deadline.**
+    Trial 10 is the same stall as run 7's trial 4 and run 4. It ended
+    after 2.26 s instead of 30 s. Its TCP was 1.8 mm from a target that is
+    2 mm below the contact height, on the axis. Had the hand stayed
+    2.9 mm off the axis, the error would have been at least 3.5 mm. So the
+    hand moved most of the way to the axis, and the peg stayed on the face
+    (1.0 mm deep). That looks like the slip in the grasp from finding 10,
+    but it was not verified: the check records no peg x/y after a failed
+    search. The successful searches took 1.11–2.32 s. In run 7 two
+    searches succeeded only after 7.36 s and 12.53 s, so the detector can
+    end a search that would have slid after a longer stop. None of this
+    run's trials showed that.
+23. **The hole-bottom contact bounces in most trials.** In 8/10 trials the hole-bottom `MoveToContact` had
+    `GetWrench` peaks of 42–47 N and second-half p10/p90 of about 2.5/32 N.
+    The operations still ended at 12.3–14.5 N, inside 12–18 N. In trials 2
+    and 8 the search left the peg past the axis (−0.5 to −0.7 mm in x),
+    and the peaks were only 16.8 N and 18.2 N, so the side the peg ends on
+    may matter (two trials; not verified). The depth stops at
+    33–35 mm again (finding 17). This is not a criterion.
 
 ## Run 7 (Addendum E)
 
@@ -721,6 +827,13 @@ Modified:
   (`COMPLIANT_DAMPING` 2000), `assets/objects/*/model.usd` (all 7
   regenerated), `tests/e2e/phase5b_check.py` (`_peg_above_block`, peg jam,
   `JAM_OFF_AXIS_M`)
+- Run 8 (F): `container/services/robot/force.py` (`JamDetector`, `JAM_*`,
+  `REACHED_M`), `container/services/robot/icon.py` (`run_sequence`
+  `watch`), `container/services/robot_service.py` (`_sensed_tip`,
+  `run_force` `watch`, `MoveCompliant` jam watch), `tests/test_force.py`
+  (`TestJamDetector`), `tests/e2e/phase5b_check.py` (`contact_face`
+  replaces `contact_table`; `FACE_OFF_AXIS_M`), `docs/designs/robot_platform.md`
+  (CUJ 6, G8; decision 9 / Step 4)
 
 Regenerated `gen/`:
 - `intrinsic/icon/actions/{force_primitive,cartesian_admittance_action,cartesian_impedance,cartesian_impedance_reference_generators}_pb2*`
@@ -737,3 +850,5 @@ Other logs:
 - Run 6: `logs/phase5b_addD_docker_build*.log`,
   `logs/phase5b_build_catalog_d{600,2000}.log`
 - Run 7: `logs/phase5b_addE_build_catalog.log`, `logs/phase5b_addE_docker_build.log`, `logs/phase5b_check_run7.log`
+- Run 8: `logs/phase5b_addF_docker_build.log`, `logs/phase5b_check_run8.log`,
+  `logs/phase5b_addF_regress_*.log`

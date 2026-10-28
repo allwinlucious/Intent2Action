@@ -191,6 +191,7 @@ class Icon:
       timeout_s: float,
       clock: Callable[[], float],
       cancel: Callable[[], bool],
+      watch: Callable[[], str | None] = lambda: None,
   ) -> SequenceResult:
     """Runs actions linked by real-time transitions in one session on `parts`, starting with the first.
 
@@ -198,9 +199,10 @@ class Icon:
     aborts: (watched ids, condition, message); on any watched action the condition raises the abort and
     starts `stop_id` in real time. success: (id, condition), which also starts `stop_id` unless it is
     `stop_id`. Every 20 ms (wall) the flags are polled; an abort wins over success. After the first flag,
-    or after timeout_s of `clock` (sim) or cancel() (then `stop_id` is started from here), it waits up to
-    2 s (sim) for `stop_id`'s is_settled and ends the session. Outcome: "ok", the abort message,
-    "timeout" or "cancelled"; status is ICON's GetStatus after the session. Raises ApiError like run_action.
+    or after timeout_s of `clock` (sim), cancel() or a message from watch() (then `stop_id` is started from
+    here), it waits up to 2 s (sim) for `stop_id`'s is_settled and ends the session. Outcome: "ok", the abort
+    or watch() message, "timeout" or "cancelled"; status is ICON's GetStatus after the session. Raises
+    ApiError like run_action.
     """
     built = {i: icon_actions.Action(i, name, slots, params) for i, name, params, slots in actions}
     # A transition (or success) and an abort that fire in the same cycle make ICON end the session ("The same
@@ -235,7 +237,7 @@ class Icon:
                                                                      responses)])
         settled = session.add_reaction(built[stop_id], reactions.Condition.is_true(stop_utils.StateVariables.IS_SETTLED))
         session.start_action(actions[0][0])
-        start, outcome = clock(), None
+        start, outcome, stop_here = clock(), None, False
         while outcome is None:
           ok_now = ok.wait(SEQUENCE_POLL_S)
           outcome = next((message for flag, message in abort_flags if flag.wait(0)), "ok" if ok_now else None)
@@ -243,7 +245,9 @@ class Icon:
             outcome = "timeout"
           elif outcome is None and cancel():
             outcome = "cancelled"
-        if outcome in ("timeout", "cancelled"):
+          elif outcome is None and (watched := watch()) is not None:
+            outcome, stop_here = watched, True
+        if outcome in ("timeout", "cancelled") or stop_here:
           session.start_action(stop_id)
         stopped_at = clock()
         while not settled.wait(SEQUENCE_POLL_S) and clock() - stopped_at <= STOP_SETTLE_S:

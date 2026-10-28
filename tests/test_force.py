@@ -133,3 +133,27 @@ class TestPushForce:
   def test_sign_is_dropped(self):
     base_r_flange = np.diag([1.0, -1.0, -1.0])
     assert force.push_force((0.0, 0.0, -12.0), np.array([0, 0, -1.0]), base_r_flange) == pytest.approx(12)
+
+
+class TestJamDetector:
+
+  def test_moving_is_no_jam(self):
+    detector = force.JamDetector(target=(0.0, 0.0, 0.0))
+    # 1 mm/s toward the target, 5 cm away: 0.1 mm per sample, 1 mm per window.
+    assert not any(detector.update(i * 0.1, (0.05 - i * 1e-4, 0.0, 0.0)) for i in range(50))
+
+  def test_still_for_1_s_is_jam(self):
+    detector = force.JamDetector(target=(0.0, 0.0, -0.03))
+    results = [detector.update(i * 0.1, (0.0, 0.0, (i % 2) * 1e-4)) for i in range(12)]
+    # The samples span the 1 s window from t = 1.0 on.
+    assert results == [False] * 10 + [True, True]
+
+  def test_still_at_the_target_is_no_jam(self):
+    detector = force.JamDetector(target=(0.0, 0.0, 0.0))
+    assert not any(detector.update(i * 0.1, (0.0005, 0.0, 0.0)) for i in range(20))
+
+  def test_due_every_sample_period(self):
+    detector = force.JamDetector(target=(0.0, 0.0, 0.0))
+    assert detector.due(0.0)
+    detector.update(0.0, (0.1, 0.0, 0.0))
+    assert not detector.due(0.05) and detector.due(0.1)

@@ -112,7 +112,10 @@ connect them to Isaac Sim over ROS 2, and put one gRPC API
     Isaac-rendered data.
 *   **G8.** Force/contact: `MoveToContact` stops with measured force within
     ±20% of the requested limit; the peg-in-hole insertion of CUJ 6
-    succeeds in ≥ 9 of 10 trials.
+    succeeds in ≥ 9 of 10 trials; a jammed `MoveCompliant` ends `ABORTED`
+    "settled before reaching the target". Checked by
+    `tests/e2e/phase5b_check.py` (`contact_face`, `insert`, `jam`;
+    [phase_5b.md](phases/phase_5b.md)).
 *   **G9.** Grasp planning: grasps from `PlanGrasp` lift the target in
     ≥ 9 of 10 trials for each graspable catalog object (`red_cube`,
     `peg`); objects wider than the 0.075 m gripper opening are rejected
@@ -232,14 +235,17 @@ connect them to Isaac Sim over ROS 2, and put one gRPC API
 
 *   **Given**: A peg is held in the gripper (`Grasp`, then `AttachObject`
     and `SetPayload`); a block with a hole (2 mm clearance) is on the table.
-*   **When**: The VLM moves the peg 2 cm above the hole with `MoveToPose`,
-    calls `TareWrench()` (removes the peg's static weight from the
-    reading), then `MoveToContact(direction=down, max_force=15 N,
-    speed=10 mm/s)`, then `MoveCompliant(target=3 cm lower, stiffness=200
-    N/m, max_force=20 N)`.
-*   **Then**: `MoveToContact` stops with measured force between 12 and
-    18 N (`GetWrench`); `MoveCompliant` ends with the peg ≥ 25 mm inside the
-    hole; no ICON fault.
+*   **When**: The VLM moves the peg 2 cm above the block top and 3 mm off
+    the hole axis with `MoveToPose`, calls `TareWrench()` (removes the
+    peg's static weight from the reading), then `MoveToContact(direction=down,
+    max_force=15 N, speed=10 mm/s)`, which stops on the top face. It then
+    searches with `MoveCompliant(target=the contact TCP pose moved onto the
+    hole axis and 2 mm lower, stiffness=2000 N/m, max_force=30 N)`, which
+    slides the peg over the hole, and inserts with
+    `MoveToContact(direction=down, max_force=15 N, speed=10 mm/s)`.
+*   **Then**: The first `MoveToContact` stops on the top face with measured
+    force between 12 and 18 N (`GetWrench`); after the second the peg is
+    ≥ 25 mm inside the hole; no ICON fault.
 
 ### CUJ 7: Developer drives the arm by hand
 

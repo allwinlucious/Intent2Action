@@ -155,6 +155,12 @@ def _by_name(name: str) -> refs_pb.ObjectReference:
   return refs_pb.ObjectReference(by_name=refs_pb.ObjectReferenceByName(object_name=name))
 
 
+def _sensed_tip(status) -> np.ndarray:
+  """ICON's sensed base_t_tip of the arm as a 4x4 transform."""
+  t = status.part_status[ARM].base_t_tip_sensed
+  return pose_matrix(api.Pose(x=t.pos.x, y=t.pos.y, z=t.pos.z, qw=t.rot.qw, qx=t.rot.qx, qy=t.rot.qy, qz=t.rot.qz))
+
+
 def _dependency_error(what: str, error: grpc.RpcError) -> ApiError:
   """A downstream failure keeps its code (NOT_FOUND, UNAVAILABLE, ...) and names the dependency."""
   return ApiError(error.code(), f"{what}: {error.details()}")
@@ -430,16 +436,17 @@ class Robot:
     return matrix_pose(np.linalg.inv(flange) @ tcp)
 
   def run_force(self, op: Operation, kind: str, actions, transitions, aborts, success, timeout_s: float,
-                push_direction: np.ndarray, explain=lambda outcome, q: outcome) -> None:
+                push_direction: np.ndarray, explain=lambda outcome, q: outcome, watch=lambda: None) -> None:
     """One force sequence (Icon.run_sequence on arm and ft_sensor; the last action is the stop) as `op`.
 
-    Ends `op` with a MotionResult, or fails it: ABORTED (abort message, extended by explain(outcome, q)),
-    DEADLINE_EXCEEDED or CANCELLED. Logs status, sim duration and the final force along `push_direction`.
+    Ends `op` with a MotionResult, or fails it: ABORTED (abort or watch() message, extended by
+    explain(outcome, q)), DEADLINE_EXCEEDED or CANCELLED. Logs status, sim duration and the final force along
+    `push_direction`.
     """
     start = self.clock.now()
     try:
       result = self.icon.run_sequence([ARM, FT_SENSOR], actions, transitions, aborts, success, actions[-1][0],
-                                      timeout_s, self.clock.now, op.cancel.is_set)
+                                      timeout_s, self.clock.now, op.cancel.is_set, watch)
     except ApiError as error:
       # ICON ended the session (often faulted): no final force to report.
       log.warning("force %s %s status=%s duration_s=%.3f force_along_push_n=nan message=%s",
@@ -787,10 +794,21 @@ class RobotService(api_grpc.RobotServiceServicer):
     slots = {ARM: ARM, FT_SENSOR: FT_SENSOR}
 
     def work(op: Operation) -> None:
-      q = self.r.icon.arm_joints()
+      status = self.r.icon.status()
+      q = self.r.icon.arm_joints(status)
       start = self.r.planner.fk(q, api.TCP)
       offset = np.array([target.x - start.x, target.y - start.y, target.z - start.z])
       push = offset / max(float(np.linalg.norm(offset)), 1e-9)
+      # Server-side jam test (Addendum F.2): ICON's settled_for_seconds does not accumulate in Isaac.
+      tip_t_tcp = np.linalg.inv(_sensed_tip(status)) @ pose_matrix(start)
+      jam = force.JamDetector((target.x, target.y, target.z))
+
+      def watch() -> str | None:
+        t = self.r.clock.now()
+        if not jam.due(t):
+          return None
+        return JAMMED if jam.update(t, (_sensed_tip(self.r.icon.status()) @ tip_t_tcp)[:3, 3]) else None
+
       actions = [
           (1, ADMITTANCE, force.admittance_params(target, request.stiffness, self.r.flange_t_tcp(q)), slots),
           (2, stop_utils.ACTION_TYPE_NAME, None, ARM),
@@ -808,7 +826,7 @@ class RobotService(api_grpc.RobotServiceServicer):
         return f"{JAMMED} (position error {error:.4f} m)"
 
       self.r.run_force(op, "MoveCompliant", actions, [], aborts, (1, reactions.Condition.is_done()),
-                       COMPLIANT_TIMEOUT_S, push, explain)
+                       COMPLIANT_TIMEOUT_S, push, explain, watch)
 
     detail = f"compliant move to ({target.x:.3f}, {target.y:.3f}, {target.z:.3f}) at {request.stiffness:g} N/m"
     return self.r.reply(self.r.start_arm("MoveCompliant", work, detail=detail), request.wait)

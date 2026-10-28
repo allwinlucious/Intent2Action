@@ -31,9 +31,8 @@ DOWN = (0.0, 0.0, -1.0)
 FORCE_N, SPEED = 15.0, 0.01
 FORCE_RANGE_N = (12.0, 18.0)  # G8: +-20 %
 TABLE_XY = (0.45, -0.05)
-CONTACT_START_Z = 0.03
 NO_CONTACT_Z = 0.30
-JAM_OFF_AXIS_M = 0.02  # +x; the peg (radius 0.010) rests on the face beside the hole (radius 0.011)
+FACE_OFF_AXIS_M = 0.02  # +x; contact_face and jam: the peg (radius 0.010) rests on the face beside the hole (radius 0.011)
 JAM_CONTACT_FORCE_N = 10.0
 JAM_DOWN_M = 0.03  # MoveCompliant target below the contact TCP pose
 JAM_STIFFNESS, JAM_MAX_FORCE_N = 1000.0, 60.0  # spring 30 N plus overshoot (about 43 N) < 60
@@ -162,24 +161,18 @@ def _sim_seconds(message: str) -> float:
   return float(found.group(1))
 
 
-def _closed_at(z: float) -> api.Pose:
-  """Gripper closed on nothing, TCP pointing down at (TABLE_XY, z)."""
-  cuj._gripper("Grasp")
-  down = cuj._down()
-  target = cuj._at(down, *TABLE_XY, z)
-  cuj._move("MoveToPose", pose=target)
-  return target
-
-
-def check_contact_table() -> str:
+def check_contact_face() -> str:
+  """Addendum F.1: the grasped peg on the block face beside the hole (bare fingers on the table chatter in Isaac)."""
   _reset()
-  _closed_at(CONTACT_START_Z)
+  hole, facts = _peg_above_block(FACE_OFF_AXIS_M)
   cuj._call(cuj._robot, "TareWrench")
   detail = _force("MoveToContact", dz=-1.0, max_force=FORCE_N, speed=SPEED)
-  along = _push_force()
+  along, peg = _push_force(), _true(PEG)
+  facts.append(f"MoveToContact(down, {FORCE_N:g} N, {SPEED:g} m/s) done; GetWrench along the push {along:.2f} N, "
+               f"peg bottom z {peg.z:.4f} ({detail})")
   if not FORCE_RANGE_N[0] <= along <= FORCE_RANGE_N[1]:
-    raise RuntimeError(f"force along the push {along:.2f} N, need {FORCE_RANGE_N} ({detail})")
-  return f"MoveToContact(down, {FORCE_N:g} N, {SPEED:g} m/s) done; GetWrench along the push {along:.2f} N ({detail})"
+    raise RuntimeError(f"force along the push outside {FORCE_RANGE_N}: {'; '.join(facts)}")
+  return "; ".join(facts)
 
 
 def check_no_contact() -> str:
@@ -282,7 +275,7 @@ def check_insert(trials: int = TRIALS, min_successes: int = MIN_SUCCESSES) -> st
 
 def check_jam() -> str:
   _reset()
-  hole, facts = _peg_above_block(JAM_OFF_AXIS_M)
+  hole, facts = _peg_above_block(FACE_OFF_AXIS_M)
   cuj._call(cuj._robot, "TareWrench")
   _force("MoveToContact", dz=-1.0, max_force=JAM_CONTACT_FORCE_N, speed=SPEED)
   contact, peg = cuj._state().tool_pose, _true(PEG)
@@ -336,7 +329,7 @@ def main() -> int:
         ("jam", check_jam),
         ("insert", lambda: check_insert(SWEEP_TRIALS, SWEEP_MIN_SUCCESSES)),
     ) if sweep else (
-        ("contact_table", check_contact_table),
+        ("contact_face", check_contact_face),
         ("no_contact", check_no_contact),
         ("bad_speed", check_bad_speed),
         ("insert", check_insert),

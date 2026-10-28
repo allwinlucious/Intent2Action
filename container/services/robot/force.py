@@ -4,6 +4,7 @@ parameters (plain protos; Intrinsic's Python helpers need unbuilt C++ extensions
 No rclpy and no ICON session here; tests/test_force.py covers it.
 """
 
+import collections
 import math
 
 import grpc
@@ -35,6 +36,12 @@ ROTATIONAL_INERTIA = 1.0  # kg m², MakeContact
 DEADBAND = (1.5, 0.2)  # N, N·m
 ADMITTANCE_ROTATIONAL_STIFFNESS = 30.0  # N·m/rad
 ADMITTANCE_INERTIA = (5.0, 0.05)  # kg, kg m²
+# MoveCompliant jam (Addendum F.2): the TCP moved less than JAM_DISTANCE_M over JAM_WINDOW_S (sim), sampled every
+# JAM_SAMPLE_S, while farther than REACHED_M (ICON's default admittance is_done threshold) from the target.
+JAM_SAMPLE_S = 0.1
+JAM_WINDOW_S = 1.0
+JAM_DISTANCE_M = 0.0005
+REACHED_M = 1e-3
 
 
 def contact_inertia(force: float, speed: float) -> float:
@@ -137,6 +144,29 @@ def admittance_params(target: api.Pose, stiffness: float,
               simple_lowpass=generators_pb.SimpleNullspaceReferenceGenerator())),
   )
   return admittance_pb.CartesianAdmittanceActionFixedParams(cartesian_impedance_parameters=params)
+
+
+class JamDetector:
+  """MoveCompliant jam: fed (sim time, TCP position) samples, true once the TCP stopped short of `target`."""
+
+  def __init__(self, target):
+    self.target = np.asarray(target, dtype=float)
+    self.samples: collections.deque[tuple[float, np.ndarray]] = collections.deque()
+
+  def due(self, t_s: float) -> bool:
+    """Whether a new sample is wanted (JAM_SAMPLE_S after the last one)."""
+    return not self.samples or t_s - self.samples[-1][0] >= JAM_SAMPLE_S
+
+  def update(self, t_s: float, position) -> bool:
+    position = np.asarray(position, dtype=float)
+    self.samples.append((t_s, position))
+    # Keep the newest sample at or before the window start, so the samples span the whole window.
+    while len(self.samples) >= 2 and self.samples[1][0] <= t_s - JAM_WINDOW_S:
+      self.samples.popleft()
+    if self.samples[0][0] > t_s - JAM_WINDOW_S or np.linalg.norm(position - self.target) <= REACHED_M:
+      return False
+    spread = np.ptp([p for _, p in self.samples], axis=0)
+    return float(np.linalg.norm(spread)) < JAM_DISTANCE_M
 
 
 def push_force(wrench_flange, direction_base: np.ndarray, base_r_flange: np.ndarray) -> float:
