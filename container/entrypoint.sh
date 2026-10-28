@@ -12,6 +12,11 @@ case "$BACKEND" in
   isaac|loopback) ;;
   *) echo "ROBOT_BACKEND must be isaac or loopback, got '$BACKEND'" >&2; exit 1 ;;
 esac
+GRASP_PLANNER="${GRASP_PLANNER:-on}"
+case "$GRASP_PLANNER" in
+  on|off) ;;
+  *) echo "GRASP_PLANNER must be on or off, got '$GRASP_PLANNER'" >&2; exit 1 ;;
+esac
 
 run() {  # run <name> <command...>: start in the background, prefix every log line with the name
   local name="$1"; shift  # and append it to /var/lib/intrinsic/logs/<name>.log
@@ -20,7 +25,7 @@ run() {  # run <name> <command...>: start in the background, prefix every log li
 
 export ALLOWED_PUBSUB_IPv4=127.0.0.1  # Zenoh peer listeners bind loopback instead of 0.0.0.0
 mkdir -p /var/lib/intrinsic/worlds
-echo "robot backend: $BACKEND"
+echo "robot backend: $BACKEND, grasp planner: $GRASP_PLANNER"
 
 run zenohd       /opt/zenoh/zenohd -c "$CFG/zenohd.json5"  # listens on $ZENOH, kv_store/** storage
 run localcas     "$BIN/localcas" --port=18020 --objects_dir=/var/lib/intrinsic/cas --partial_dir=/var/lib/intrinsic/cas-partial
@@ -52,6 +57,12 @@ if [ "$BACKEND" = isaac ]; then
   FASTDDS="set +u; source /opt/ros/humble/setup.bash; source /opt/ros_ext/setup.bash; set -u;
     RMW_IMPLEMENTATION=rmw_fastrtps_cpp FASTRTPS_DEFAULT_PROFILES_FILE=/opt/app/container/dds/fastdds.xml exec python3"
   run scene_sync bash -c "$FASTDDS /opt/app/container/services/scene_sync.py"
+  if [ "$GRASP_PLANNER" = on ]; then
+    # move_group + grasp planner on CycloneDDS, robot_service's vendor (actions and services do not cross vendors).
+    run grasp_planner bash -c "set +u; source /opt/ros/humble/setup.bash; source /opt/ros_ext/setup.bash; set -u;
+      RMW_IMPLEMENTATION=rmw_cyclonedds_cpp CYCLONEDDS_URI=file:///opt/app/container/dds/cyclonedds.xml \
+      exec ros2 launch franka_grasp_config grasp_planner.launch.py"
+  fi
   run camera_sim bash -c "$FASTDDS /opt/app/container/services/camera_sim.py"
   run calibration "$BIN/calibration_service_main" --runtime_context_file="$CFG/calibration.runtime.pb" \
                    --zenoh_router="$ZENOH"

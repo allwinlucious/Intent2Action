@@ -8,10 +8,17 @@ FROM ros:humble-ros-base
 
 RUN apt-get update && apt-get install -y --no-install-recommends python3-pip python3-yaml iproute2 ros-humble-rmw-cyclonedds-cpp && rm -rf /var/lib/apt/lists/* \
  && pip3 install --no-cache-dir grpcio==1.85.0 protobuf==7.36.2
+# MoveIt and MTC for the grasp planner (phase_5c.md decision 4).
+RUN apt-get update && apt-get install -y --no-install-recommends ros-humble-moveit ros-humble-moveit-task-constructor-core \
+    ros-humble-moveit-configs-utils ros-humble-moveit-msgs ros-humble-moveit-resources-panda-moveit-config \
+ && rm -rf /var/lib/apt/lists/*
 # The version Isaac's bridge bundles, so both sides use the same definitions.
-RUN git clone --depth 1 --branch 1.1.0 https://github.com/ros-simulation/simulation_interfaces /opt/ws/src/simulation_interfaces \
- && . /opt/ros/humble/setup.sh \
- && colcon build --base-paths /opt/ws/src --merge-install --install-base /opt/ros_ext
+RUN git clone --depth 1 --branch 1.1.0 https://github.com/ros-simulation/simulation_interfaces /opt/ws/src/simulation_interfaces
+COPY ros_ws /opt/ws/ros_ws
+COPY assets/robots /opt/ws/assets/robots
+RUN bash /opt/ws/ros_ws/prepare.sh \
+ && cd /opt/ws && . /opt/ros/humble/setup.sh \
+ && colcon build --base-paths /opt/ws/src /opt/ws/ros_ws/src --merge-install --install-base /opt/ros_ext
 # The vendored ICON Python client (container/stage_vendor.sh) logs through absl.
 RUN pip3 install --no-cache-dir absl-py==2.5.1
 

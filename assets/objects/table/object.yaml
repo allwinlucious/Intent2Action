@@ -3,5 +3,9 @@ color:
 - 0.55
 - 0.45
 - 0.35
+dims:
+- 1.2
+- 0.8
+- 0.75
 mass: null
 static: true

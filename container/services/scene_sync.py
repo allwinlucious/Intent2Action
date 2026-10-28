@@ -328,6 +328,7 @@ class Sync:
       for set_name in (VISUAL_SET, COLLISION_SET):
         geometries[set_name].named_geometries[catalog].geometry.geo_ref.CopyFrom(refs)
       request.user_data["source"].Pack(wrappers_pb2.StringValue(value="ground_truth"))
+      request.user_data["catalog"].Pack(wrappers_pb2.StringValue(value=catalog))  # PlanGrasp reads its dims
       self.world.CreateObject(request, timeout=RPC_TIMEOUT_S)
       log.info(
           "object created name=%s catalog=%s world=%s replaced=%s pose=%s",

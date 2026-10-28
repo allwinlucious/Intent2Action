@@ -1,0 +1,48 @@
+# Velocities from assets/robots/franka/lula_franka_gen.urdf, accelerations from
+# assets/robots/franka/robot_descriptor.yaml acceleration_limits (the fingers have none).
+joint_limits:
+  panda_joint1:
+    has_velocity_limits: true
+    max_velocity: 2.1750
+    has_acceleration_limits: true
+    max_acceleration: 15.0
+  panda_joint2:
+    has_velocity_limits: true
+    max_velocity: 2.1750
+    has_acceleration_limits: true
+    max_acceleration: 7.5
+  panda_joint3:
+    has_velocity_limits: true
+    max_velocity: 2.1750
+    has_acceleration_limits: true
+    max_acceleration: 10.0
+  panda_joint4:
+    has_velocity_limits: true
+    max_velocity: 2.1750
+    has_acceleration_limits: true
+    max_acceleration: 12.5
+  panda_joint5:
+    has_velocity_limits: true
+    max_velocity: 2.6100
+    has_acceleration_limits: true
+    max_acceleration: 15.0
+  panda_joint6:
+    has_velocity_limits: true
+    max_velocity: 2.6100
+    has_acceleration_limits: true
+    max_acceleration: 20.0
+  panda_joint7:
+    has_velocity_limits: true
+    max_velocity: 2.6100
+    has_acceleration_limits: true
+    max_acceleration: 20.0
+  panda_finger_joint1:
+    has_velocity_limits: true
+    max_velocity: 0.2
+    has_acceleration_limits: false
+    max_acceleration: 0.0
+  panda_finger_joint2:
+    has_velocity_limits: true
+    max_velocity: 0.2
+    has_acceleration_limits: false
+    max_acceleration: 0.0

@@ -2,7 +2,7 @@
 
 For each object: assets/objects/<name>/mesh.glb (metres, Z up, origin at the
 bottom centre, except calib_board: box centre, as Isaac's board prim) and
-object.yaml (static, mass, color, collision; origin: center if centred).
+object.yaml (static, mass, color, collision, dims; origin: center if centred).
 sim/tools/build_catalog.py turns them into model.usd. Dev-time only:
   .venv/bin/python tools/build_catalog_meshes.py
 """
@@ -67,6 +67,8 @@ def main() -> int:
         "mass": mass,
         "color": list(color),
         "collision": "none" if static else "convexHull",
+        # Bounding box (m); robot_service's PlanGrasp reads it (phase_5c.md decision 5).
+        "dims": [round(float(v), 6) for v in mesh.extents],
     }
     if name == "calib_board":
       description["origin"] = "center"

@@ -3,6 +3,10 @@ color:
 - 1.0
 - 1.0
 - 1.0
+dims:
+- 0.28
+- 0.2
+- 0.005
 mass: 0.2
 origin: center
 static: false

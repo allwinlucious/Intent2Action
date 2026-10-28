@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Semantic description of assets/robots/franka/lula_franka_gen.urdf for the grasp planner
+     (docs/designs/phases/phase_5c.md decision 3). disable_collisions are copied from apt
+     moveit_resources_panda_moveit_config/config/panda.srdf (BSD-3-Clause). -->
+<robot name="franka">
+  <group name="panda_arm">
+    <chain base_link="base_link" tip_link="panda_link8"/>
+  </group>
+  <group name="hand">
+    <link name="panda_hand"/>
+    <link name="panda_leftfinger"/>
+    <link name="panda_rightfinger"/>
+    <joint name="panda_finger_joint1"/>
+    <joint name="panda_finger_joint2"/>
+  </group>
+  <group_state group="hand" name="open">
+    <joint name="panda_finger_joint1" value="0.04"/>
+    <joint name="panda_finger_joint2" value="0.04"/>
+  </group_state>
+  <group_state group="hand" name="closed">
+    <joint name="panda_finger_joint1" value="0.0"/>
+    <joint name="panda_finger_joint2" value="0.0"/>
+  </group_state>
+  <end_effector group="hand" name="hand" parent_group="panda_arm" parent_link="panda_link8"/>
+  <virtual_joint child_link="base_link" name="virtual_joint" parent_frame="world" type="fixed"/>
+  <disable_collisions link1="panda_link0" link2="panda_link1" reason="Adjacent"/>
+  <disable_collisions link1="panda_link0" link2="panda_link2" reason="Never"/>
+  <disable_collisions link1="panda_link0" link2="panda_link3" reason="Never"/>
+  <disable_collisions link1="panda_link0" link2="panda_link4" reason="Never"/>
+  <disable_collisions link1="panda_link1" link2="panda_link2" reason="Adjacent"/>
+  <disable_collisions link1="panda_link1" link2="panda_link3" reason="Never"/>
+  <disable_collisions link1="panda_link1" link2="panda_link4" reason="Never"/>
+  <disable_collisions link1="panda_link2" link2="panda_link3" reason="Adjacent"/>
+  <disable_collisions link1="panda_link2" link2="panda_link4" reason="Never"/>
+  <disable_collisions link1="panda_link2" link2="panda_link6" reason="Never"/>
+  <disable_collisions link1="panda_link3" link2="panda_link4" reason="Adjacent"/>
+  <disable_collisions link1="panda_link3" link2="panda_link5" reason="Never"/>
+  <disable_collisions link1="panda_link3" link2="panda_link6" reason="Never"/>
+  <disable_collisions link1="panda_link3" link2="panda_link7" reason="Never"/>
+  <disable_collisions link1="panda_link4" link2="panda_link5" reason="Adjacent"/>
+  <disable_collisions link1="panda_link4" link2="panda_link6" reason="Never"/>
+  <disable_collisions link1="panda_link4" link2="panda_link7" reason="Never"/>
+  <disable_collisions link1="panda_link5" link2="panda_link6" reason="Adjacent"/>
+  <disable_collisions link1="panda_link6" link2="panda_link7" reason="Adjacent"/>
+  <disable_collisions link1="panda_hand" link2="panda_leftfinger" reason="Adjacent"/>
+  <disable_collisions link1="panda_hand" link2="panda_rightfinger" reason="Adjacent"/>
+  <disable_collisions link1="panda_leftfinger" link2="panda_rightfinger" reason="Default"/>
+  <disable_collisions link1="panda_hand" link2="panda_link3" reason="Never"/>
+  <disable_collisions link1="panda_hand" link2="panda_link4" reason="Never"/>
+  <disable_collisions link1="panda_hand" link2="panda_link6" reason="Never"/>
+  <disable_collisions link1="panda_hand" link2="panda_link7" reason="Adjacent"/>
+  <disable_collisions link1="panda_leftfinger" link2="panda_link3" reason="Never"/>
+  <disable_collisions link1="panda_leftfinger" link2="panda_link4" reason="Never"/>
+  <disable_collisions link1="panda_leftfinger" link2="panda_link6" reason="Never"/>
+  <disable_collisions link1="panda_leftfinger" link2="panda_link7" reason="Never"/>
+  <disable_collisions link1="panda_link3" link2="panda_rightfinger" reason="Never"/>
+  <disable_collisions link1="panda_link4" link2="panda_rightfinger" reason="Never"/>
+  <disable_collisions link1="panda_link6" link2="panda_rightfinger" reason="Never"/>
+  <disable_collisions link1="panda_link7" link2="panda_rightfinger" reason="Never"/>
+</robot>

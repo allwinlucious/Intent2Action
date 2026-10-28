@@ -4,4 +4,5 @@ set -euo pipefail
 sg docker -c "docker rm -f intrinsic" >/dev/null 2>&1 || true
 exec sg docker -c "docker run --name intrinsic --network host \
   --cap-add IPC_LOCK --cap-add SYS_NICE --ulimit memlock=-1:-1 -e ROBOT_BACKEND=${ROBOT_BACKEND:-isaac} \
+  -e GRASP_PLANNER=${GRASP_PLANNER:-on} \
   -v intrinsic-data:/var/lib/intrinsic intrinsic-core:dev"

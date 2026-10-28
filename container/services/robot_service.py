@@ -2,7 +2,8 @@
 
 Plain Python in the image, started by container/entrypoint.sh with CycloneDDS rclpy (for /clock). Uses
 only Intrinsic APIs: ICON (localhost:18003), the motion planner (:18002), the world (:18000),
-camera_sim's CameraService (:18005), the CalibrationService (:18006); simulation-only calls go through
+camera_sim's CameraService (:18005), the CalibrationService (:18006), the grasp planner and MoveIt (ROS 2,
+robot/grasp.py); simulation-only calls go through
 scene_sync's SimLink (:18101). Every RPC is logged with its status; errors carry a specific code and
 a message naming the cause.
 """
@@ -49,6 +50,7 @@ import rclpy  # noqa: E402
 from rclpy.executors import SingleThreadedExecutor  # noqa: E402
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy  # noqa: E402
 from robot import calibration  # noqa: E402
+from robot import grasp  # noqa: E402
 from robot import gripper  # noqa: E402
 from robot import png  # noqa: E402
 from robot.icon import ARM, FT_SENSOR, GRIPPER, Icon  # noqa: E402
@@ -251,6 +253,7 @@ class Robot:
     self.calibration = calib_grpc.CalibrationServiceStub(grpc.insecure_channel(args.calibration))
     self.simlink = simlink_pb2_grpc.SimLinkStub(grpc.insecure_channel(args.simlink))
     self.clock = SimClock()
+    self.grasps = grasp.GraspPlanner()
     self.ops = OperationTable()
     self.mirror_world = mirror_world
     self.lock = threading.Lock()
@@ -685,7 +688,10 @@ class RobotService(api_grpc.RobotServiceServicer):
 
   MoveToContact = _unimplemented("MoveToContact", "5b")
   MoveCompliant = _unimplemented("MoveCompliant", "5b")
-  PlanGrasp = _unimplemented("PlanGrasp", "5c")
+
+  def PlanGrasp(self, request, context):
+    return self.r.grasps.plan_grasp(self.r.world, request.object)
+
   def CalibrateCamera(self, request, context):
     def work(op: Operation) -> None:
       result = calibration.run(CalibrationArm(self.r, op), self.r.calibration)

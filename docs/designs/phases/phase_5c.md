@@ -171,3 +171,18 @@ G9 covers the graspable catalog objects `red_cube` and `peg`; `plate`
 
 As phase 3 (no `git commit`; Docker via `sg docker -c`; no `pkill -f`;
 Bazel only via `container/build_intrinsic.sh`; Observability).
+
+## Addendum A (after the first run, phase_5c_notes.md)
+
+1.  **Frame:** the Franka base is at the world origin, so `robot_service`
+    puts every `CollisionObject` in `header.frame_id = "base_link"` (same
+    poses as before). No static TF is added; remove any diagnostic one.
+2.  **Table vs. robot base:** in the MoveIt scene only, a static object
+    whose top is within 0.005 m of z = 0 (the robot base plane) gets its
+    box lowered by 0.005 m (dims and pose unchanged otherwise), so the
+    robot's start state is not in collision with it. Intrinsic's `world`
+    is unchanged. Log it once per object.
+3.  `tests/e2e/phase3_cuj_check.py` `cuj4`: stop a `MoveJoints` whose
+    planned duration is ≥ 3 s (e.g. joint 1 by 1.5 rad), issued 1 s after
+    the start.
+Then rerun Step 3; all done criteria must pass.
