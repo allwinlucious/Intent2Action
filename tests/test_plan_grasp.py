@@ -77,10 +77,10 @@ def test_side_grasp_composed_into_world(degrees):
   out = grasp.response(world_t_object, _grasp(_side(CUBE)), CUBE)
   c, s = math.cos(math.radians(degrees)), math.sin(math.radians(degrees))
   approach = np.array([c, s, 0.0])
-  # Tool on the -x face (-0.025) moved 0.04 deeper along its approach: +0.015 from the centre line.
+  # Tool on the -x face (-0.025) moved 0.02 deeper along its approach: -0.005 from the centre line.
   centre = np.array([0.5, 0.1, 0.775])
   grasp_m, pregrasp_m = pose_matrix(out.grasp), pose_matrix(out.pregrasp)
-  np.testing.assert_allclose(grasp_m[:3, 3], centre + 0.015 * approach, atol=1e-9)
+  np.testing.assert_allclose(grasp_m[:3, 3], centre - 0.005 * approach, atol=1e-9)
   np.testing.assert_allclose(grasp_m[:3, 2], approach, atol=1e-9)
   np.testing.assert_allclose(grasp_m[:3, 1], [-s, c, 0.0], atol=1e-9)
   # The pregrasp is not deepened: 0.08 back from the face.
@@ -174,8 +174,7 @@ def test_unknown_catalog_is_not_found(tmp_path):
   assert e.value.code == grpc.StatusCode.NOT_FOUND
 
 
-@pytest.mark.parametrize("dims, depth", [(CUBE, 0.04), (np.array([0.05, 0.05, 0.08]), 0.04),
-                                         (np.array([0.05, 0.05, 0.025]), 0.015)])
+@pytest.mark.parametrize("dims, depth", [(CUBE, 0.02), (np.array([0.05, 0.05, 0.025]), 0.015)])
 def test_depth(dims, depth):
   tool = _top_down(dims)
   np.testing.assert_allclose(grasp.deepened(tool, dims)[:3, 3], [0, 0, dims[2] - depth], atol=1e-12)

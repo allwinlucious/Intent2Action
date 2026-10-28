@@ -1,18 +1,26 @@
 # Phase 5b notes
 
-**Status: stopped at Addendum C.1** (run 5). The grip changes are applied
-and take effect in Isaac and ICON. The rerun of `phase5c_check.py` that
-C.1 requires fails: cube 0/10 and peg 0/10. The new grasp depth puts the
-hand in collision with the table (cube) or with the peg itself, so no
-grasp is reachable. A depth rule is a design decision (see "Run 5"
-below), so the C.2 sweep, the full `phase5b_check.py`, C.3 and Step 4
-were not run. `robot_platform.md` (CUJ 6, G8) is untouched. Decisions
-1–8, Steps 1–2 and Addenda A and B are implemented.
+**Status: stopped at Addendum C.2** (run 6). Addendum D is applied: the
+grasp depth is back to `min(0.02, extent − 0.01)`, and `phase5c_check.py`
+passes with cube 10/10 and peg 10/10. In the sweep, no combination
+qualifies. `jam` fails in all six combinations, always with "force limit
+reached" and never with "settled before reaching the target". Three
+combinations reach ≥ 4/5 inserts. As C.2 requires, the full
+`phase5b_check.py`, C.3 and Step 4 were not run, and `robot_platform.md`
+(CUJ 6, G8) is untouched. The sweep parameters are back at the committed
+values (admittance inertia 2 kg, compliant damping 600; USDs as
+committed). The phase 3 and 4 checks and pytest pass on the final tree
+(see "Run 6" below). Decisions 1–8, Steps 1–2, Addenda A and B, C.1 (finger
+material and the 60 N grip) and D are implemented.
 
 ## Check results
 
 | Check | Result | Log |
 |-------|--------|-----|
+| `phase5c_check.py` after D | all PASS: planner_up, cube 10/10, peg 10/10, too_wide, logs, errors | `logs/phase5b_addD_phase5c_check.log` (Isaac and container: `logs/phase5b_addD_phase5c_{isaac,container}.log`) |
+| C.2 sweep, 6 combinations (`phase5b_check.py --sweep`) | none qualifies: `jam` FAIL in all 6; inserts 3/5, 4/5, 1/5, 5/5, 2/5, 4/5 | `logs/phase5b_sweep_i{2,5,10}_d{600,2000}.log` |
+| phase 3 hwm / scene / cuj, phase 4 (final tree) | all PASS on first run | `logs/phase5b_addD_regress_*.log` |
+| `pytest -q tests/` (final tree) | 77 passed | |
 | `phase5c_check.py` after C.1 | planner_up PASS, cube FAIL 0/10, peg FAIL 0/10, too_wide PASS, logs PASS, errors PASS | `logs/phase5b_addC_phase5c_check.log` (Isaac and container: `logs/phase5b_addC_phase5c_{isaac,container}.log`) |
 | `pytest -q tests/` after C.1 | 78 passed | |
 | `phase5b_check.py` run 4 (Addendum B) | contact_table PASS, no_contact PASS, bad_speed PASS, insert FAIL 1/10, jam FAIL, logs PASS | `logs/phase5b_check_run4.log` |
@@ -37,6 +45,98 @@ Fixes made between run 1 and run 2 (implementation bugs, not design):
    condition to be false, so the abort wins.
 3. Sequences that ICON ended had no `force` log line. `run_force` now
    logs one with `force_along_push_n=nan` before re-raising.
+
+## Run 6 (Addendum D, then the C.2 sweep)
+
+Applied:
+- **D:** `container/services/robot/grasp.py` and `tests/test_plan_grasp.py`
+  are restored to their phase 5c content (`MAX_DEPTH_M` 0.02, the old
+  depth expectations). The finger material and the 60 N grasp force from
+  C.1 stay. Image rebuilt (`logs/phase5b_addD_docker_build.log`).
+  `phase5c_check.py` passes.
+- **C.2 sweep:** for each combination, `ADMITTANCE_INERTIA` in
+  `container/services/robot/force.py` (translational only; rotational
+  stays 0.05) and `COMPLIANT_DAMPING` in `sim/tools/build_catalog.py`
+  were set. All 7 USDs were regenerated whenever the damping changed
+  (`logs/phase5b_build_catalog_d{600,2000}.log`), the image was rebuilt,
+  and `phase5b_check.py --sweep` ran (`jam`, then 5 `insert` trials).
+  After the sweep, `force.py`, `build_catalog.py` and
+  `assets/objects/*/model.usd` were restored to the committed files
+  (2 kg, 600), and the image was rebuilt again.
+
+### Sweep results
+
+`jam` columns: the `MoveToContact(10 N)` result, and the `MoveCompliant`
+(1000 N/m, 3 cm down, 60 N) result. Each has the final force along the
+push, the peak `GetWrench` norm, and the p10/p90 of the second half of the
+samples (the two levels of an alternating wrench). Inserts: depth per
+trial in mm (success ≥ 25 mm). Search = the `MoveCompliant` (2 mm down,
+2000 N/m, 30 N) outcome.
+
+| Inertia (kg), damping | `jam` MoveToContact | `jam` MoveCompliant | Inserts | Depths (mm) | Search |
+|---|---|---|---|---|---|
+| 2, 600 | done 3.38 s, 7.1 N; peak 32.1, p10/p90 0.6/26.0 | force limit after 0.56 s, 25.9 N; peak 57.3, 26.1/28.5 | 3/5 | 32.8, 29.8, 25.0, 18.0, 20.1 | 5 done in 8.2–18.3 s; hole-bottom contact only 0.4–5.6 N |
+| 2, 2000 | done 3.38 s, 1.7 N; peak 46.9, 0.4/31.0 | force limit after 0.34 s, 4.8 N; peak 82.6, 4.4/5.3 | 4/5 | 34.1, 34.1, 34.0, 34.2, 0.9 | 4 done in 0.74–0.90 s; 1 force limit after 0.59 s (6.0 N, peak 23.3) |
+| 5, 600 | done 3.38 s, 7.0 N; peak 32.5, 0.6/25.8 | force limit after 0.59 s, 32.3 N; peak 60.5, 33.5/35.7 | 1/5 | 1.0, 0.9, 1.2, 1.3, 35.1 | 4 DEADLINE_EXCEEDED at 30.3 s (2.5–3.0 N); 1 done in 2.02 s |
+| 5, 2000 | done 3.38 s, 3.8 N; peak 49.5, 0.4/29.2 | force limit after 0.44 s, 7.5 N; peak 56.6, 7.0/7.8 | **5/5** | 34.1, 34.1, 34.1, 34.3, 34.1 | 5 done in 1.24–7.03 s |
+| 10, 600 | done 3.37 s, 7.9 N; peak 32.1, 0.6/25.8 | force limit after 4.41 s, 34.3 N; peak 61.1, 17.2/53.5 | 2/5 | 1.3, 28.0, 33.3, 1.2, 0.9 | 3 DEADLINE_EXCEEDED at 30.3 s (2.3–3.1 N); 2 done in 1.31–3.92 s |
+| 10, 2000 | done 3.39 s, 4.2 N; peak 48.6, 0.4/29.7 | force limit after 0.44 s, 8.9 N; peak 70.5, 8.8/9.9 | 4/5 | 34.4, 1.1, 34.2, 33.4, 33.3 | 4 done in 1.02–10.72 s; 1 DEADLINE_EXCEEDED (2.8 N) |
+
+In all 30 trials the face `MoveToContact` was done after 5.6–5.8 s of
+sim time, on the top face, at 12.4–14.6 N, with a peak of 14–16 N. No
+trial faulted ICON. The sweep does not run the `logs` check.
+
+### Findings 14–17 (for the lead)
+
+14. **The grip now holds the peg.** Every search that ended `done` left
+    the peg 0.3–1.2 mm from the axis, with the peg bottom 2.8–3.3 mm below
+    the face. In run 4 the peg moved < 0.1 mm and the hand moved instead.
+    The phase 5c depth, the finger material and the 60 N grip together
+    fix finding 10.
+15. **`jam` fails the same way in every combination: "force limit
+    reached".** It aborts after 0.34–0.59 s (4.41 s once), never on
+    "settled". In the damping-2000 runs the force after the stop is only
+    4.8–8.9 N (p10/p90 4.4–9.9 N), far below the 30 N spring force, so the
+    60 N limit tripped on a short spike early in the move. The
+    `GetWrench` peaks are 57–83 N, and ICON samples at 1 kHz, so it can
+    see higher peaks than the 10 ms client sampler. Neither swept
+    parameter removes it.
+16. **The alternating wrench is in the closed-finger contact with the
+    table, before `MoveCompliant` starts.** The jam's `MoveToContact`
+    (which does not use the admittance inertia) already alternates
+    between p10 0.4–0.6 N and p90 26–31 N, with peaks of 32–50 N. It ends
+    at 1.7–7.9 N, below its 10 N target. Damping 2000 raises those peaks
+    (47–50 N against 32 N). The peg-on-face contact does not alternate:
+    its peak is within about 2 N of the final force. So `jam`, as
+    specified with closed fingers on the table, starts from a chattering
+    contact. The chattering is likely related to the finger geometry or
+    the C.1 finger material against the compliant table, but that is not
+    verified.
+17. **Damping 2000 makes the search and the hole-bottom contact
+    reliable.** With damping 2000, 13/15 searches were done in 0.7–11 s,
+    and every hole-bottom contact reached 11.8–14.0 N at depth 33.3–34.4
+    mm. With 600, 7/10 searches at 5 and 10 kg hit the 30 s deadline at
+    about 3 N. At 2 kg, the hole-bottom `MoveToContact` was "done" at
+    only 0.4–5.6 N, at depths of 18–33 mm. The depth stops at about 34 mm,
+    not 40 mm (the hole bottom). Something stops the peg about 6 mm
+    above the hole bottom (perhaps the fingers on the block top), but
+    this was not checked.
+
+Options (not applied), choose one for `jam`:
+- Run the jam with the grasped peg pressed on the block's top face away
+  from the hole (the contact that does not chatter, finding 16), instead
+  of closed fingers on the table.
+- Raise the jam `max_force` to 80 N (below the 85 N excessive-force
+  abort). The measured `GetWrench` peaks reach 83 N, so this may still
+  trip.
+- Lower the jam stiffness to about 500 N/m (15 N spring), with
+  `max_force` 60.
+- Investigate the finger–table contact in Isaac, for example compliant
+  parameters on the finger material.
+
+For `insert` alone: if `jam` were dropped from the criterion, the first
+qualifying combination in the C.2 order would be 2 kg with damping 2000
+(4/5). The best was 5 kg with damping 2000 (5/5).
 
 ## Run 5 (Addendum C)
 
@@ -490,9 +590,13 @@ Modified:
 - Run 5 (C.1): `sim/scene.py` (finger material), `container/config/icon.txtpb`
   (`default_force` 60), `container/services/robot/grasp.py` (`MAX_DEPTH_M`
   0.04), `tests/test_plan_grasp.py` (depth expectations)
-- Run 5 (C.2 tooling, unused): `tests/e2e/phase5b_check.py` (`--sweep`,
+- Run 5 (C.2 tooling): `tests/e2e/phase5b_check.py` (`--sweep`,
   wrench percentiles), `sim/tools/build_catalog.py` (`COMPLIANT_DAMPING`
   constant, still 600; USDs not regenerated)
+- Run 6 (D): `container/services/robot/grasp.py` and
+  `tests/test_plan_grasp.py` restored to their phase 5c content. The sweep
+  changed `force.py`, `build_catalog.py` and the USDs temporarily; all
+  three are restored to the committed files.
 
 Regenerated `gen/`:
 - `intrinsic/icon/actions/{force_primitive,cartesian_admittance_action,cartesian_impedance,cartesian_impedance_reference_generators}_pb2*`
@@ -505,4 +609,6 @@ Other logs:
   `logs/phase5b_build_catalog_b.log`
 - `logs/phase5b_addB_{build,stage,stage_vendor,docker_build}.log`
 - `logs/phase5b_docker_build.log`
-- `logs/phase5b_robot_service.log`
+- `logs/phase5b_robot_service.log` (from the last sweep run)
+- Run 6: `logs/phase5b_addD_docker_build*.log`,
+  `logs/phase5b_build_catalog_d{600,2000}.log`

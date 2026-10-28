@@ -228,3 +228,19 @@ approach − 0.01)` (`MAX_DEPTH_M` back to 0.02; restore the unit test
 expectations). Keep the finger friction material and the 60 N grasp
 force from Addendum C.1. Then rerun `phase5c_check.py` (≥ 9/10 each) and
 continue with Addendum C.2 (the sweep), C.3 and Step 4 unchanged.
+
+## Addendum E (after run 6, the sweep)
+
+1.  **Chosen parameters:** `MoveCompliant` translational virtual inertia
+    **5 kg**; catalog `compliantContactDamping` **2000** (sweep: jam aside,
+    5/5 inserts, searches < 11 s). Set them in `container/services/robot/force.py`
+    and `sim/tools/build_catalog.py`; regenerate the USDs.
+2.  **`jam` uses a realistic jam** (bare fingers on the table chatter
+    0.5↔30 N in Isaac; the peg on the block face does not): grasp `peg`,
+    `AttachObject`, `SetPayload(0.05)`; peg tip 2 cm above the block top
+    at 0.02 m from the hole axis (fully on the face); `TareWrench`;
+    `MoveToContact((0,0,−1), 10, 0.01)`; `MoveCompliant(target 0.03 m
+    below the contact TCP pose, stiffness 1000, max_force 60)` →
+    `ABORTED` "settled before reaching the target".
+3.  Then the full `phase5b_check.py` (all criteria, `insert` ≥ 9/10), C.3
+    (phase 3, 4, 5c regressions) and Step 4.
