@@ -34,7 +34,7 @@ STIFFNESS_RANGE = (50.0, 5000.0)  # N/m
 ROTATIONAL_INERTIA = 1.0  # kg m², MakeContact
 DEADBAND = (1.5, 0.2)  # N, N·m
 ADMITTANCE_ROTATIONAL_STIFFNESS = 30.0  # N·m/rad
-ADMITTANCE_INERTIA = (2.0, 0.05)  # kg, kg m²
+ADMITTANCE_INERTIA = (5.0, 0.05)  # kg, kg m²
 
 
 def contact_inertia(force: float, speed: float) -> float:

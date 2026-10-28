@@ -33,7 +33,7 @@ FORCE_RANGE_N = (12.0, 18.0)  # G8: +-20 %
 TABLE_XY = (0.45, -0.05)
 CONTACT_START_Z = 0.03
 NO_CONTACT_Z = 0.30
-JAM_START_Z = 0.02
+JAM_OFF_AXIS_M = 0.02  # +x; the peg (radius 0.010) rests on the face beside the hole (radius 0.011)
 JAM_CONTACT_FORCE_N = 10.0
 JAM_DOWN_M = 0.03  # MoveCompliant target below the contact TCP pose
 JAM_STIFFNESS, JAM_MAX_FORCE_N = 1000.0, 60.0  # spring 30 N plus overshoot (about 43 N) < 60
@@ -200,8 +200,8 @@ def check_bad_speed() -> str:
   return f"MoveToContact(speed 0.2) -> {cuj._code(error)}"
 
 
-def _insert_trial() -> str:
-  _reset()
+def _peg_above_block(off_axis_m: float) -> tuple[api.Pose, list[str]]:
+  """Grasps the peg and holds its bottom off_axis_m off the hole axis in +x, ABOVE_M above the top; returns (hole, facts)."""
   p5c._settled(PEG)
   plan = p5c._plan(PEG)
   cuj._move("MoveToPose", pose=plan.pregrasp)
@@ -211,17 +211,22 @@ def _insert_trial() -> str:
   cuj._call(cuj._robot, "SetPayload", api.SetPayloadRequest(mass=PAYLOAD_KG))
   cuj._move("MoveToPose", pose=cuj._at(plan.grasp, plan.grasp.x, plan.grasp.y, plan.grasp.z + LIFT_M), motion=api.LINEAR)
   hole = _true(BLOCK)
-  # The peg's origin is its bottom centre: move it OFF_AXIS_M off the hole axis in +x, ABOVE_M above the top.
-  # The arm lands within about 1 mm of a target, so the move is repeated from the new true pose.
+  # The peg's origin is its bottom centre. The arm lands within about 1 mm of a target, so the move is
+  # repeated from the new true pose.
   for _ in range(PLACE_MOVES):
     peg, tcp = _true(PEG), cuj._state().tool_pose
-    goal = np.array([hole.x + OFF_AXIS_M, hole.y, BLOCK_TOP_Z + ABOVE_M]) - [peg.x, peg.y, peg.z]
+    goal = np.array([hole.x + off_axis_m, hole.y, BLOCK_TOP_Z + ABOVE_M]) - [peg.x, peg.y, peg.z]
     if np.linalg.norm(goal) <= PLACE_TOLERANCE_M:
       break
     cuj._move("MoveToPose", pose=cuj._at(tcp, tcp.x + goal[0], tcp.y + goal[1], tcp.z + goal[2]), motion=api.LINEAR)
   peg = _true(PEG)
-  facts = [f"start off axis ({(peg.x - hole.x) * 1e3:+.2f}, {(peg.y - hole.y) * 1e3:+.2f}) mm, "
-           f"{(peg.z - BLOCK_TOP_Z) * 1e3:.1f} mm above"]
+  return hole, [f"start off axis ({(peg.x - hole.x) * 1e3:+.2f}, {(peg.y - hole.y) * 1e3:+.2f}) mm, "
+                f"{(peg.z - BLOCK_TOP_Z) * 1e3:.1f} mm above"]
+
+
+def _insert_trial() -> str:
+  _reset()
+  hole, facts = _peg_above_block(OFF_AXIS_M)
   cuj._call(cuj._robot, "TareWrench")
   step = "MoveToContact (top face)"
   try:
@@ -277,16 +282,19 @@ def check_insert(trials: int = TRIALS, min_successes: int = MIN_SUCCESSES) -> st
 
 def check_jam() -> str:
   _reset()
-  _closed_at(JAM_START_Z)
+  hole, facts = _peg_above_block(JAM_OFF_AXIS_M)
   cuj._call(cuj._robot, "TareWrench")
   _force("MoveToContact", dz=-1.0, max_force=JAM_CONTACT_FORCE_N, speed=SPEED)
-  contact = cuj._state().tool_pose
+  contact, peg = cuj._state().tool_pose, _true(PEG)
+  facts.append(f"contact {_push_force():.2f} N, peg bottom z {peg.z:.4f}, x/y off axis "
+               f"({(peg.x - hole.x) * 1e3:+.2f}, {(peg.y - hole.y) * 1e3:+.2f}) mm")
   error = _force_error("MoveCompliant", pose=cuj._at(contact, contact.x, contact.y, contact.z - JAM_DOWN_M),
                        stiffness=JAM_STIFFNESS, max_force=JAM_MAX_FORCE_N)
+  facts.append(f"MoveCompliant into the block face -> {cuj._code(error)}")
   took = _sim_seconds(error.details()) if error.code() == grpc.StatusCode.ABORTED else None
   if took is None or "settled before reaching the target" not in error.details() or took > JAM_MAX_SIM_S:
-    raise RuntimeError(f"MoveCompliant into the table -> {cuj._code(error)}")
-  return f"MoveCompliant into the table -> {cuj._code(error)}"
+    raise RuntimeError("; ".join(facts))
+  return "; ".join(facts)
 
 
 def _log_lines() -> list[str]:

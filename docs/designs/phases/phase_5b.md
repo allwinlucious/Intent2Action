@@ -244,3 +244,24 @@ continue with Addendum C.2 (the sweep), C.3 and Step 4 unchanged.
     `ABORTED` "settled before reaching the target".
 3.  Then the full `phase5b_check.py` (all criteria, `insert` ≥ 9/10), C.3
     (phase 3, 4, 5c regressions) and Step 4.
+
+## Addendum F (after run 7: insert 9/10)
+
+1.  **`contact_table` → `contact_face`:** bare fingers on the table chatter
+    in Isaac (findings 14, 18); the check now uses the `jam` set-up's
+    first half: grasped `peg`, `SetPayload(0.05)`, tip 2 cm above the
+    block top 20 mm off the hole axis, `TareWrench`,
+    `MoveToContact((0,0,−1), 15, 0.01)` → done, force along the push
+    12–18 N.
+2.  **Server-side jam detection in `MoveCompliant`** (ICON's
+    `settled_for_seconds` does not accumulate in Isaac, findings 12, 20):
+    while the sequence runs, `robot_service` samples the sensed TCP
+    position every 0.1 s of sim time (ICON `GetStatus`
+    `base_t_tip_sensed`); if it moved < 0.0005 m over the last 1.0 s of
+    sim time and the target is not reached, it cancels the sequence
+    (starts the stop action) and returns `ABORTED` "settled before
+    reaching the target (position error e m)". The ICON condition stays as
+    well. Pure helper `JamDetector` in `container/services/robot/force.py`
+    with a unit test (moving → no jam; still for 1 s → jam).
+3.  Then the full `phase5b_check.py`, C.3 regressions (phase 3, 4, 5c with
+    the new damping) and Step 4.

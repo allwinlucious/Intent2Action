@@ -1,6 +1,17 @@
 # Phase 5b notes
 
-**Status: stopped at Addendum C.2** (run 6). Addendum D is applied: the
+**Status: stopped at Addendum E.3** (run 7). Addendum E.1 and E.2 are
+applied: admittance inertia 5 kg, compliant damping 2000 (all 7 USDs
+regenerated), and `jam` uses the grasped peg on the block face. The full
+`phase5b_check.py` passes `insert` 9/10, `no_contact`, `bad_speed` and
+`logs`. It fails `contact_table` (bare fingers on the table chatter and end
+at 5.2 N) and `jam` (it holds at about 31 N but never reports "settled",
+so it ends on the 30 s deadline). Neither can pass without a new decision
+(findings 18–19). So C.3 (the phase 3, 4 and 5c regressions) and Step 4
+were not run, and `robot_platform.md` is untouched. `pytest` passes (77).
+E.1 and E.2 stay applied.
+
+**Previous status (run 6): stopped at Addendum C.2.** Addendum D is applied: the
 grasp depth is back to `min(0.02, extent − 0.01)`, and `phase5c_check.py`
 passes with cube 10/10 and peg 10/10. In the sweep, no combination
 qualifies. `jam` fails in all six combinations, always with "force limit
@@ -17,6 +28,8 @@ material and the 60 N grip) and D are implemented.
 
 | Check | Result | Log |
 |-------|--------|-----|
+| `phase5b_check.py` run 7 (Addendum E) | contact_table FAIL (5.18 N), no_contact PASS, bad_speed PASS, insert PASS 9/10, jam FAIL (DEADLINE_EXCEEDED), logs PASS | `logs/phase5b_check_run7.log` (Isaac, container, service: `logs/phase5b_{isaac,container,robot_service}.log`) |
+| `pytest -q tests/` (Addendum E) | 77 passed | |
 | `phase5c_check.py` after D | all PASS: planner_up, cube 10/10, peg 10/10, too_wide, logs, errors | `logs/phase5b_addD_phase5c_check.log` (Isaac and container: `logs/phase5b_addD_phase5c_{isaac,container}.log`) |
 | C.2 sweep, 6 combinations (`phase5b_check.py --sweep`) | none qualifies: `jam` FAIL in all 6; inserts 3/5, 4/5, 1/5, 5/5, 2/5, 4/5 | `logs/phase5b_sweep_i{2,5,10}_d{600,2000}.log` |
 | phase 3 hwm / scene / cuj, phase 4 (final tree) | all PASS on first run | `logs/phase5b_addD_regress_*.log` |
@@ -45,6 +58,112 @@ Fixes made between run 1 and run 2 (implementation bugs, not design):
    condition to be false, so the abort wins.
 3. Sequences that ICON ended had no `force` log line. `run_force` now
    logs one with `force_along_push_n=nan` before re-raising.
+
+## Run 7 (Addendum E)
+
+Applied:
+- **E.1:** `ADMITTANCE_INERTIA` (`container/services/robot/force.py`) is
+  (5.0, 0.05), and `tests/test_force.py` expects diag(5, 5, 5, 0.05, 0.05,
+  0.05). `COMPLIANT_DAMPING` (`sim/tools/build_catalog.py`) is 2000. All 7
+  `model.usd` were regenerated (`logs/phase5b_addE_build_catalog.log`), and
+  the image was rebuilt (`logs/phase5b_addE_docker_build.log`; the image's
+  `force.py` was checked to have 5.0).
+- **E.2:** `check_jam` grasps the peg the same way as `insert`, through a
+  shared helper `_peg_above_block(off_axis_m)` with the grasp, attach,
+  payload and placement steps from `_insert_trial`. The peg starts 20 mm
+  off the axis in +x and 2 cm above the top. Then: `TareWrench`,
+  `MoveToContact(down, 10 N, 0.01)`, and `MoveCompliant` (3 cm below the
+  contact TCP pose, 1000 N/m, 60 N). Geometry: the peg (radius 10 mm) at
+  +20 mm covers +10 to +30 mm, and the hole radius is 11 mm, so a 1 mm
+  sliver of the peg bottom hangs over the hole rim. The centre and nearly
+  all of the bottom are on the face. `JAM_START_Z` is removed, and
+  `contact_table` is unchanged.
+
+### Insert, run 7, per trial
+
+Same columns as run 4. Face/bottom = the `MoveToContact` result (sim time,
+final force in the operation message). Contact = `GetWrench` along the push
+afterwards.
+
+| # | Start off axis (mm), height | Face | Contact (N) | Off axis at contact (mm), peg bottom z | Search (`MoveCompliant`) → off axis after (mm) | Bottom | Depth |
+|---|---|---|---|---|---|---|---|
+| 1 | +3.00, −0.07; 19.6 | 5.80 s, 14.3 N | 14.05 | +2.98, −0.21; 0.0497 | done 2.20 s → +0.91, −0.42 | 6.27 s, 12.98 N | 34.1 mm |
+| 2 | +2.45, −0.34; 18.8 | 5.78 s, 13.1 N | 13.54 | +2.64, −0.32; 0.0496 | done 1.80 s → +0.87, −0.28 | 6.46 s, 12.00 N | 40.0 mm |
+| 3 | +2.62, −0.24; 19.1 | 5.74 s, 12.6 N | 13.23 | +2.68, −0.32; 0.0496 | done 1.62 s → +0.76, −0.27 | 6.43 s, 12.50 N | 34.1 mm |
+| 4 | +2.70, −0.26; 19.1 | 5.74 s, 13.0 N | 13.56 | +3.13, −0.04; 0.0497 | DEADLINE_EXCEEDED 30.29 s, 3.0 N | – | **1.1 mm (fail)** |
+| 5 | +2.50, −0.32; 18.9 | 5.88 s, 13.2 N | 13.47 | +2.65, −0.47; 0.0496 | done 0.93 s → +0.31, −0.31 | 6.41 s, 12.44 N | 34.1 mm |
+| 6 | +2.77, −0.37; 18.6 | 5.77 s, 13.6 N | 12.93 | +2.69, −0.34; 0.0496 | done 1.22 s → +0.42, −0.35 | 6.37 s, 12.88 N | 35.1 mm |
+| 7 | +2.73, −0.30; 19.0 | 5.81 s, 11.2 N | 17.71 | +2.80, −0.37; 0.0496 | done 1.25 s → +0.53, −0.27 | 6.31 s, 13.05 N | 34.3 mm |
+| 8 | +2.57, −0.37; 18.7 | 5.77 s, 12.7 N | 12.65 | +2.65, −0.41; 0.0496 | done 12.53 s → +1.10, −0.02 | 4.10 s, 0.81 N | 29.7 mm |
+| 9 | +2.96, −0.13; 19.6 | 5.77 s, 13.6 N | 13.23 | +2.87, −0.25; 0.0497 | done 1.52 s → +0.61, −0.16 | 6.23 s, 12.07 N | 34.2 mm |
+| 10 | +3.04, −0.13; 19.6 | 5.75 s, 12.7 N | 13.11 | +3.17, −0.10; 0.0498 | done 7.36 s → +0.79, −0.45 | 6.17 s, 12.66 N | 34.2 mm |
+
+No trial faulted ICON. Every face contact was on the top face at
+12.65–17.71 N (`GetWrench`), inside 12–18 N. In trial 7 the operation's
+own final force was 11.2 N (face peak 18.4 N, p10/p90 4.3/16.6 N), but the
+criterion uses `GetWrench`. Trial 8's bottom `MoveToContact` was "done" at
+0.8 N and 29.7 mm. That passes the 25 mm criterion, but the peg did not
+press on anything at 12–18 N. Trial 2 reached 40.0 mm (the hole bottom),
+while the other successes stopped at 34.1–35.1 mm (finding 17).
+
+### `contact_table` and `jam`, run 7
+
+- `contact_table`: `MoveToContact(down, 15 N, 0.01)` was done after
+  4.45 s with 5.3 N. `GetWrench` along the push was then 5.18 N. The peak
+  was 48.3 N, and the second-half p10/p90 was 1.1/34.6 N.
+- `jam`: the peg started at (+19.89, −0.08) mm and 19.5 mm up.
+  `MoveToContact(10 N)` was done after 7.01 s with 8.2 N (`GetWrench`
+  8.50 N; peak 10.1 N), and the peg bottom was at z 0.0500, 19.6 mm off the
+  axis, on the face. `MoveCompliant` (3 cm down, 1000 N/m, 60 N) returned
+  DEADLINE_EXCEEDED "not finished within 30 s of sim time", with a final
+  force of 31.3 N, a peak of 37.7 N and a second-half p10/p90 of
+  25.8/37.2 N. Neither the force limit nor the settled abort fired.
+
+### Findings 18–20 (for the lead)
+
+18. **`contact_table` fails because bare fingers on the table chatter.**
+    It is the same contact that E.2 replaced in `jam` (finding 16), and
+    `contact_table` still uses it. With damping 2000 the closed-finger
+    `MoveToContact` on the table ended at 1.7–4.2 N of 10 N in the sweep,
+    and at 5.3 N of 15 N here. At damping 600 with the C.1 finger material
+    it ended at 7.0–7.9 N of 10 N, also below −20 %. So reverting damping
+    alone probably would not pass either (inferred from the sweep's jam
+    `MoveToContact`; `contact_table` was not run at 600 after C.1). It last
+    passed in run 4, before the finger material. Against the peg-on-face
+    contact, G8 accuracy holds: 10/10 face contacts at 12.65–17.71 N for
+    15 N, and the jam's 10 N contact at 8.50 N.
+19. **The peg jam holds but never reports "settled".** The force limit
+    no longer trips (peak 37.7 N, under 60). The arm presses at about the
+    30 N spring force for 30 s, and the force varies between 26 and 37 N
+    (p10/p90). `intrinsic.settled_for_seconds` > 1.0 never fired. This
+    matches finding 12, where searches ran into the deadline instead of
+    aborting as settled. It probably comes from the same thing: the
+    remaining force oscillation keeps ICON from settling. This is not
+    verified, because the client cannot read that state variable, and the
+    TCP motion during the jam was not sampled.
+20. **The insert passes, with one search stall.** Trial 4 started the
+    search 3.13 mm off the axis and stalled there at 3.0 N until the
+    deadline (the same failure as run 4). Trial 10 started 3.17 mm off and
+    succeeded after 7.36 s. Successful searches took 0.93–12.53 s.
+
+Options (not applied):
+- (18) Choose one:
+  - Run `contact_table` with the grasped peg pressed on the block face
+    away from the hole, as E.2 does for `jam`.
+  - Give the finger material compliant-contact parameters, or remove it
+    and keep only the 60 N grip. That would need 5c rerun, since C.1 fixed
+    the grip.
+  - Judge the force from ICON's filtered sensed force at the end of the
+    operation, instead of a single `GetWrench` sample. The operation's own
+    value was 5.3 N here as well, so this alone does not pass.
+- (19) Choose one:
+  - Detect the jam on the server from TCP motion, for example < 0.5 mm in
+    1 s (run 3 option 7, run 4 option 12). This changes decision 5.
+  - Detect the jam from force: the sensed force stays within a band (for
+    example ±10 N) for 1 s while the position error stays above a
+    threshold. This also changes decision 5.
+  - Accept DEADLINE_EXCEEDED with a large position error as the jam
+    outcome. This changes the `jam` criterion and the RPC contract.
 
 ## Run 6 (Addendum D, then the C.2 sweep)
 
@@ -597,6 +716,11 @@ Modified:
   `tests/test_plan_grasp.py` restored to their phase 5c content. The sweep
   changed `force.py`, `build_catalog.py` and the USDs temporarily; all
   three are restored to the committed files.
+- Run 7 (E): `container/services/robot/force.py` (`ADMITTANCE_INERTIA`
+  5 kg), `tests/test_force.py` (expects 5 kg), `sim/tools/build_catalog.py`
+  (`COMPLIANT_DAMPING` 2000), `assets/objects/*/model.usd` (all 7
+  regenerated), `tests/e2e/phase5b_check.py` (`_peg_above_block`, peg jam,
+  `JAM_OFF_AXIS_M`)
 
 Regenerated `gen/`:
 - `intrinsic/icon/actions/{force_primitive,cartesian_admittance_action,cartesian_impedance,cartesian_impedance_reference_generators}_pb2*`
@@ -609,6 +733,7 @@ Other logs:
   `logs/phase5b_build_catalog_b.log`
 - `logs/phase5b_addB_{build,stage,stage_vendor,docker_build}.log`
 - `logs/phase5b_docker_build.log`
-- `logs/phase5b_robot_service.log` (from the last sweep run)
+- `logs/phase5b_robot_service.log` (now from run 7)
 - Run 6: `logs/phase5b_addD_docker_build*.log`,
   `logs/phase5b_build_catalog_d{600,2000}.log`
+- Run 7: `logs/phase5b_addE_build_catalog.log`, `logs/phase5b_addE_docker_build.log`, `logs/phase5b_check_run7.log`

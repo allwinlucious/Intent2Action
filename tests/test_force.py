@@ -115,7 +115,7 @@ class TestParams:
     stiffness = np.array(goal.cartesian_stiffness.data).reshape(6, 6)
     np.testing.assert_allclose(stiffness, np.diag([200, 200, 200, 30, 30, 30]))
     inertia = np.array(goal.virtual_cartesian_inertia.data).reshape(6, 6)
-    np.testing.assert_allclose(inertia, np.diag([2, 2, 2, 0.05, 0.05, 0.05]))
+    np.testing.assert_allclose(inertia, np.diag([5, 5, 5, 0.05, 0.05, 0.05]))
     assert not goal.HasField("cartesian_damping")
     assert goal.tool_reference_wrench.z == 0
     assert params.algorithm_configuration.sensed_wrench_deadband.x == 1.5
