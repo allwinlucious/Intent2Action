@@ -52,6 +52,10 @@ if [ "$BACKEND" = isaac ]; then
     RMW_IMPLEMENTATION=rmw_fastrtps_cpp FASTRTPS_DEFAULT_PROFILES_FILE=/opt/app/container/dds/fastdds.xml exec python3"
   run scene_sync bash -c "$FASTDDS /opt/app/container/services/scene_sync.py"
   run camera_sim bash -c "$FASTDDS /opt/app/container/services/camera_sim.py"
+  # CycloneDDS for /clock (and the grasp planner later); the vendored ICON client is in /opt/app/vendor.
+  run robot_service bash -c "set +u; source /opt/ros/humble/setup.bash; source /opt/ros_ext/setup.bash; set -u;
+    RMW_IMPLEMENTATION=rmw_cyclonedds_cpp CYCLONEDDS_URI=file:///opt/app/container/dds/cyclonedds.xml \
+    PYTHONPATH=/opt/app:/opt/app/gen:/opt/app/vendor:\$PYTHONPATH exec python3 /opt/app/container/services/robot_service.py"
 fi
 
 wait -n

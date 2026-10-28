@@ -331,6 +331,47 @@ def check_epoch() -> str:
   return f"/sim/reset {result['message']!r} -> FAULTED ({reason!r}); {_clear_faults()}"
 
 
+# Sends a signal to robot_service in the container; prints how many processes got it.
+_SIGNAL_ROBOT_SERVICE = """
+import os, signal, sys
+count = 0
+for pid in filter(str.isdigit, os.listdir("/proc")):
+  try:
+    argv = open(f"/proc/{pid}/cmdline", "rb").read().split(b"\\0")
+  except OSError:
+    continue
+  if argv[:2] == [b"python3", b"/opt/app/container/services/robot_service.py"]:
+    os.kill(int(pid), getattr(signal, sys.argv[1]))
+    count += 1
+print(count)
+"""
+
+
+def _signal_robot_service(signal_name: str) -> None:
+  done = subprocess.run(
+      harness.docker(f"docker exec -i intrinsic python3 - {signal_name}"),
+      input=_SIGNAL_ROBOT_SERVICE,
+      capture_output=True,
+      text=True,
+  )
+  if done.stdout.strip() != "1":
+    raise RuntimeError(f"robot_service {signal_name}: {done.stdout}{done.stderr}")
+
+
+def _without_robot_service(check):
+  """robot_service (Part 3) clears ICON faults after 2 s (decision 24); these checks watch ICON's own
+  fault handling, so it is paused (SIGSTOP; the entrypoint's `wait -n` ignores stopped children)."""
+
+  def paused():
+    _signal_robot_service("SIGSTOP")
+    try:
+      return check()
+    finally:
+      _signal_robot_service("SIGCONT")
+
+  return paused
+
+
 def _run_check(name: str, check) -> bool:
   try:
     print(f"PASS {name}: {check()}", flush=True)
@@ -357,8 +398,8 @@ def main() -> int:
         ("gripper", check_gripper),
         ("wrench", check_wrench),
         ("stop", check_stop),
-        ("isaac_restart", lambda: check_isaac_restart(run)),
-        ("epoch", check_epoch),
+        ("isaac_restart", _without_robot_service(lambda: check_isaac_restart(run))),
+        ("epoch", _without_robot_service(check_epoch)),
     )
     results = [_run_check(name, check) for name, check in checks]
   except Exception as error:  # pylint: disable=broad-except

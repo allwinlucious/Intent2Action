@@ -17,6 +17,9 @@ import sys
 import threading
 import time
 
+# robot_service.py next to this file would shadow the generated (namespace) package `robot_service`.
+sys.path.pop(0)
+
 from google.protobuf import empty_pb2
 from google.protobuf import text_format
 from google.protobuf import wrappers_pb2
@@ -64,6 +67,7 @@ VISUAL_SET, COLLISION_SET = "Intrinsic_Visual", "Intrinsic_Collision"
 # Object names in the world service: a letter, then letters, digits or '_'.
 NAME_PATTERN = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
 ABSENT_S = 2.0
+STALE_AFTER_S = 5.0  # after the first /tf, ground-truth objects not on /tf are left over from earlier runs
 CALL_TIMEOUT_S = 10.0
 RESET_EPOCH_TIMEOUT_S = 5.0
 RENDER_REQUEST_PERIOD_S = 0.25  # sim_control handles calls only inside renders (phase 2)
@@ -221,12 +225,18 @@ class Sync:
     log.info("world created world=%s cloned_from=%s removed=%s", SIM_WORLD, WORLD, removed)
 
   def run(self) -> None:
+    first_tf = None
+    stale_removed = False
     while True:
       self.ros.tf_arrived.wait()
       poses = self.ros.take_pending()
       now = time.monotonic()
+      first_tf = first_tf or now
       try:
         self._sync(poses, now)
+        if not stale_removed and now - first_tf >= STALE_AFTER_S:
+          self._delete_stale(now)
+          stale_removed = True
       except grpc.RpcError as error:
         self._log_error(f"world update failed: {error.code().name}: {error.details()}")
         # Objects removed from a world by someone else are re-created on their next sight.
@@ -273,6 +283,22 @@ class Sync:
       for w in self.worlds:
         self._delete(w, name)
       log.info("object deleted name=%s worlds=%s reason=absent_from_tf_%.0fs", name, self.worlds, ABSENT_S)
+
+  def _delete_stale(self, now: float) -> None:
+    on_tf = {n for n, t in self.last_seen.items() if now - t <= ABSENT_S}
+    for w in (SIM_WORLD, WORLD):
+      objects = self.world.ListObjects(
+          world_pb.ListObjectsRequest(world_id=w, view=updates_pb.FULL), timeout=RPC_TIMEOUT_S
+      ).objects
+      for o in objects:
+        if o.name in on_tf or "source" not in o.object_component.user_data:
+          continue
+        source = wrappers_pb2.StringValue()
+        o.object_component.user_data["source"].Unpack(source)
+        if source.value == "ground_truth":
+          self._delete(w, o.name)
+          self.known.discard(o.name)
+          log.info("object deleted name=%s world=%s reason=stale_not_on_tf", o.name, w)
 
   def _catalog(self, name: str) -> str | None:
     catalog = self.catalogs.get(name)
@@ -338,8 +364,9 @@ class Sync:
 
   def _log_error(self, message: str) -> None:
     now = time.monotonic()
-    if now - self.error_logged.get(message, -REPEAT_LOG_S) >= REPEAT_LOG_S:
-      self.error_logged[message] = now
+    key = re.sub(r"\d+", "#", message)  # repeats differ only in IDs and timestamps
+    if now - self.error_logged.get(key, -REPEAT_LOG_S) >= REPEAT_LOG_S:
+      self.error_logged[key] = now
       log.error("%s (repeats are logged every %.0f s)", message, REPEAT_LOG_S)
 
 

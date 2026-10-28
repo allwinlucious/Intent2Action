@@ -170,6 +170,7 @@ class Ros2HardwareModule final
   bool has_previous_entry_ = false;
   int64_t current_stamp_ns_ = 0;
   TaringState taring_;
+  uint32_t read_baseline_epoch_ = 0;
   bool last_retare_ = false;
   bool reset_fault_active_ = false;
 

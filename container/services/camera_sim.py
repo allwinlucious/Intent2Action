@@ -43,6 +43,7 @@ DEVICE_ID = "d455"
 WIDTH, HEIGHT = 848, 480
 REQUEST_AHEAD_S = 0.05  # the frame must show sim time >= latest /clock + this
 DEFAULT_TIMEOUT_S = 5.0
+INFO_REQUEST_PERIOD_S = 1.0
 STAMP_TOLERANCE_S = 1e-6
 QOS = QoSProfile(
     reliability=ReliabilityPolicy.RELIABLE,
@@ -110,6 +111,18 @@ class Ros:
     self.executor = SingleThreadedExecutor()
     self.executor.add_node(n)
     threading.Thread(target=self.executor.spin, daemon=True).start()
+    threading.Thread(target=self._request_info, daemon=True).start()
+
+  def _request_info(self) -> None:
+    """Isaac sends camera_info only with a requested frame; DescribeCamera needs one before any Capture."""
+    while self.latest_info() is None:
+      if self.clock is not None:
+        header = Header()
+        header.stamp.sec, header.stamp.nanosec = divmod(round(self.clock * 1e9), 1_000_000_000)
+        self.request.publish(header)
+      time.sleep(INFO_REQUEST_PERIOD_S)
+    info = self.latest_info()
+    log.info("camera_info received width=%d height=%d fx=%.2f", info.width, info.height, info.k[0])
 
   def _on_clock(self, msg: Clock) -> None:
     self.clock = _seconds(msg.clock)

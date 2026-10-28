@@ -189,3 +189,12 @@ As phase 3: Bazel only via `container/build_intrinsic.sh`; no `git
 commit`; Docker via `sg docker -c`; no `pkill -f`; do not modify
 `~/intrinsic-core` except the `ext` symlink and `.git/info/exclude`.
 Follow the design's Observability requirement for every new call.
+
+## Phase 3 carry-overs (do first)
+
+Apply the two items under "Part 3 resolution" in
+`docs/designs/phases/phase_3_notes.md` (swept volume in `PlanOnly`; fault
+watcher only while `/clock` advances), update the `PlanOnlyResponse`
+comment in `robot_service/robot_service.proto`, remove the
+`robot_service` pause from `tests/e2e/phase3_hwm_check.py`, and rerun
+`phase3_hwm_check.py` and `phase3_cuj_check.py` (all pass).

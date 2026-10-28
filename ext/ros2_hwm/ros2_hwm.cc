@@ -225,6 +225,8 @@ absl::Status Ros2HardwareModule::Prepare() {
   }
   INTR_RETURN_IF_ERROR(realtime_clock_->Reset(CLOCK_RESET_TIMEOUT));
   has_previous_entry_ = false;
+  // Isaac reopens the fingers on restart, so the next command must be sent.
+  last_gripper_.reset();
   startTickThread();
   LOG(INFO) << COMPONENT << " prepared";
   return absl::OkStatus();
@@ -298,6 +300,12 @@ RealtimeStatus Ros2HardwareModule::ReadStatus() {
     return intrinsic::icon::InternalError("simulation reset");
   }
   reset_fault_active_ = false;
+  // After a reset the wrench is untared until the next retare (decision 24).
+  if (const uint32_t baseline = baseline_epoch_.load(std::memory_order_acquire);
+      baseline != read_baseline_epoch_) {
+    read_baseline_epoch_ = baseline;
+    taring_ = {};
+  }
 
   TickEntry* entry = nullptr;
   if (!tick_buffer_.GetActiveBuffer(&entry)) {
@@ -431,6 +439,9 @@ void Ros2HardwareModule::onStatusTimer() {
     LOG(INFO) << COMPONENT
               << (flowing ? " states arriving (lockstep)"
                           : " no state for > 1 s (simulation paused or absent)");
+    // A restarted Isaac starts its sim time near 0 again; old unpaired stamps
+    // must not pair with new ones.
+    if (!flowing) pairer_->clear();
   }
   if (const uint64_t n = reset_faults_.load(std::memory_order_relaxed);
       n != logged_reset_faults_) {
@@ -494,7 +505,15 @@ void Ros2HardwareModule::stopRos() {
 }
 
 void Ros2HardwareModule::tickLoop() {
+  uint32_t tick_baseline_epoch = baseline_epoch_.load(std::memory_order_acquire);
   while (true) {
+    // Isaac reopens the fingers on reset, so the next command must be sent.
+    if (const uint32_t baseline =
+            baseline_epoch_.load(std::memory_order_acquire);
+        baseline != tick_baseline_epoch) {
+      tick_baseline_epoch = baseline;
+      last_gripper_.reset();
+    }
     TickEntry entry;
     {
       absl::MutexLock lock(&queue_mutex_);
@@ -527,9 +546,11 @@ bool Ros2HardwareModule::tickWithRetries(const TickEntry& entry) {
     const RealtimeStatus status = realtime_clock_->TickBlockingWithTimeout(
         intrinsic::Clock::FromNSec(entry.state.stamp_ns), TICK_TIMEOUT);
     if (status.ok()) return true;
-    LOG(WARNING) << COMPONENT << " tick failed stamp_ns="
-                 << entry.state.stamp_ns << " attempt=" << attempt + 1
-                 << " error=\"" << status.message() << "\"";
+    LOG_EVERY_N_SEC(WARNING, 5) << COMPONENT << " tick failed stamp_ns="
+                                << entry.state.stamp_ns
+                                << " attempt=" << attempt + 1 << " error=\""
+                                << status.message() << "\"";
+    if (tickStopping()) return false;
     if (const RealtimeStatus reset = realtime_clock_->Reset(CLOCK_RESET_TIMEOUT);
         !reset.ok()) {
       LOG(WARNING) << COMPONENT << " clock reset failed error=\""
@@ -538,6 +559,9 @@ bool Ros2HardwareModule::tickWithRetries(const TickEntry& entry) {
     absl::SleepFor(TICK_RETRY_SLEEP);
     if (tickStopping()) return false;
   }
+  LOG(WARNING) << COMPONENT << " tick entry dropped stamp_ns="
+               << entry.state.stamp_ns << " after " << TICK_RETRIES + 1
+               << " attempts";
   return false;
 }
 
@@ -548,7 +572,9 @@ void Ros2HardwareModule::publishCommand(const Command& command) {
     joint_command_msg_.velocity[i] = command.velocity[i];
   }
   joint_command_pub_->publish(joint_command_msg_);
-  if (last_gripper_ != command.gripper) {
+  // Force <= 0 is ICON's unset default; Isaac would set the finger max effort
+  // to it and leave the fingers without drive.
+  if (command.gripper.force > 0.0 && last_gripper_ != command.gripper) {
     gripper_command_msg_.header.stamp = joint_command_msg_.header.stamp;
     gripper_command_msg_.position[0] = fingerPosition(command.gripper.width);
     gripper_command_msg_.effort[0] = command.gripper.force;

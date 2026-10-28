@@ -1,7 +1,8 @@
 """Writes the catalog objects' meshes and physics descriptions.
 
 For each object: assets/objects/<name>/mesh.glb (metres, Z up, origin at the
-bottom centre) and object.yaml (static, mass, color, collision).
+bottom centre, except calib_board: box centre, as Isaac's board prim) and
+object.yaml (static, mass, color, collision; origin: center if centred).
 sim/tools/build_catalog.py turns them into model.usd. Dev-time only:
   .venv/bin/python tools/build_catalog_meshes.py
 """
@@ -45,8 +46,9 @@ OBJECTS = {
     "plate": (_cylinder(0.09, 0.012), False, 0.30, (0.9, 0.9, 0.9)),
     "peg": (_cylinder(0.010, 0.08), False, 0.05, (0.2, 0.4, 0.8)),
     "hole_block": (_hole_block(), True, None, (0.3, 0.3, 0.3)),
-    # The ChArUco board sim/scene.py attaches to the hand (same size and mass).
-    "calib_board": (_box(0.21, 0.15, 0.005), False, 0.2, (1.0, 1.0, 1.0)),
+    # The ChArUco board sim/scene.py attaches to the hand (same size and mass;
+    # origin at the box centre like its prim, so /tf poses match).
+    "calib_board": (trimesh.creation.box(extents=(0.21, 0.15, 0.005)), False, 0.2, (1.0, 1.0, 1.0)),
     "obstacle": (_box(0.1, 0.1, 0.5), True, None, (0.5, 0.5, 0.5)),
 }
 
@@ -66,6 +68,8 @@ def main() -> int:
         "color": list(color),
         "collision": "none" if static else "convexHull",
     }
+    if name == "calib_board":
+      description["origin"] = "center"
     (out / "object.yaml").write_text(yaml.safe_dump(description))
     bounds = trimesh.load(glb, force="mesh").bounds
     ok = np.allclose(bounds, mesh.bounds, atol=TOLERANCE_M, rtol=0)

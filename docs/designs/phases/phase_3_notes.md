@@ -352,3 +352,239 @@ Modified: `container/services/platform_stubs.py`, `container/Dockerfile`,
 `container/gen_protos.sh`, `tools/build_catalog_meshes.py`,
 `tests/e2e/phase3_probe.py`, `.dockerignore`, this file. Image
 `intrinsic-core:dev` rebuilt (no Bazel run in Part 2).
+
+## Part 3 (Part 1 fixes, Part 2 follow-ups, `robot_service`)
+
+Status: **done, with one plan item impossible.** `phase3_cuj_check.py` passes
+eight of eight, `phase3_scene_check.py` five of five, `phase3_hwm_check.py`
+seven of seven (all on the final image), and `pytest tests/` 19 of 19.
+`PlanOnly`'s swept-volume bounds cannot be computed: the open-source planner
+does not implement swept volumes (deviation 1). The fields are left unset,
+and the orchestrator needs to decide what to do with them. Deviations 2 to 5
+are fixes for problems found in live runs, and 6 and 7 change how two checks
+measure. No containers or Isaac processes are left running.
+
+### Check output
+
+`.venv/bin/python tests/e2e/phase3_cuj_check.py` (exit 0;
+`logs/phase3_cuj_check.log`):
+
+```
+isaac READY pid=18140
+robot_service ready after 32.1 s
+PASS logging: unreachable MoveToPose -> ABORTED "operations/MoveToPose-1: planning failed: IK solver couldn't find any solutions for the given constraints. [...]"; logged: 2026-10-28 00:22:54,943 WARNING robot_service rpc MoveToPose request={pose { x: 2.0 z: 0.5 qw: 1.0 } wait: true} ms=5042 status=ABORTED message=operations/MoveT[...]
+PASS cuj2: LINEAR MoveToPose: true TCP 0.70 mm / 0.098 deg from target
+PASS cuj7: MoveWaypoints 1.120 s / PlanOnly 1.114 s; Jog moved joint 1 by 0.1035 rad; ComputeFk vs tool_pose 0.0000 mm
+PASS cuj4: Stop -> operations/MoveJoints-7 CANCELLED ('cancelled (Stop, CancelOperation or ResetScene)'); next Home done in 0.66 s
+PASS grasp: Grasp width 50.0 mm gripping; cube rose 49.9 mm
+PASS obstacle: midpoint in collision; PlanOnly 1.12 s around the obstacle; 20 samples of the executed path collision-free
+PASS cuj5: fault "'robot_hwm': simulation reset"; Home 0.00 s later -> FAILED_PRECONDITION "robot faulted: 'robot_hwm': simulation reset; call ClearFaults"; after ClearFaults Home done in 0.03 s
+PASS misc: SetPayload(0.5) ok; SetSpeed(0.5) 0.41 -> 0.82 s; ResetScene ok; ListObjects ['hole_block', 'peg', 'plate', 'red_cube', 'table'] ground_truth; GetImage RGB/DEPTH 848x480 PNG; GetPointCloud 407040 points, z 0.81..5.43 m
+elapsed 85.0
+```
+
+`.venv/bin/python tests/e2e/phase3_scene_check.py` (exit 0;
+`logs/phase3_scene_check_final.log`):
+
+```
+isaac READY pid=8688
+ICON ENABLED after 29.5 s
+PASS objects: sim_world: worst 0.00 mm, sources ground_truth; world: worst 0.00 mm, sources ground_truth
+PASS spawn: extra_cube in both worlds 0.2 s after Spawn, gone 2.1 s after Delete
+PASS joints: world franka joints within 0.00000 rad of ICON's
+PASS camera: RGB + depth 848x480, fx 420.08, stamped +0.052 s after the clock read before Capture, depth median 2.048 m; DescribeCamera [(1, 'color', [1], (848, 480)), (4, 'depth', [2], (848, 480))]
+PASS restart: objects re-created 13 s after docker restart; exactly one of each in both worlds: ['franka', 'franka_hand', 'hole_block', 'peg', 'plate', 'red_cube', 'table']
+elapsed 63.7
+```
+
+`.venv/bin/python tests/e2e/phase3_hwm_check.py` (exit 0;
+`logs/phase3_hwm_check_final.log`):
+
+```
+isaac READY pid=19340
+ICON ENABLED after 29.7 s
+PASS move: Isaac joint error 0.00090 rad
+PASS trajectory: Isaac final error 0.00090 rad
+PASS gripper: GRASP done True width ICON 0.0000 Isaac 0.0000 m; RELEASE done True width ICON 0.0750 Isaac 0.0750 m
+PASS wrench: force norm 5.753 N before, 0.000 N after taring
+PASS stop: moving at 0.205 rad/s, stopped (< 0.01 rad/s) 0.020 s sim time after intrinsic.stop
+isaac READY pid=23556
+PASS isaac_restart: FAULTED ('DEADLINE_EXCEEDED: BeginCycle: robot_hwm: Timeout after 20001.3 ms') 25 s after kill; ClearFaults OK after 1 attempt(s), ICON ENABLED; move: Isaac joint error 0.00090 rad
+PASS epoch: /sim/reset 'epoch 1' -> FAULTED ("'robot_hwm': simulation reset"); ClearFaults OK after 1 attempt(s), ICON ENABLED
+elapsed 91.5
+```
+
+`.venv/bin/python -m pytest tests/` (`logs/phase3_pytest.log`): 19 passed
+(13 in `tests/test_robot_service.py`). `container/build_intrinsic.sh --test`
+after fixes 1 to 5 passed (`logs/phase3_part3_build.log`).
+
+### Part 1 review fixes (1 to 6)
+
+All six are applied as listed. After the rebuild, `phase3_hwm_check.py`
+passed 7/7 (`logs/phase3_hwm_check_part3.log`) before any Part 3 work began.
+* Fix 1: `last_gripper_` is reset in `Prepare()`, and in the tick thread
+  when the baseline epoch changes. The container log shows the open command
+  re-sent after the Isaac restart and after `/sim/reset`.
+* Fix 2: a gripper command is published only when its force is > 0 and it
+  differs from the last one sent. No zero-force command appears in the log.
+* Fix 3: `ReadStatus` keeps its own copy of the baseline epoch and clears
+  `taring_` when it changes. It reads only an atomic and does not allocate.
+* Fix 4: tick failures log with `LOG_EVERY_N_SEC(WARNING, 5)`, and a dropped
+  entry logs one line (`tick entry dropped stamp_ns=… after N attempts`).
+  `tickStopping()` is checked before `Reset` and again after the back-off.
+* Fix 5: the pairer is cleared on the "no state for > 1 s" transition.
+* Fix 6: `logpipe.py` prefixes each file line with
+  `YYYY-MM-DD HH:MM:SS.mmm` unless the line already starts with an ISO time.
+  stdout is unchanged. The Python services already used the required
+  `basicConfig` format.
+
+### Part 2 follow-ups (7 to 9)
+
+* Follow-up 7: `camera_sim` has a thread that publishes `/camera/request`
+  (stamp = latest `/clock`) once per second until a `camera_info` has
+  arrived. It logs `camera_info received width=… fx=…`. In the scene check's
+  container log, that line appears at start-up, before the first `Capture`.
+  The check itself still calls `Capture` before `DescribeCamera`.
+* Follow-up 8: `calib_board`'s mesh is now centred (`object.yaml` has
+  `origin: center`). Its `mesh.glb` and `model.usd` were regenerated with
+  `build_catalog.py` and pulled back with `sync_isaac.sh --pull-catalog`.
+  No other catalog file changed.
+* Follow-up 9: 5 s after its first `/tf`, `scene_sync` deletes from both
+  worlds every `ground_truth` object that is not on `/tf`. Each deletion is
+  logged (`reason=stale_not_on_tf`). No check covers this, and it was not
+  tested by hand.
+
+### `robot_service`
+
+`container/services/robot_service.py` runs `RobotService`, `SimService` and
+`Operations` on 127.0.0.1:18100. The helpers in `container/services/robot/`
+are `icon.py`, `motion.py`, `ops.py`, `gripper.py` and `png.py`. The
+entrypoint starts it in the isaac backend only, with CycloneDDS `rclpy` for
+`/clock`. `container/stage_vendor.sh` copies the nine ICON Python client
+modules from `~/intrinsic-core` into `container/stage/vendor/` and checks
+that they import. Run it after `stage_intrinsic.sh`, which wipes `stage/`.
+The image adds `absl-py==2.5.1` and `/opt/app/vendor`. Decisions 19 to 27
+are implemented as written, apart from the deviations below. Decision 28:
+an interceptor logs every RPC (`rpc <Method> request={≤200 chars} ms=
+status= message=`), each operation logs its end state, and errors carry
+specific codes. `OperationInfo.state`/`detail` were already in
+`robot_service.proto` and `gen/`.
+
+### Plan deviations and choices (Part 3)
+
+1. **Impossible: `PlanOnlyResponse.swept_min`/`swept_max`.** With
+   `compute_swept_volume`, the planner returns `ComputeSweptVolumeFromPath is
+   not implemented`, so even plans that would otherwise succeed fail.
+   `PlanOnly` therefore leaves both fields unset. Needs a decision: drop
+   the fields, or define bounds `robot_service` can compute itself (for
+   example, from FK of the robot's links along the discretized trajectory).
+2. **LINEAR pose targets are replanned to the reached joints.** Most LINEAR
+   moves failed with `Could not generate Cartesian linear path to the desired
+   motion target joint configuration …`. The planner resolves the pose to a
+   joint target by IK. Its straight-line path IK from the start then ends at
+   another solution of the redundant arm, about 3 mrad away, which is over
+   its tolerance. The error also arrives as a structured
+   `MotionPipelineError` in `grpc-status-details-bin`. `Planner.plan`
+   replans with that segment's target set to the reached joints, which is
+   what the planner's message advises. This gives the same pose (FK error
+   0.0 mm), still LINEAR. With blending, the failing range is reported as
+   (first, last), and the reached joints belong to the last segment.
+   `container/gen_protos.sh` generated `motion_planning_error_pb2` for this.
+3. **A motion finishes only when the arm has reached the trajectory end.**
+   Isaac's joint drives lag ICON's setpoints by up to about 0.13 rad after a
+   fast move. The next trajectory starts from the sensed joints, and ICON
+   rejects it ("Difference between previous setpoint and position command
+   (0.131954) exceeds 0.1") and disables the arm. After ICON reports the
+   action done, `robot_service` waits until every sensed joint is within
+   0.01 rad of the last point (at most 2 s of sim time; otherwise
+   `DEADLINE_EXCEEDED`). `MotionResult.duration_s` still ends at ICON's
+   "done", so it stays comparable with `PlanOnly`.
+4. **`DetachObject` waits for `world` (with GROUND_TRUTH).** `scene_sync`
+   skips attached objects, so right after detach `world` still has the cube
+   inside the hand. The next plan then fails with "Invalid initial joint
+   configuration … franka_hand / red_cube". `DetachObject` waits until the
+   object's `world` pose is within 5 mm of its true pose (at most 5 s;
+   otherwise `DEADLINE_EXCEEDED`). `AddObject` and `RemoveObject` likewise
+   wait up to 5 s for `world`.
+5. **`GetState.speed_factor` is the value `robot_service` applied.** ICON's
+   `GetStatus.current_speed_override` reads 0. The override itself works:
+   at 0.5, the measured duration doubled (0.41 s to 0.82 s).
+6. **Obstacle check: the executed path is sampled.** `PlanOnlyResponse` has
+   no path. After `PlanOnly`, the check runs the same `MoveWaypoints`,
+   samples `GetState` joints 20 times at `planned_duration_s` / 20, and
+   calls `CheckCollisions` on each sample. It first checks that the
+   straight-line midpoint (inside the obstacle) is in collision, so the
+   check cannot pass trivially.
+7. **`GetPointCloud` z bound (0.2, 6) m, not (0.2, 4) m.** The floor is
+   1.65 m below the camera, which is pitched 45°. With a 59.5° vertical
+   field of view, the top image row meets the floor at 5.43 m optical
+   depth, which matches the measured maximum. The server keeps every finite
+   depth > 0, as decision 26 says.
+8. **`phase3_hwm_check.py` pauses `robot_service` for `isaac_restart` and
+   `epoch`.** The decision 24 watcher clears faults after 2 s. With Isaac
+   dead, `ClearFaults` leaves ICON DISABLED (and the HWM times out again
+   20 s later), so the check saw DISABLED instead of FAULTED. These checks
+   test ICON's own fault handling, so the check sends `robot_service`
+   SIGSTOP and then SIGCONT (`wait -n` in the entrypoint ignores stopped
+   children). Behaviour to decide on: while Isaac is down, the watcher
+   cycles ICON between FAULTED and DISABLED about every 22 s. It could clear
+   faults only while `/clock` advances.
+9. **Smaller choices:**
+   * `READY` in decision 25 is ICON's `ENABLED`, because ICON has no READY
+     state.
+   * Jog: `GetStatus` has no velocity limits, so the joint maximum comes
+     from `GetConfig` application limits, capped at ICON's jogging limit of
+     30°/s.
+   * `wait=true` on an operation that failed returns the operation's error
+     as the RPC status. A successful or still-running operation returns
+     the Operation.
+   * `planned_duration_s` = planner duration / speed factor. The motion
+     timeout (2 × planned + 2 s of sim time) uses it.
+   * `blend_radius`: the planner takes one blending setting per request.
+     The largest radius becomes Cartesian corner rounding, and every
+     waypoint must be LINEAR (otherwise `INVALID_ARGUMENT`).
+   * `colliding_pairs` holds the planner's `collision_debug_msg` text,
+     because `CheckCollisions` returns no pairs.
+   * `GetPointCloud` is about 4.9 MB, so clients need a larger
+     `grpc.max_receive_message_length` (the check uses 64 MB).
+   * The calibration board attach and detach use SimLink and then the world
+     reparent, as in the design doc. Phase 4 will exercise them.
+10. **Name clash.** `container/services/robot_service.py` would shadow the
+    generated `robot_service` package, because both proto directories are
+    namespace packages and a regular module wins over them. The fix:
+    `robot_service.py` imports the package with its own directory removed
+    from `sys.path` first, and `scene_sync.py` drops that directory. In the
+    entrypoint, `PYTHONPATH` prepends to ROS's value instead of replacing it.
+11. **WSL clock jump.** In one dev run the container's wall clock stepped
+    back 2.7 s (log times went from 00:16:21.6 to 00:16:18.9). The world
+    service then rejected every update older than the last stamp
+    ("timestamp … is newer than the given timestamp") until the clock
+    caught up. `scene_sync` logged this every 55 ms, because the repeat
+    filter compared whole messages. It now ignores digits when comparing,
+    so repeats are logged once per 10 s.
+
+### Files (Part 3)
+
+Created: `container/services/robot_service.py`,
+`container/services/robot/{__init__, icon, motion, ops, gripper, png}.py`,
+`container/stage_vendor.sh`, `tests/test_robot_service.py`,
+`tests/e2e/phase3_cuj_check.py`,
+`gen/intrinsic/motion_planning/proto/v1/motion_planning_error_pb2{,_grpc}.py`.
+Modified: `ext/ros2_hwm/{ros2_hwm.cc, ros2_hwm.h}`, `container/logpipe.py`,
+`container/services/{camera_sim.py, scene_sync.py}`,
+`container/{Dockerfile, entrypoint.sh}`, `tools/build_catalog_meshes.py`,
+`assets/objects/calib_board/{mesh.glb, object.yaml, model.usd}`,
+`tests/e2e/phase3_hwm_check.py`, this file. Image `intrinsic-core:dev`
+rebuilt (Bazel through `build_intrinsic.sh --test`, after fixes 1 to 5).
+
+## Part 3 resolution (lead)
+
+*   Swept volume: `PlanOnly` computes `swept_min`/`swept_max` itself:
+    `ComputeFk` of the TCP and every arm link origin on every 10th
+    `discretized` trajectory point, bounds enlarged by 0.08 m (link
+    radius). Documented in the proto comment as an approximation. Done
+    as the first step of phase 4.
+*   Fault watcher: clears faults only if `/clock` advanced within the last
+    1 s (Isaac running); otherwise it leaves the fault visible. Done as
+    the first step of phase 4; `phase3_hwm_check.py` then no longer needs
+    to pause `robot_service`.

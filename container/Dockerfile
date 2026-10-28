@@ -1,5 +1,6 @@
 # One container with the Intrinsic layer. Build from the project root:
-#   container/build_intrinsic.sh && container/stage_intrinsic.sh && docker build -f container/Dockerfile -t intrinsic-core:dev .
+#   container/build_intrinsic.sh && container/stage_intrinsic.sh && container/stage_vendor.sh \
+#     && docker build -f container/Dockerfile -t intrinsic-core:dev .
 FROM us-central1-docker.pkg.dev/intrinsic-mirror/intrinsic-build-images/zenohd@sha256:9a8195c927169365e516309d55753b9c3a7484a59825cf4fbefb9125cfbdb01d AS zenoh
 
 # Humble matches the ROS 2 distro Intrinsic's Bazel build links against.
@@ -11,11 +12,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3-pip pyt
 RUN git clone --depth 1 --branch 1.1.0 https://github.com/ros-simulation/simulation_interfaces /opt/ws/src/simulation_interfaces \
  && . /opt/ros/humble/setup.sh \
  && colcon build --base-paths /opt/ws/src --merge-install --install-base /opt/ros_ext
+# The vendored ICON Python client (container/stage_vendor.sh) logs through absl.
+RUN pip3 install --no-cache-dir absl-py==2.5.1
 
 COPY --from=zenoh /zenohd /opt/zenoh/zenohd
 COPY container/stage/bin /opt/intrinsic/bin
 COPY container/stage/lib /opt/intrinsic/lib
 COPY gen /opt/app/gen
+COPY container/stage/vendor /opt/app/vendor
 COPY container/services /opt/app/container/services
 COPY container/config /opt/app/container/config
 COPY container/dds /opt/app/container/dds
