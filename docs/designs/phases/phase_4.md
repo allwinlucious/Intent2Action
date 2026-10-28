@@ -198,3 +198,21 @@ watcher only while `/clock` advances), update the `PlanOnlyResponse`
 comment in `robot_service/robot_service.proto`, remove the
 `robot_service` pause from `tests/e2e/phase3_hwm_check.py`, and rerun
 `phase3_hwm_check.py` and `phase3_cuj_check.py` (all pass).
+
+## Phase 3 code-review fixes (do first, after the carry-overs)
+
+Apply every finding in `docs/designs/reviews/phase_3/code_review_part3.md`
+with its stated fix, plus these decisions:
+*   `GetPointCloud` takes `GetPointCloudRequest{int32 stride = 1}` (pixel
+    stride, default 4 when 0 → ≤ 101 760 points, < 1.3 MB); RPC comment
+    says so.
+*   `RobotService` gains `GetOperation(google.longrunning.GetOperationRequest)`
+    and `WaitOperation(google.longrunning.WaitOperationRequest)` (both
+    return `google.longrunning.Operation`), delegating to the operations
+    table, so the generated MCP tools can poll `wait=false` calls.
+*   Proto comments that become MCP descriptions: `GetStateResponse` says
+    joints/tool_pose are unset while faulted; `colliding_pairs` says it is
+    the planner's description of the collision.
+Regenerate stubs; extend `tests/test_robot_service.py` for the operation
+table's cancel/`done` semantics and the LINEAR replan acceptance check;
+rerun `phase3_cuj_check.py` (all pass).
