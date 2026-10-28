@@ -23,7 +23,6 @@ import transformers
 import trl
 
 import agent
-import bench
 import qwen
 import sft
 
@@ -36,6 +35,8 @@ DPO = dict(beta=0.1, learning_rate=5e-7, per_device_train_batch_size=1, gradient
 # Group size 8 in the recipe; 4 (inside its 4-16 guidance) fits 4 x 6.5k-token rollouts in 10 GB. KL 0.04 (0.01-0.1).
 GRPO = dict(learning_rate=1e-6, per_device_train_batch_size=4, num_generations=4, max_completion_length=256, beta=0.04)
 TEMPLATE = {"enable_thinking": False}
+# Liger layer kernels locally; off on Kaggle (TRL computes the loss in chunks anyway): LEARN_LIGER=0.
+LIGER = os.environ.get("LEARN_LIGER", "1") == "1"
 
 
 def _flat(messages: list[dict]) -> list[dict]:
@@ -82,6 +83,7 @@ def dpo_rows(stage1: str) -> list[dict]:
 
 
 def grpo_rows(stage1: str, tokenizer) -> list[dict]:
+  import bench  # needs the robot stack modules; not shipped to Kaggle
   tools = agent.tool_specs()
   rows = []
   for line in open(stage1):
@@ -94,6 +96,7 @@ def grpo_rows(stage1: str, tokenizer) -> list[dict]:
 def reward(completions, want, **_) -> list[float]:
   """Deterministic tiers like the recipe's: 1 right call (or right refusal), 0.3 right tool with wrong
   arguments, 0.1 a well-formed call to a known tool, 0 no call when one was wanted, -0.05 unknown tool or bad JSON."""
+  import bench
   names = {t["function"]["name"] for t in agent.tool_specs()}
   out = []
   for text, w in zip(completions, want):
@@ -133,24 +136,27 @@ def main() -> None:
   model.config.use_cache = False
   if args.init:
     model = peft.PeftModel.from_pretrained(model, args.init, is_trainable=True)
+  else:
+    model = peft.get_peft_model(model, peft.LoraConfig(**LORA))
   # Checkpoints every 10 optimizer steps (the supervisor stops training at 17:00 and resumes it at 00:00).
-  common = dict(output_dir=args.out, bf16=True, gradient_checkpointing=True, logging_steps=5, save_strategy="steps",
+  half = qwen.DTYPE == torch.float16
+  common = dict(output_dir=args.out, bf16=not half, fp16=half, gradient_checkpointing=True, logging_steps=5, save_strategy="steps",
                 save_steps=10, save_total_limit=1,
                 report_to="none", seed=42, max_steps=args.max_steps,
                 gradient_checkpointing_kwargs={"use_reentrant": False})
   if args.mode == "sft":
     rows = sft_rows(args.stage1, args.stage2, args.replay, rng)
-    config = trl.SFTConfig(**common, **SFT, max_length=None, use_liger_kernel=True, completion_only_loss=True)
+    config = trl.SFTConfig(**common, **SFT, max_length=None, use_liger_kernel=LIGER, completion_only_loss=True)
     trainer_class = trl.SFTTrainer
   elif args.mode == "dpo":
     rows = dpo_rows(args.stage1)
     # Reference log-probs in a pass before training: chosen + rejected + reference together exceed 10 GB.
-    config = trl.DPOConfig(**common, **DPO, max_length=None, use_liger_kernel=True, precompute_ref_log_probs=True,
+    config = trl.DPOConfig(**common, **DPO, max_length=None, use_liger_kernel=LIGER, precompute_ref_log_probs=True,
                            precompute_ref_batch_size=1)
     trainer_class = trl.DPOTrainer
   else:
     rows = grpo_rows(args.stage1, tokenizer)
-    config = trl.GRPOConfig(**common, **GRPO, use_liger_kernel=True)
+    config = trl.GRPOConfig(**common, **GRPO, use_liger_kernel=LIGER)
     trainer_class = trl.GRPOTrainer
   if args.epochs is not None:
     config.num_train_epochs = args.epochs
@@ -162,11 +168,13 @@ def main() -> None:
   print(f"{args.mode}: {len(rows)} rows", flush=True)
   dataset = datasets.Dataset.from_list(rows)
   kwargs = dict(model=model, args=config, train_dataset=dataset, processing_class=tokenizer)
-  if not args.init:
-    kwargs["peft_config"] = peft.LoraConfig(**LORA)
   if args.mode == "grpo":
     kwargs["reward_funcs"] = reward
   trainer = trainer_class(**kwargs)
+  if half:  # TRL casts QLoRA adapters to bf16 (as the QLoRA paper does); fp16 loss scaling needs them in fp32
+    for p in trainer.model.parameters():
+      if p.requires_grad:
+        p.data = p.data.float()
   last = transformers.trainer_utils.get_last_checkpoint(args.out) if os.path.isdir(args.out) else None
   print(f"resuming from {last}" if last else "starting", flush=True)
   trainer.train(resume_from_checkpoint=last)

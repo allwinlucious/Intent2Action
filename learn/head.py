@@ -116,7 +116,7 @@ class Head(nn.Module):
 
 def _hidden(lm, tokenizer, text: str) -> tuple[torch.Tensor, list[tuple[int, int]]]:
   enc = tokenizer(text, add_special_tokens=False, return_offsets_mapping=True)
-  ids = torch.tensor([enc["input_ids"]])
+  ids = torch.tensor([enc["input_ids"]], device=lm.model.embed_tokens.weight.device)
   with torch.no_grad():
     h = lm.model(input_ids=ids).last_hidden_state[0]
   return h, enc["offset_mapping"]
@@ -138,20 +138,14 @@ def _candidates(text: str, offsets) -> tuple[list[str], list[int]]:
 
 
 def featurize(tokenizer, lm, examples, tools) -> list[dict]:
+  """One forward pass per trained turn, on exactly the prompt the model sees at that turn: Qwen3's template
+  renders an earlier assistant turn without the empty <think></think> block the live prompt has, so hidden
+  states read from a later, longer rendering would differ from what the policy sees."""
   names = tool_names()
   out = []
   t0 = time.monotonic()
   for n, (messages, trained) in enumerate(examples):
-    last = max(trained)
-    full = tokenizer.apply_chat_template(messages[:last], tools=tools, add_generation_prompt=True,
-                                         enable_thinking=False, tokenize=False)
-    h, offsets = _hidden(lm, tokenizer, full)
     for i in trained:
-      prefix = tokenizer.apply_chat_template(messages[:i], tools=tools, add_generation_prompt=True,
-                                             enable_thinking=False, tokenize=False)
-      assert full.startswith(prefix)
-      pos = next(k for k, (a, b) in enumerate(offsets) if b >= len(prefix)) if len(prefix) < len(full) else len(offsets) - 1
-      cand_ids, cand_pos = _candidates(prefix, offsets)
       m = messages[i]
       if m.get("tool_calls"):
         f = m["tool_calls"][0]["function"]
@@ -160,8 +154,12 @@ def featurize(tokenizer, lm, examples, tools) -> list[dict]:
         name, args = FINISH, {}
       if name not in names:
         continue
+      prompt = tokenizer.apply_chat_template(messages[:i], tools=tools, add_generation_prompt=True,
+                                             enable_thinking=False, tokenize=False)
+      h, offsets = _hidden(lm, tokenizer, prompt)
+      cand_ids, cand_pos = _candidates(prompt, offsets)
       target = args.get(POINTER_KEY.get(name, ""), None)
-      out.append({"h": h[pos].half().cpu(), "cands": h[cand_pos].half().cpu() if cand_pos else torch.zeros(0, HIDDEN).half(),
+      out.append({"h": h[-1].half().cpu(), "cands": h[cand_pos].half().cpu() if cand_pos else torch.zeros(0, HIDDEN).half(),
                   "cand_ids": cand_ids, "tool": names.index(name), **encode_call(name, args),
                   "pointer": cand_ids.index(target) if target in cand_ids else -1})
     if n % 50 == 0:

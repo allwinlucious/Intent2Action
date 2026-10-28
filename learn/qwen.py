@@ -5,6 +5,7 @@ token prefix, so each turn only prefills the new tool results.
 """
 
 import json
+import os
 import re
 
 import torch
@@ -14,19 +15,26 @@ MODEL = "Qwen/Qwen3-8B"
 MAX_NEW_TOKENS = 768
 TOOL_CALL = re.compile(r"<tool_call>(.*?)(?:</tool_call>|$)", re.S)
 THINK = re.compile(r"<think>.*?</think>", re.S)
+# bfloat16 locally; float16 on GPUs without bf16 tensor cores (Kaggle's T4): LEARN_DTYPE=float16.
+DTYPE = getattr(torch, os.environ.get("LEARN_DTYPE", "bfloat16"))
 
 
 def load(adapter: str | None = None, model: str = MODEL, embed_on_cpu: bool = True):
   quant = transformers.BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4",
-                                          bnb_4bit_compute_dtype=torch.bfloat16, bnb_4bit_use_double_quant=True,
+                                          bnb_4bit_compute_dtype=DTYPE, bnb_4bit_use_double_quant=True,
                                           llm_int8_enable_fp32_cpu_offload=True)
+  if torch.cuda.get_device_capability()[0] < 8:
+    # No flash attention before sm80 (Kaggle's T4), and SDPA's memory-efficient kernel takes no GQA: with
+    # enable_gqa it falls back to the math kernel (a full 6.5k x 6.5k score matrix per head). Repeat K/V instead.
+    from transformers.integrations import sdpa_attention
+    sdpa_attention.use_gqa_in_sdpa = lambda *args, **kwargs: False
   tokenizer = transformers.AutoTokenizer.from_pretrained(model)
   # The embedding table (1.2 GB in bf16) stays in CPU memory: Isaac shares the 10 GB GPU, and a lookup is cheap.
   config = transformers.AutoConfig.from_pretrained(model)
   device_map = {"model.embed_tokens": "cpu" if embed_on_cpu else 0, "model.norm": 0, "model.rotary_emb": 0, "lm_head": 0,
                 **{f"model.layers.{i}": 0 for i in range(config.num_hidden_layers)}}
   lm = transformers.AutoModelForCausalLM.from_pretrained(model, quantization_config=quant, device_map=device_map,
-                                                         dtype=torch.bfloat16)
+                                                         dtype=DTYPE)
   if adapter:
     from peft import PeftModel
     lm = PeftModel.from_pretrained(lm, adapter)
