@@ -15,7 +15,6 @@ import threading
 import time
 from typing import NamedTuple
 
-from google.protobuf import duration_pb2
 from google.protobuf import timestamp_pb2
 import grpc
 from intrinsic.perception.proto.v1 import camera_identifier_pb2
@@ -40,7 +39,7 @@ from sensor_msgs.msg import Image
 from std_msgs.msg import Header
 
 DEVICE_ID = "d455"
-WIDTH, HEIGHT = 848, 480
+WIDTH, HEIGHT = 1280, 720
 REQUEST_AHEAD_S = 0.05  # the frame must show sim time >= latest /clock + this
 DEFAULT_TIMEOUT_S = 5.0
 INFO_REQUEST_PERIOD_S = 1.0
@@ -205,8 +204,8 @@ class CameraService(camera_grpc.CameraServiceServicer):
     params = _camera_params(found[INFO])
     result = capture_result_pb2.CaptureResult(
         capture_at=timestamp_pb2.Timestamp(seconds=found[RGB].header.stamp.sec, nanos=found[RGB].header.stamp.nanosec),
-        capture_duration=duration_pb2.Duration(nanos=round(wait_ms * 1e6)),
     )
+    result.capture_duration.FromNanoseconds(round(wait_ms * 1e6))  # waits can exceed Duration.nanos' 1 s range
     for sensor in SENSORS:
       if sensor.id not in wanted:
         continue

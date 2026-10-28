@@ -2,7 +2,7 @@
 
 Plain Python in the image, started by container/entrypoint.sh with CycloneDDS rclpy (for /clock). Uses
 only Intrinsic APIs: ICON (localhost:18003), the motion planner (:18002), the world (:18000),
-camera_sim's CameraService (:18005); simulation-only calls go through
+camera_sim's CameraService (:18005), the CalibrationService (:18006); simulation-only calls go through
 scene_sync's SimLink (:18101). Every RPC is logged with its status; errors carry a specific code and
 a message naming the cause.
 """
@@ -38,21 +38,24 @@ from intrinsic.perception.proto.v1 import camera_config_pb2  # noqa: E402
 from intrinsic.perception.proto.v1 import camera_identifier_pb2  # noqa: E402
 from intrinsic.perception.proto.v1 import camera_service_pb2 as camera_pb  # noqa: E402
 from intrinsic.perception.proto.v1 import camera_service_pb2_grpc as camera_grpc  # noqa: E402
+from intrinsic.perception.proto.v1 import calibration_service_pb2_grpc as calib_grpc  # noqa: E402
 from intrinsic.world.proto import object_world_refs_pb2 as refs_pb  # noqa: E402
 from intrinsic.world.proto import object_world_service_pb2 as world_pb  # noqa: E402
 from intrinsic.world.proto import object_world_service_pb2_grpc as world_grpc  # noqa: E402
 from intrinsic.world.proto import object_world_updates_pb2 as updates_pb  # noqa: E402
+from intrinsic.world.proto import user_data_pb2  # noqa: E402
 import numpy as np  # noqa: E402
 import rclpy  # noqa: E402
 from rclpy.executors import SingleThreadedExecutor  # noqa: E402
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy  # noqa: E402
+from robot import calibration  # noqa: E402
 from robot import gripper  # noqa: E402
 from robot import png  # noqa: E402
 from robot.icon import ARM, FT_SENSOR, GRIPPER, Icon  # noqa: E402
-from robot.motion import ArmChain, Planner, blending, from_pose_proto, joints, segment, duration_s  # noqa: E402
+from robot.motion import ROBOT, ArmChain, Planner, blending, from_pose_proto, joints, segment, duration_s  # noqa: E402
 from robot.ops import CANCELLED, EXECUTING, PLANNING, ApiError, Operation, OperationTable  # noqa: E402
 from robot_model.franka_scene_object import HOME  # noqa: E402
-from robot_model.load_camera import CALIBRATED_KEY, SENSOR_FRAME  # noqa: E402
+from robot_model.load_camera import CALIBRATED_KEY, INIT_WORLD, SENSOR_FRAME  # noqa: E402
 from robot_service import robot_service_pb2 as api  # noqa: E402
 from robot_service import robot_service_pb2_grpc as api_grpc  # noqa: E402
 from robot_service import simlink_pb2  # noqa: E402
@@ -80,7 +83,15 @@ AUTO_CLEAR_AFTER_S = 2.0
 CLOCK_ADVANCING_S = 1.0  # the watcher clears faults only if /clock moved this recently (Isaac running)
 RESET_FAULT_WAIT_S = 5.0
 RESET_ENABLED_WAIT_S = 10.0
-POINT_CLOUD_STRIDE = 4  # GetPointCloud default: <= 101 760 points (< 1.3 MB), under gRPC's 4 MB limit
+POINT_CLOUD_STRIDE = 4  # GetPointCloud default: <= 230 400 points (< 2.8 MB), under gRPC's 4 MB limit
+# Before each calibration capture (decision 9): this much sim time, then world's joints within the
+# tolerance of ICON's, polled every SYNC_POLL_S for at most SYNC_TIMEOUT_S (wall).
+CAPTURE_SETTLE_S = 0.2
+SYNC_TOLERANCE_RAD = 1e-4
+SYNC_POLL_S = 0.02
+SYNC_TIMEOUT_S = 2.0
+# Planner codes that reject a calibration pose (unreachable, no plan); anything else fails the calibration.
+POSE_REJECTED_CODES = (grpc.StatusCode.ABORTED, grpc.StatusCode.NOT_FOUND, grpc.StatusCode.INVALID_ARGUMENT)
 CLOCK_QOS = QoSProfile(
     reliability=ReliabilityPolicy.RELIABLE, history=HistoryPolicy.KEEP_LAST, depth=1,
     durability=DurabilityPolicy.VOLATILE,
@@ -179,6 +190,19 @@ class World:
       user_data[key].Unpack(value)
     return value.value
 
+  def set_flag(self, name: str, key: str, value: bool, world_id: str = WORLD) -> None:
+    """Sets a BoolValue in the object's user data."""
+    request = updates_pb.UpdateObjectPropertiesRequest(
+        world_id=world_id, object=_by_name(name),
+        user_data=user_data_pb2.UpdateUserData(policy=user_data_pb2.UpdateUserData.POLICY_INSERT_OR_UPDATE))
+    request.user_data.user_data[key].Pack(wrappers_pb2.BoolValue(value=value))
+    self._call("UpdateObjectProperties", request)
+
+  def joints(self, name: str) -> list[float]:
+    """Joint positions of a kinematic object (rad)."""
+    obj = self._call("GetObject", world_pb.GetObjectRequest(world_id=WORLD, object=_by_name(name), view=updates_pb.FULL))
+    return list(obj.kinematic_object_component.joint_positions)
+
   def attach(self, name: str) -> None:
     """Parents the object to the flange of `franka`, keeping its pose."""
     self._call(
@@ -224,6 +248,7 @@ class Robot:
     self.chain = ArmChain()
     self.world = World(args.world)
     self.camera = camera_grpc.CameraServiceStub(grpc.insecure_channel(args.camera))
+    self.calibration = calib_grpc.CalibrationServiceStub(grpc.insecure_channel(args.calibration))
     self.simlink = simlink_pb2_grpc.SimLinkStub(grpc.insecure_channel(args.simlink))
     self.clock = SimClock()
     self.ops = OperationTable()
@@ -304,10 +329,19 @@ class Robot:
     return self.start_arm(kind, lambda op: self._run_motion(op, segments, curve))
 
   def _run_motion(self, op: Operation, segments, curve) -> None:
+    took, planned = self.execute(op, segments, curve)
+    self.ops.finish(op, api.MotionResult(final_joints=api.Joints(positions=self.icon.arm_joints()), duration_s=took),
+                    f"done in {took:.2f} s of sim time (planned {planned:.2f} s)")
+
+  def execute(self, op: Operation, segments, curve=None, detail: str | None = None) -> tuple[float, float]:
+    """Plans and runs `segments` as part of `op`; returns (sim seconds taken, planned seconds).
+
+    The operation becomes EXECUTING with `detail` (default: the planned duration).
+    """
     start = self.icon.arm_joints()
     trajectory = self.planner.plan(start, segments, curve).discretized
     planned = duration_s(trajectory) / self.speed  # the speed override stretches execution
-    if op.cancel.is_set() or not self.ops.update(op, EXECUTING, f"executing a {planned:.2f} s trajectory",
+    if op.cancel.is_set() or not self.ops.update(op, EXECUTING, detail or f"executing a {planned:.2f} s trajectory",
                                                  planned_duration_s=planned):
       raise ApiError(grpc.StatusCode.CANCELLED, "stopped while planning")
     timeout = 2 * planned + 2.0
@@ -326,8 +360,7 @@ class Robot:
                          on_started=lambda: times.setdefault("start", self.clock.now()))
     took = self.clock.now() - times["start"]
     self._wait_arm_at(trajectory.state[-1].position)
-    self.ops.finish(op, api.MotionResult(final_joints=api.Joints(positions=self.icon.arm_joints()), duration_s=took),
-                    f"done in {took:.2f} s of sim time (planned {planned:.2f} s)")
+    return took, planned
 
   def _wait_arm_at(self, target) -> None:
     """Waits until the sensed joints reach `target`.
@@ -485,6 +518,71 @@ class LoggingInterceptor(grpc.ServerInterceptor):
     )
 
 
+class CalibrationArm:
+  """What calibration.run needs from the robot, inside one CalibrateCamera operation."""
+
+  def __init__(self, robot: Robot, op: Operation):
+    self.r, self.op = robot, op
+    self._plan_from: list[float] | None = None  # end joints of the last kept pose's plan
+
+  def board_attached(self) -> bool:
+    return CALIB_BOARD in self.r.world.attached()
+
+  def camera_pose(self) -> api.Pose:
+    """The belief (seed or last calibration), never Isaac's true pose."""
+    return self.r.world.frame_pose(CAMERA_OBJECT, SENSOR_FRAME)
+
+  def move(self, pose: api.Pose, detail: str) -> None:
+    self.r.execute(self.op, [segment(api.Waypoint(pose=pose), api.FLANGE)], detail=detail)
+
+  def home(self) -> None:
+    self.r.execute(self.op, [segment(api.Waypoint(joints=api.Joints(positions=HOME)), api.TCP)], detail="homing")
+
+  def sample(self, start: api.Pose, camera: api.Pose) -> list[api.Pose]:
+    return calibration.sample_poses(start, camera)
+
+  def feasible(self, pose: api.Pose) -> bool:
+    """Decision 11.4: a collision-free IK solution and a planned trajectory from the last kept pose."""
+    start = self._plan_from or self.r.icon.arm_joints()
+    try:
+      q = self.r.planner.ik(pose, api.FLANGE, start)
+      in_collision, debug = self.r.planner.check_collisions(q)
+      if in_collision:
+        log.info("calibration: pose rejected: IK solution in collision: %s", debug)
+        return False
+      trajectory = self.r.planner.plan(start, [segment(api.Waypoint(pose=pose), api.FLANGE)]).discretized
+    except ApiError as error:
+      if error.code not in POSE_REJECTED_CODES:
+        raise
+      log.info("calibration: pose rejected: %s %s", error.code.name, error.message)
+      return False
+    self._plan_from = list(trajectory.state[-1].position)
+    return True
+
+  def wait_synced(self) -> bool:
+    """Decision 9: CAPTURE_SETTLE_S of sim time, then world's franka joints equal ICON's sensed joints."""
+    start = self.r.clock.now()
+    while self.r.clock.now() - start < CAPTURE_SETTLE_S:
+      time.sleep(SYNC_POLL_S)
+    deadline = time.monotonic() + SYNC_TIMEOUT_S
+    while True:
+      error = max(abs(a - b) for a, b in zip(self.r.world.joints(ROBOT), self.r.icon.arm_joints(), strict=True))
+      if error <= SYNC_TOLERANCE_RAD:
+        return True
+      if time.monotonic() > deadline:
+        log.info("calibration: world's %s joints %.5f rad from ICON's after %.0f s", ROBOT, error, SYNC_TIMEOUT_S)
+        return False
+      time.sleep(SYNC_POLL_S)
+
+  def report(self, detail: str) -> None:
+    if self.op.cancel.is_set() or not self.r.ops.update(self.op, detail=detail):
+      raise ApiError(grpc.StatusCode.CANCELLED, "calibration cancelled")
+
+  def mark_calibrated(self) -> None:
+    for world_id in (WORLD, INIT_WORLD):
+      self.r.world.set_flag(CAMERA_OBJECT, CALIBRATED_KEY, True, world_id)
+
+
 def _unimplemented(what: str, phase: str):
   def rpc(self, request, context):
     raise ApiError(grpc.StatusCode.UNIMPLEMENTED, f"{what} is not implemented yet (phase {phase})")
@@ -588,7 +686,14 @@ class RobotService(api_grpc.RobotServiceServicer):
   MoveToContact = _unimplemented("MoveToContact", "5b")
   MoveCompliant = _unimplemented("MoveCompliant", "5b")
   PlanGrasp = _unimplemented("PlanGrasp", "5c")
-  CalibrateCamera = _unimplemented("CalibrateCamera", "4")
+  def CalibrateCamera(self, request, context):
+    def work(op: Operation) -> None:
+      result = calibration.run(CalibrationArm(self.r, op), self.r.calibration)
+      self.r.ops.finish(op, result, f"calibrated from {result.poses_used} captures: rms {result.rms_translation_m * 1e3:.2f} mm"
+                                    f" / {result.rms_rotation_deg:.3f} deg")
+
+    return self.r.reply(self.r.start_arm("CalibrateCamera", work), request.wait)
+
   DetectObjects = _unimplemented("DetectObjects", "5")
 
   def GetOperation(self, request, context):
@@ -827,8 +932,7 @@ class SimService(api_grpc.SimServiceServicer):
     return empty_pb2.Empty()
 
   def DetachCalibrationBoard(self, request, context):
-    if self.r.world.exists(CALIB_BOARD):
-      self.r.world.detach(CALIB_BOARD)
+    """Decision 10: scene_sync deletes calib_board from the worlds once it has left Isaac's /tf."""
     self.r.sim("SetAttached", simlink_pb2.SetAttachedRequest(name=CALIB_BOARD, attached=False))
     self.r.sim("DetachBoard", empty_pb2.Empty())
     return empty_pb2.Empty()
@@ -881,6 +985,7 @@ def main() -> int:
   parser.add_argument("--world", default="localhost:18000")
   parser.add_argument("--camera", default="127.0.0.1:18005")
   parser.add_argument("--simlink", default="127.0.0.1:18101")
+  parser.add_argument("--calibration", default="localhost:18006")
   args = parser.parse_args()
   logging.basicConfig(stream=sys.stdout, level=logging.INFO,
                       format="%(asctime)s %(levelname)s robot_service %(message)s")
@@ -895,8 +1000,8 @@ def main() -> int:
   operations_pb2_grpc.add_OperationsServicer_to_server(Operations(robot), server)
   server.add_insecure_port(f"127.0.0.1:{args.port}")
   server.start()
-  log.info("started port=127.0.0.1:%d belief_source=%s icon=%s planner=%s world=%s camera=%s simlink=%s",
-           args.port, belief_source, args.icon, args.planner, args.world, args.camera, args.simlink)
+  log.info("started port=127.0.0.1:%d belief_source=%s icon=%s planner=%s world=%s camera=%s simlink=%s calibration=%s",
+           args.port, belief_source, args.icon, args.planner, args.world, args.camera, args.simlink, args.calibration)
   server.wait_for_termination()
   return 0
 

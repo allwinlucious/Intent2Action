@@ -27,6 +27,11 @@ from isaacsim import SimulationApp  # noqa: E402  pylint: disable=g-import-not-a
 simulation_app = SimulationApp(
     {
         "headless": True,
+        # /rtx/post/aa/op = 4 (DLAA): anti-aliasing at native resolution; DLSS
+        # upscaling smears the ChArUco markers (phase_4.md, Addendum A).
+        # SimulationApp sets this setting from its config after start-up, so
+        # it cannot go in extra_args.
+        "anti_aliasing": 4,
         "extra_args": [
             "--/app/vulkan=false",
             "--/app/asyncRendering=0",

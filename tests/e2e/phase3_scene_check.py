@@ -53,9 +53,10 @@ APPEAR_S = 5.0
 GONE_TIMEOUT_S = 10.0
 JOINT_TOLERANCE_RAD = 0.01
 JOINT_SYNC_TIMEOUT_S = 5.0
-WIDTH, HEIGHT = 848, 480
-FX = 420.08
+WIDTH, HEIGHT = 1280, 720
+FX = 634.09  # 1280 * focal length 1.93 / horizontal aperture 3.896
 FX_TOLERANCE = 0.01
+CAPTURE_MAX_BYTES = 16 * 1024 * 1024
 RESTART_TIMEOUT_S = 240
 RESTART_SETTLE_S = 3.0
 
@@ -68,7 +69,9 @@ def _simlink(method: str, request, timeout: float = 30):
 
 
 def _camera(method: str, request, timeout: float = 30):
-  with p1._channel(CAMERA_PORT) as channel:
+  # RGB + depth at 1280 x 720 is 6.5 MB, over gRPC's default 4 MB receive limit.
+  with grpc.insecure_channel(f"{p1.HOST}:{CAMERA_PORT}",
+                             options=[("grpc.max_receive_message_length", CAPTURE_MAX_BYTES)]) as channel:
     return getattr(camera_grpc.CameraServiceStub(channel), method)(
         request, timeout=timeout
     )

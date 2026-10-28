@@ -56,9 +56,9 @@ PATH_SAMPLES = 20
 SPEED = 0.5
 SPEED_TOLERANCE = 0.10
 PAYLOAD_KG = 0.5
-WIDTH, HEIGHT = 848, 480
-# Default stride 4: at most 848 * 480 / 4 = 101 760 points; every pixel sees the floor or the table.
-CLOUD_POINTS = (100_000, 101_760)
+WIDTH, HEIGHT = 1280, 720
+# Default stride 4: at most 1280 * 720 / 4 = 230 400 points; every pixel sees the floor or the table.
+CLOUD_POINTS = (226_000, 230_400)
 # phase_3.md says (0.2, 4); the floor (1.65 m below the camera, pitched 45 deg) reaches 5.43 m at
 # the top image row (vertical FOV 59.5 deg).
 CLOUD_Z = (0.2, 6.0)

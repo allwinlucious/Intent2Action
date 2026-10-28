@@ -100,7 +100,7 @@ connect them to Isaac Sim over ROS 2, and put one gRPC API
     image into a point cloud). Simulation-only operations (spawning
     objects, resetting the scene) are in a separate `SimService` and never
     reach the robot functions.
-*   **G5.** The camera is Isaac's D455 model (848×480) with RGB and
+*   **G5.** The camera is Isaac's D455 model (1280×720) with RGB and
     depth. Depth is Isaac's clean rendered depth, with no noise model (D8).
 *   **G6.** Camera-to-robot calibration through Intrinsic's
     `CalibrationService` reaches < 2 mm and < 0.2° against Isaac's true
@@ -205,11 +205,14 @@ connect them to Isaac Sim over ROS 2, and put one gRPC API
 *   **Given**: The D455 is fixed in the scene, looking at the table
     (eye-to-hand). A developer calls `SimService.AttachCalibrationBoard()`
     (in a real cell, a person mounts the board).
-*   **When**: `RobotService.CalibrateCamera()` is called.
-*   **Then**: The flow in "Calibration flow" runs. The camera pose in
-    `world` is within 2 mm / 0.2° of Isaac's true camera pose
-    (`SimService.GetTruePose("camera")`). The developer then calls
-    `SimService.DetachCalibrationBoard()`.
+*   **When**: `RobotService.CalibrateCamera(wait=false)` is called and the
+    developer polls `GetOperation` until it is done (a few minutes).
+*   **Then**: The flow in "Calibration flow" runs and uses at least 12
+    captures. The `sensor` frame of `d455` in `world` is within 2 mm /
+    0.2° of Isaac's true camera pose
+    (`SimService.GetTruePose("Camera_Pseudo_Depth")`), and
+    `GetPointCloud.camera_calibrated` is true, also after a container
+    restart. The developer then calls `SimService.DetachCalibrationBoard()`.
 
 ### CUJ 4: Stop a motion
 
@@ -308,7 +311,9 @@ connect them to Isaac Sim over ROS 2, and put one gRPC API
         (multicast does not cross Windows ↔ WSL both ways). Configuration in
         `container/dds/` (phase 0.5).
 *   **GPU budget** (one RTX 3080, 10 GB, shared by Windows and WSL): Isaac
-    rendering ≤ 6 GB (camera 848×480, the D455's native depth resolution);
+    rendering ≤ 6 GB (camera 1280×720, the D455's native depth resolution
+    and a supported colour resolution, rendered at native resolution with
+    DLAA);
     Triton ≤ 3.5 GB (RF-DETR and FoundationPose in FP16). Phase 5 measures
     actual use; if it exceeds the budget, FoundationPose runs with a lower
     batch size first.
@@ -487,23 +492,44 @@ into Intrinsic; the robot, the camera and the ground are not.
         writes objects into `world`, marked `perceived`.
 *   While an object is attached (`AttachObject`), its pose in `world` is
     not updated from ground truth.
-*   The camera's pose in `world` comes only from calibration, never from
-    ground truth.
+*   The camera's pose in `world` (object `d455`, optical frame `sensor`) is
+    never Isaac's true pose. Until the first calibration it is a nominal
+    seed (Isaac's nominal camera pose moved 3 cm and turned 3°), flagged
+    `user_data["calibrated"] = false`; after it, the calibrated pose,
+    flagged `true`. `GetPointCloud` reports both (`camera_pose`,
+    `camera_calibrated`).
 
 ### Calibration flow
 
-Eye-to-hand: the D455 is fixed in the scene.
-1.  Precondition: a board is attached (`AttachCalibrationBoard` in sim).
-2.  `CalibrationService.Initialize`; 20 board poses from Intrinsic's
-    `pose_sampling` library (board facing the camera, inside reach and
-    view); for each reachable pose: `MoveToPose`, then `CaptureData` (with
-    an image taken after the arm settled, as in `GetImage`).
-3.  `Calibrate`, then `Save`. `Save` is the only persistence: it writes
-    the camera pose into the world's initial state and the camera's
-    configuration through the asset-instances stand-in. The phase 4 plan
-    defines how the service's "execute" and "initial" worlds map to
-    `world` and `sim_world`, and where the stand-in keeps saved data so it
-    survives a container restart.
+Eye-to-hand: the D455 is fixed in the scene. Details in phase 4 decisions
+5–11.
+1.  Precondition: the board is attached (`AttachCalibrationBoard`: Isaac
+    fixes a 7 × 5 ChArUco board, 40 mm squares, 30 mm `DICT_5X5_100`
+    markers, 0.12 m along the hand's z; `robot_service` parents
+    `calib_board` to `franka`'s flange in `world`). Otherwise
+    `FAILED_PRECONDITION`.
+2.  Move the flange to a start pose at (0.60, 0, 0.50) m with its z (the
+    board's textured face) toward the camera position in `world`.
+3.  `CalibrationService.Initialize` (ChArUco detection, camera `d455` at
+    `camera_sim`, arm `franka`).
+4.  Sample 200 flange poses with Intrinsic's `pose_sampling` library
+    (`sample_poses` CLI: box ±(0.08, 0.12, 0.08) m, tilt 15°, roll 20°,
+    board facing the camera) and keep, in order, the first 20 with a
+    collision-free IK solution and a planned trajectory.
+5.  For each kept pose: `MoveToPose` (a failed move is skipped), wait
+    0.2 s of sim time and until `world`'s joints equal ICON's, then
+    `CaptureData`. Fewer than 12 board detections → `ABORTED`.
+6.  `Calibrate` (camera-to-robot, stationary camera; it writes the new
+    camera pose into `world`), then `Save` (it writes only `init_world`),
+    set `calibrated` in both worlds, `Home`. The result carries the
+    camera pose, the RMS translation and rotation residuals and the number
+    of captures used.
+
+`init_world` is persisted by the world service on the container's volume.
+At start-up the camera loader takes `d455`'s pose and flag from
+`init_world` if it has one (else the seed), creates it in `world` and
+clones `world` into `init_world`, so the robot and flange IDs that
+`Save` sends match in both worlds.
 
 ### Adapters
 

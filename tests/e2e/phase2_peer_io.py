@@ -66,7 +66,9 @@ GRIPPER_EFFORT_N = 20.0
 HAND_LOAD_N = np.array([0.0, 0.0, 5.75])
 BOARD_LOAD_N = 0.2 * 9.81
 AVERAGE_S = 0.2
-EXPECTED_K = [420.08, 0, 424, 0, 420.08, 240, 0, 0, 1]
+WIDTH, HEIGHT = 1280, 720
+# fx = fy = 1280 * focal length 1.93 / horizontal aperture 3.896; principal point at the centre.
+EXPECTED_K = [634.09, 0, 640, 0, 634.09, 360, 0, 0, 1]
 OPTICAL = "d455_optical"
 CAMERA_FRAME = "Camera_Pseudo_Depth"
 OBJECT_FILTER = "^/World/objects/[^/]+$"
@@ -382,8 +384,8 @@ def check_camera(p: Peer, _) -> tuple[bool, str]:
   if not (rgb and depth and info):
     return False, f"received {sorted(found)} within {IMAGE_TIMEOUT_S} s"
   ok = (
-      (rgb.encoding, rgb.width, rgb.height) == ("rgb8", 848, 480)
-      and (depth.encoding, depth.width, depth.height) == ("32FC1", 848, 480)
+      (rgb.encoding, rgb.width, rgb.height) == ("rgb8", WIDTH, HEIGHT)
+      and (depth.encoding, depth.width, depth.height) == ("32FC1", WIDTH, HEIGHT)
       and np.allclose(info.k, EXPECTED_K, atol=0.1)
       and {m.header.frame_id for m in (rgb, depth, info)} == {OPTICAL}
   )

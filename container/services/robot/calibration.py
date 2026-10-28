@@ -1,21 +1,26 @@
-"""Pieces of the camera-to-robot calibration (phase_4.md decisions 6, 8 and 11.3), used by the Step 2
-experiments (tests/e2e/exp4/exp4_cd.py). The CalibrateCamera flow itself (Step 3) is not implemented:
-experiments c and d failed (phase_4_notes.md).
+"""Camera-to-robot calibration through Intrinsic's CalibrationService (phase_4.md decisions 6, 8 and 11).
+
+`run` is the CalibrateCamera flow. It reaches the robot only through an `arm` object (robot_service's
+CalibrationArm; fakes in tests/test_calibration_flow.py) and the service through its gRPC stub.
 """
 
 import json
+import logging
 import math
 import subprocess
+import time
 from typing import Callable
 
 import grpc
 from intrinsic.perception.proto.v1 import calibration_service_pb2 as calib_pb
 from intrinsic.perception.proto.v1 import camera_config_pb2
+from intrinsic.perception.proto.v1 import camera_setup_pb2
 from intrinsic.perception.proto.v1 import charuco_pattern_pb2
 from intrinsic.perception.proto.v1 import pattern_detection_config_pb2 as pattern_pb
 from intrinsic.resources.proto import resource_handle_pb2
 from intrinsic.world.proto import object_world_refs_pb2 as refs_pb
 import numpy as np
+from robot.motion import from_pose_proto
 from robot.ops import ApiError
 from robot_model.load_camera import quaternion_wxyz
 from robot_service import robot_service_pb2 as api
@@ -29,6 +34,10 @@ START_FLANGE_M = (0.60, 0.0, 0.50)  # base frame
 # The board sits 0.12 m along Isaac's panda_hand z; panda_hand is the flange turned -pi/4 about z.
 FLANGE_T_BOARD = api.Pose(z=0.12, qz=-math.sin(math.pi / 8), qw=math.cos(math.pi / 8))
 SAMPLING = {"halfsize": [0.08, 0.12, 0.08], "tilt_deg": 15.0, "roll_deg": 20.0, "count": 200, "seed": 0}
+CAPTURES = 20
+MIN_DETECTIONS = 12
+RPC_TIMEOUT_S = 120.0  # Calibrate solves over all captures
+log = logging.getLogger("robot_service")
 
 
 def initialize_request() -> calib_pb.InitializeRequest:
@@ -81,3 +90,82 @@ def sample_poses(start: api.Pose, base_t_camera: api.Pose, run: Callable = subpr
     (x, y, z), (qx, qy, qz, qw) = p["position"], p["quaternion_xyzw"]
     poses.append(api.Pose(x=x, y=y, z=z, qx=qx, qy=qy, qz=qz, qw=qw))
   return poses
+
+
+def _call(service, method: str, request):
+  """One CalibrationService call, logged with its status; a failure keeps its gRPC code."""
+  start = time.monotonic()
+  try:
+    response = getattr(service, method)(request, timeout=RPC_TIMEOUT_S)
+  except grpc.RpcError as error:
+    log.warning("calibration service %s ms=%.0f status=%s message=%s",
+                method, (time.monotonic() - start) * 1e3, error.code().name, error.details())
+    raise ApiError(error.code(), f"calibration service {method}: {error.details()}") from error
+  log.info("calibration service %s ms=%.0f status=OK", method, (time.monotonic() - start) * 1e3)
+  return response
+
+
+def _skippable(error: ApiError) -> bool:
+  return error.code != grpc.StatusCode.CANCELLED
+
+
+def run(arm, service) -> api.CalibrationResult:
+  """Decision 11: start pose, Initialize, sample and filter poses, capture, Calibrate, Save, Home."""
+  if not arm.board_attached():
+    raise ApiError(grpc.StatusCode.FAILED_PRECONDITION, "calibration board not attached")
+  camera = arm.camera_pose()
+  start = start_pose((camera.x, camera.y, camera.z))
+  try:
+    arm.move(start, "moving to the start pose")
+  except ApiError as error:
+    if not _skippable(error):
+      raise
+    raise ApiError(grpc.StatusCode.ABORTED, f"start pose not reached: {error.message}") from error
+  _call(service, "Initialize", initialize_request())
+
+  kept = []
+  for i, pose in enumerate(arm.sample(start, camera)):
+    if len(kept) == CAPTURES:
+      break
+    arm.report(f"selecting poses: sample {i}, {len(kept)}/{CAPTURES} kept")
+    if arm.feasible(pose):
+      kept.append(pose)
+  log.info("calibration: %d of %d poses kept (reachable, collision-free, planned)", len(kept), CAPTURES)
+
+  detections = 0
+  for k, pose in enumerate(kept, 1):
+    progress = f"capture {k}/{CAPTURES}"
+    try:
+      arm.move(pose, f"{progress}: moving")
+    except ApiError as error:
+      if not _skippable(error):
+        raise
+      log.warning("calibration: %s skipped: move failed: %s", progress, error.message)
+      arm.report(f"{progress}: skipped (move failed)")
+      continue
+    if not arm.wait_synced():
+      log.warning("calibration: %s skipped: world's franka joints did not match ICON's", progress)
+      arm.report(f"{progress}: skipped (world joints not synced)")
+      continue
+    status = status_name(_call(service, "CaptureData", calib_pb.CaptureDataRequest()))
+    detections += status == NO_ERRORS
+    log.info("calibration: %s: %s", progress, status)
+    arm.report(f"{progress}: {status}")
+  if detections < MIN_DETECTIONS:
+    raise ApiError(grpc.StatusCode.ABORTED, f"only {detections} board detections (need {MIN_DETECTIONS})")
+
+  arm.report(f"calibrating with {detections} captures")
+  result = _call(service, "Calibrate", calib_pb.CalibrationRequest(
+      calibrate_camera_to_robot=True, camera_to_robot_calibration_type=camera_setup_pb2.CAMERA_SETUP_STATIONARY))
+  if (len(result.camera_to_robot_calibration_results) != 1
+      or not result.camera_to_robot_calibration_results[0].HasField("stationary_camera_result_poses")):
+    raise ApiError(grpc.StatusCode.INTERNAL, "Calibrate returned no stationary camera-to-robot result for d455")
+  _call(service, "Save", result)
+  arm.mark_calibrated()
+  arm.home()
+  solved = result.camera_to_robot_calibration_results[0]
+  return api.CalibrationResult(
+      camera_pose=from_pose_proto(solved.stationary_camera_result_poses.base_t_camera),
+      rms_translation_m=solved.translation_root_mean_square_error,
+      rms_rotation_deg=solved.rotation_root_mean_square_error_in_degrees,
+      poses_used=detections)

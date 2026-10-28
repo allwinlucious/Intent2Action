@@ -380,7 +380,7 @@ class RobotServiceServicer:
 
     def GetPointCloud(self, request, context):
         """Take a point cloud from the depth camera: every stride-th pixel (default
-        4, at most 101 760 points, < 1.3 MB).
+        4, at most 230 400 points, < 2.8 MB).
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')

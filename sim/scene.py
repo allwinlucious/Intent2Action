@@ -24,7 +24,7 @@ CHARUCO_PNG = "C:/isaac-sim-work/repo/assets/calib/charuco_7x5.png"
 ROBOT_PRIM = "/World/franka"
 D455_PRIM = "/World/d455"
 CAMERA_PRIM = "/World/d455/RSD455/Camera_Pseudo_Depth"
-CAMERA_RESOLUTION = (848, 480)
+CAMERA_RESOLUTION = (1280, 720)
 CAMERA_CLIPPING_M = (0.05, 20.0)
 
 BOARD_PRIM = f"{OBJECTS_ROOT}/calib_board"
