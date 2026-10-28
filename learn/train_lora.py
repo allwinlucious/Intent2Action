@@ -23,7 +23,7 @@ import sft
 
 def loss_of(model, ids: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
   base = model.get_base_model()
-  hidden = base.model(input_ids=ids).last_hidden_state[0, :-1]
+  hidden = base.model(input_ids=ids, use_cache=False).last_hidden_state[0, :-1]
   target = labels[0, 1:]
   keep = target != sft.IGNORE
   logits = base.lm_head(hidden[keep]).float()
@@ -52,7 +52,9 @@ def main() -> None:
   if args.limit:
     data = data[:args.limit]
   tokenizer, model = qwen.load()
-  model = peft.prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
+  # Not peft.prepare_model_for_kbit_training: it casts lm_head to fp32 (+1.2 GB on a GPU shared with Isaac).
+  model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+  model.enable_input_require_grads()
   if args.init:
     model = peft.PeftModel.from_pretrained(model, args.init, is_trainable=True)
   else:

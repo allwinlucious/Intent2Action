@@ -16,14 +16,14 @@ TOOL_CALL = re.compile(r"<tool_call>(.*?)(?:</tool_call>|$)", re.S)
 THINK = re.compile(r"<think>.*?</think>", re.S)
 
 
-def load(adapter: str | None = None, model: str = MODEL):
+def load(adapter: str | None = None, model: str = MODEL, embed_on_cpu: bool = True):
   quant = transformers.BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4",
                                           bnb_4bit_compute_dtype=torch.bfloat16, bnb_4bit_use_double_quant=True,
                                           llm_int8_enable_fp32_cpu_offload=True)
   tokenizer = transformers.AutoTokenizer.from_pretrained(model)
   # The embedding table (1.2 GB in bf16) stays in CPU memory: Isaac shares the 10 GB GPU, and a lookup is cheap.
   config = transformers.AutoConfig.from_pretrained(model)
-  device_map = {"model.embed_tokens": "cpu", "model.norm": 0, "model.rotary_emb": 0, "lm_head": 0,
+  device_map = {"model.embed_tokens": "cpu" if embed_on_cpu else 0, "model.norm": 0, "model.rotary_emb": 0, "lm_head": 0,
                 **{f"model.layers.{i}": 0 for i in range(config.num_hidden_layers)}}
   lm = transformers.AutoModelForCausalLM.from_pretrained(model, quantization_config=quant, device_map=device_map,
                                                          dtype=torch.bfloat16)

@@ -171,8 +171,13 @@ def main() -> None:
   parser.add_argument("--seed", type=int, required=True)
   parser.add_argument("--out", required=True)
   args = parser.parse_args()
-  rng = random.Random(args.seed)
-  done, start = 0, time.monotonic()
+  path = env.LOG_DIR / f"{args.out}.jsonl"
+  done = sum(1 for _ in open(path)) if path.exists() else 0  # resume after a stop
+  rng = random.Random(args.seed * 100_000 + done)
+  start = time.monotonic()
+  if done >= args.intents:
+    print(f"DONE {done} intents (already)", flush=True)
+    return
   with env.Stack(args.out), open(env.LOG_DIR / f"{args.out}.jsonl", "a") as out:
     while done < args.intents:
       names = sorted(set(rng.sample(env.CUBES, rng.randint(1, 4))) | {"plate", "peg"})

@@ -6,6 +6,7 @@ are removed and re-added at random poses, so ids and positions change per episod
 
 import math
 import random
+import signal
 import subprocess
 import sys
 import time
@@ -22,6 +23,8 @@ import phase3_hwm_check as hwm  # noqa: E402
 from robot_service import robot_service_pb2 as api  # noqa: E402
 
 LOG_DIR = ROOT / "logs/learn"
+# The supervisor stops a step with SIGTERM; as SystemExit, `with Stack(...)` still stops Isaac and the container.
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
 CUBES = ["red_cube", "blue_cube", "green_cube", "small_yellow_cube"]
 CUBE_SIZE = {"red_cube": 0.05, "blue_cube": 0.05, "green_cube": 0.05, "small_yellow_cube": 0.035}
 MOVABLE = CUBES + ["plate", "peg"]

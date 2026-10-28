@@ -12,6 +12,7 @@ the hidden state of the id's last token in the latest list_objects result.
 
 import argparse
 import json
+import os
 import random
 import re
 import sys
@@ -46,6 +47,7 @@ POINTER_KEY = {"plan_grasp": "object_id", "attach_object": "id", "detach_object"
 MOTIONS = ["", "ANY", "LINEAR"]
 ID = re.compile(r'"id": "(obj_\d+)"')
 HIDDEN = 4096
+SHARD = 200
 
 
 def tool_names() -> list[str]:
@@ -246,8 +248,16 @@ def main() -> None:
       examples += sft.load(args.stage1, sft.stage1_examples)
     if args.stage2:
       examples += sft.load(args.stage2, sft.stage2_examples)
-    tokenizer, lm = qwen.load()
-    torch.save(featurize(tokenizer, lm, examples, agent.tool_specs()), args.out)
+    tokenizer, lm = qwen.load(embed_on_cpu=False)
+    shards = []
+    for k in range(0, len(examples), SHARD):  # shards, so a stopped run resumes
+      path = f"{args.out}.part{k // SHARD:03d}"
+      if not os.path.exists(path):
+        torch.save(featurize(tokenizer, lm, examples[k:k + SHARD], agent.tool_specs()), path + ".tmp")
+        os.replace(path + ".tmp", path)
+      shards.append(path)
+    torch.save([d for path in shards for d in torch.load(path)], args.out)
+    print(f"DONE {args.out}", flush=True)
     return
   data = torch.load(args.features)
   if args.replay_from:
@@ -257,7 +267,6 @@ def main() -> None:
   if args.init:
     head.load_state_dict(torch.load(f"{args.init}/head.pt"))
   train(head, data, args.epochs, args.lr)
-  import os
   os.makedirs(args.out, exist_ok=True)
   torch.save(head.state_dict(), f"{args.out}/head.pt")
   print(f"DONE {args.out}: {len(data)} turns", flush=True)

@@ -5,6 +5,8 @@
 """
 
 import argparse
+import collections
+import json
 import time
 
 import agent
@@ -41,15 +43,20 @@ def main() -> None:
   suite = tasks_lib.suite(args.split, args.start + args.count, 0)[args.start:]
   if args.families:
     suite = [t for t in suite if t.family in args.families.split(",")]
+  path = env.LOG_DIR / f"{args.out}.jsonl"
+  finished = collections.Counter(json.loads(l)["task"]["id"] for l in open(path)) if path.exists() else {}
+  todo = [t for r in range(args.repeat) for t in suite if finished.get(t.id, 0) <= r]  # resume after a stop
+  if not todo:
+    print(f"DONE {args.out}: nothing left", flush=True)
+    return
   policy = make_policy(args.policy)
   print(f"policy {args.policy} loaded; GPU {env.gpu_used_mib()} MiB", flush=True)
   start, passed = time.monotonic(), 0
   with env.Stack(args.out), open(env.LOG_DIR / f"{args.out}.jsonl", "a") as out:
     print(f"stack up; GPU {env.gpu_used_mib()} MiB", flush=True)
-    for _ in range(args.repeat):
-      for task in suite:
-        passed += agent.episode(policy, task, out)["success"]
-  total = len(suite) * args.repeat
+    for task in todo:
+      passed += agent.episode(policy, task, out)["success"]
+  total = len(todo)
   print(f"DONE {args.out}: {passed}/{total} passed in {(time.monotonic() - start) / 60:.0f} min", flush=True)
 
 
