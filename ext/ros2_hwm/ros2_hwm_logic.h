@@ -54,6 +54,26 @@ inline double fingerPosition(double gripper_width) {
 double finiteDifference(double velocity, double previous_velocity,
                         double dt_s);
 
+// Joint velocity from consecutive positions, low-pass filtered
+// (v <- 0.5 v + 0.5 v_fd). Isaac's reported velocity shows phantom motion
+// under contact while the position holds (phase_5b.md, Addendum B1).
+class VelocityEstimator {
+ public:
+  // Feeds one sample; returns the filtered velocity after it. The first
+  // sample after construction or reset() gives zero velocity; a sample with a
+  // non-increasing stamp keeps the velocity.
+  const std::array<double, ARM_DOF>& update(
+      int64_t stamp_ns, const std::array<double, ARM_DOF>& position);
+  const std::array<double, ARM_DOF>& velocity() const { return velocity_; }
+  void reset();
+
+ private:
+  bool has_previous_ = false;
+  int64_t previous_stamp_ns_ = 0;
+  std::array<double, ARM_DOF> previous_position_{};
+  std::array<double, ARM_DOF> velocity_{};
+};
+
 inline bool stampsMatch(int64_t a_ns, int64_t b_ns, int64_t tolerance_ns) {
   const int64_t d = a_ns - b_ns;
   return d <= tolerance_ns && -d <= tolerance_ns;

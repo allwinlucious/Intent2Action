@@ -168,6 +168,7 @@ class Ros2HardwareModule final
   // ICON runtime threads only (ReadStatus and ApplyCommand run in sequence).
   TickEntry previous_entry_;
   bool has_previous_entry_ = false;
+  VelocityEstimator velocity_estimator_;
   int64_t current_stamp_ns_ = 0;
   TaringState taring_;
   uint32_t read_baseline_epoch_ = 0;

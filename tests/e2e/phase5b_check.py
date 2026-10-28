@@ -35,10 +35,11 @@ NO_CONTACT_Z = 0.30
 JAM_START_Z = 0.02
 JAM_CONTACT_FORCE_N = 10.0
 JAM_DOWN_M = 0.03  # MoveCompliant target below the contact TCP pose
-JAM_STIFFNESS, JAM_MAX_FORCE_N = 1000.0, 40.0  # spring about 30 N < 40
+JAM_STIFFNESS, JAM_MAX_FORCE_N = 1000.0, 60.0  # spring 30 N plus overshoot (about 43 N) < 60
 JAM_MAX_SIM_S = 10.0
-SEARCH_DOWN_M = 0.005  # MoveCompliant target below the contact TCP pose, on the hole axis
-SEARCH_STIFFNESS, SEARCH_MAX_FORCE_N = 1000.0, 30.0  # about 5 N normal, 3 N lateral pull
+# Sliding needs the lateral pull to beat friction (offset > mu * depth), so the target is only 2 mm down.
+SEARCH_DOWN_M = 0.002  # MoveCompliant target below the contact TCP pose, on the hole axis
+SEARCH_STIFFNESS, SEARCH_MAX_FORCE_N = 2000.0, 30.0  # about 4 N normal, 6 N lateral pull at 3 mm
 OPERATION_TIMEOUT_S = 120.0  # wall; WaitOperation is repeated since the server caps one wait at 60 s
 PEG, BLOCK = "peg", "hole_block"
 BLOCK_TOP_Z = 0.05

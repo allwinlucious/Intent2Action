@@ -225,6 +225,7 @@ absl::Status Ros2HardwareModule::Prepare() {
   }
   INTR_RETURN_IF_ERROR(realtime_clock_->Reset(CLOCK_RESET_TIMEOUT));
   has_previous_entry_ = false;
+  velocity_estimator_.reset();
   // Isaac reopens the fingers on restart, so the next command must be sent.
   last_gripper_.reset();
   startTickThread();
@@ -305,6 +306,7 @@ RealtimeStatus Ros2HardwareModule::ReadStatus() {
       baseline != read_baseline_epoch_) {
     read_baseline_epoch_ = baseline;
     taring_ = {};
+    velocity_estimator_.reset();
   }
 
   TickEntry* entry = nullptr;
@@ -316,12 +318,15 @@ RealtimeStatus Ros2HardwareModule::ReadStatus() {
       has_previous_entry_
           ? (state.stamp_ns - previous_entry_.state.stamp_ns) * 1e-9
           : 0.0;
+  const std::array<double, ARM_DOF> previous_velocity =
+      velocity_estimator_.velocity();
+  const std::array<double, ARM_DOF>& velocity =
+      velocity_estimator_.update(state.stamp_ns, state.position);
   for (int i = 0; i < ARM_DOF; ++i) {
     joint_position_state_->mutable_position()->Mutate(i, state.position[i]);
-    joint_velocity_state_->mutable_velocity()->Mutate(i, state.velocity[i]);
+    joint_velocity_state_->mutable_velocity()->Mutate(i, velocity[i]);
     joint_acceleration_state_->mutable_acceleration()->Mutate(
-        i, finiteDifference(state.velocity[i],
-                            previous_entry_.state.velocity[i], dt_s));
+        i, finiteDifference(velocity[i], previous_velocity[i], dt_s));
     joint_torque_state_->mutable_torque()->Mutate(i, state.effort[i]);
   }
   gripper_status_->mutate_width(gripperWidth(state.finger_position));

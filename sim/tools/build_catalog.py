@@ -64,8 +64,12 @@ def write_model(directory: Path) -> None:
   physx.CreateRestOffsetAttr(0.0)
   # Compliant contact at MakeContact's MEDIUM environment stiffness (60 kN/m): rigid PhysX contact spikes past 85 N.
   material = UsdShade.Material.Define(stage, "/Object/physics_material")
-  UsdPhysics.MaterialAPI.Apply(material.GetPrim()).CreateStaticFrictionAttr(0.5)
-  UsdPhysics.MaterialAPI(material.GetPrim()).CreateDynamicFrictionAttr(0.4)
+  UsdPhysics.MaterialAPI.Apply(material.GetPrim()).CreateStaticFrictionAttr(
+      description.get("friction_static", 0.5)
+  )
+  UsdPhysics.MaterialAPI(material.GetPrim()).CreateDynamicFrictionAttr(
+      description.get("friction_dynamic", 0.4)
+  )
   physx_material = PhysxSchema.PhysxMaterialAPI.Apply(material.GetPrim())
   physx_material.CreateCompliantContactStiffnessAttr(60000.0)
   physx_material.CreateCompliantContactDampingAttr(600.0)

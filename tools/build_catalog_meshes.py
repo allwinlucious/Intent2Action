@@ -2,7 +2,8 @@
 
 For each object: assets/objects/<name>/mesh.glb (metres, Z up, origin at the
 bottom centre, except calib_board: box centre, as Isaac's board prim) and
-object.yaml (static, mass, color, collision, dims; origin: center if centred).
+object.yaml (static, mass, color, collision, dims; origin: center if centred;
+friction_static/friction_dynamic where not the default).
 sim/tools/build_catalog.py turns them into model.usd. Dev-time only:
   .venv/bin/python tools/build_catalog_meshes.py
 """
@@ -51,6 +52,9 @@ OBJECTS = {
     "calib_board": (trimesh.creation.box(extents=(0.28, 0.20, 0.005)), False, 0.2, (1.0, 1.0, 1.0)),
     "obstacle": (_box(0.1, 0.1, 0.5), True, None, (0.5, 0.5, 0.5)),
 }
+# Static/dynamic friction where not build_catalog.py's default 0.5/0.4: the peg
+# must slide on the block's face to the hole (phase_5b.md, Addendum B2).
+FRICTION = {"peg": (0.3, 0.25), "hole_block": (0.3, 0.25)}
 
 
 def main() -> int:
@@ -72,6 +76,8 @@ def main() -> int:
     }
     if name == "calib_board":
       description["origin"] = "center"
+    if name in FRICTION:
+      description["friction_static"], description["friction_dynamic"] = FRICTION[name]
     (out / "object.yaml").write_text(yaml.safe_dump(description))
     bounds = trimesh.load(glb, force="mesh").bounds
     ok = np.allclose(bounds, mesh.bounds, atol=TOLERANCE_M, rtol=0)

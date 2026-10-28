@@ -42,6 +42,44 @@ TEST(FiniteDifference, DividesByDtAndGuardsZero) {
   EXPECT_DOUBLE_EQ(finiteDifference(1.0, 0.5, 0.0), 0.0);
 }
 
+TEST(VelocityEstimator, ConstantPositionGivesZero) {
+  VelocityEstimator estimator;
+  std::array<double, ARM_DOF> position{};
+  position.fill(0.7);
+  for (int64_t k = 0; k < 10; ++k) {
+    estimator.update(k * 2'000'000, position);
+  }
+  for (double v : estimator.velocity()) EXPECT_DOUBLE_EQ(v, 0.0);
+}
+
+TEST(VelocityEstimator, RampConvergesToSlope) {
+  VelocityEstimator estimator;
+  std::array<double, ARM_DOF> position{};
+  constexpr double SLOPE = 0.3;  // rad/s
+  for (int64_t k = 0; k <= 60; ++k) {
+    const int64_t stamp_ns = k * 2'000'000;
+    position.fill(SLOPE * stamp_ns * 1e-9);
+    estimator.update(stamp_ns, position);
+  }
+  for (double v : estimator.velocity()) EXPECT_NEAR(v, SLOPE, 1e-9);
+}
+
+TEST(VelocityEstimator, RepeatedStampKeepsVelocityAndResetClears) {
+  VelocityEstimator estimator;
+  std::array<double, ARM_DOF> position{};
+  estimator.update(0, position);
+  position.fill(0.002);
+  estimator.update(2'000'000, position);  // v_fd = 1 rad/s, filtered 0.5
+  EXPECT_DOUBLE_EQ(estimator.velocity()[0], 0.5);
+  position.fill(5.0);
+  estimator.update(2'000'000, position);
+  EXPECT_DOUBLE_EQ(estimator.velocity()[0], 0.5);
+  estimator.reset();
+  EXPECT_DOUBLE_EQ(estimator.velocity()[0], 0.0);
+  estimator.update(4'000'000, position);  // first sample after reset
+  EXPECT_DOUBLE_EQ(estimator.velocity()[0], 0.0);
+}
+
 TEST(StampsMatch, WithinToleranceBothWays) {
   EXPECT_TRUE(stampsMatch(1000, 1999, 1000));
   EXPECT_TRUE(stampsMatch(1999, 1000, 1000));

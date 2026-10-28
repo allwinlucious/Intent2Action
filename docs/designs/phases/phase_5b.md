@@ -195,3 +195,28 @@ Then Steps 3–4.
     below 60) → `ABORTED` "settled before reaching the target".
 4.  After the check passes, rerun the phase 3, 4 and 5c checks (the new
     contact materials and velocity source affect them) and do Step 4.
+
+## Addendum C (after run 4: grasp slip, wrench chatter)
+
+1.  **Grip** (peg slipped and pivoted ~8–10° in the fingers):
+    *   `sim/scene.py` (Modify): a physics material on the Franka finger
+        collision prims (`/World/franka/panda_leftfinger`,
+        `/World/franka/panda_rightfinger`): friction static/dynamic
+        1.2/1.0 with `frictionCombineMode = "max"` (PhysX gives `max`
+        priority over `average`, so finger contacts use 1.2 while
+        peg–hole stays at the peg/hole average).
+    *   `container/config/icon.txtpb`: gripper `default_force` 30 → 60 N.
+    *   `container/services/robot/grasp.py` depth (phase 5c decision 6.6):
+        d = min(0.04, extent along the approach − 0.01) (was 0.02):
+        shorter lever arm.
+    *   Rerun `phase5c_check.py` after this (cube and peg ≥ 9/10).
+2.  **Chatter sweep** (wrench alternating 22/57 N while still): for each
+    combination in this order — admittance translational inertia
+    (`MoveCompliant`, decision 2) ∈ {2, 5, 10} kg (outer loop) × catalog
+    `compliantContactDamping` ∈ {600, 2000} (inner loop; regenerate
+    USDs) — run `jam` and 5 `insert` trials. Choose the **first**
+    combination where `jam` passes and ≥ 4/5 inserts succeed; then run
+    the full check (≥ 9/10). Record every combination's results (peak
+    and alternating wrench, insert depth) in `phase_5b_notes.md`. If none
+    qualifies, stop and record.
+3.  Then Step 4 and the phase 3, 4, 5c regression checks.

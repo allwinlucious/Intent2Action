@@ -26,6 +26,28 @@ double finiteDifference(double velocity, double previous_velocity,
   return dt_s > 0.0 ? (velocity - previous_velocity) / dt_s : 0.0;
 }
 
+const std::array<double, ARM_DOF>& VelocityEstimator::update(
+    int64_t stamp_ns, const std::array<double, ARM_DOF>& position) {
+  if (has_previous_ && stamp_ns > previous_stamp_ns_) {
+    const double dt_s = (stamp_ns - previous_stamp_ns_) * 1e-9;
+    for (int i = 0; i < ARM_DOF; ++i) {
+      velocity_[i] = 0.5 * velocity_[i] +
+                     0.5 * (position[i] - previous_position_[i]) / dt_s;
+    }
+  }
+  if (!has_previous_ || stamp_ns > previous_stamp_ns_) {
+    previous_stamp_ns_ = stamp_ns;
+    previous_position_ = position;
+    has_previous_ = true;
+  }
+  return velocity_;
+}
+
+void VelocityEstimator::reset() {
+  has_previous_ = false;
+  velocity_.fill(0.0);
+}
+
 bool mapJointIndices(std::span<const std::string> names,
                      std::span<const std::string> wanted,
                      std::span<int> indices) {

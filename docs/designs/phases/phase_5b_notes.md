@@ -1,17 +1,20 @@
 # Phase 5b notes
 
-**Status: stopped at Step 3 again, after Addendum A** (run 3). `insert` is
-0/10 and `jam` fails, and the causes need design decisions (see "Run 3"
-below). Addendum A items 1–4 are applied. Compliant contact removed the
-impact spikes, and `contact_table` now passes. Step 4 was not done:
-`robot_platform.md` (CUJ 6, G8) is untouched, and the phase 3/4/5c checks
-were not rerun with the new catalog materials. Decisions 1–8 and Steps 1–2
-are implemented.
+**Status: stopped at Step 3 again, after Addendum B** (run 4). `insert` is
+1/10 and `jam` fails. Both causes need design decisions (see "Run 4"
+below). Addendum B items 1–3 are applied, and B1 works: ICON now settles
+in contact. Step 4 and B4 were not done: `robot_platform.md` (CUJ 6, G8)
+is untouched, and the phase 3/4/5c checks were not rerun with the new
+velocity source and friction (B4 says to rerun them after the check
+passes). Decisions 1–8, Steps 1–2 and Addendum A are implemented.
 
 ## Check results
 
 | Check | Result | Log |
 |-------|--------|-----|
+| `phase5b_check.py` run 4 (Addendum B) | contact_table PASS, no_contact PASS, bad_speed PASS, insert FAIL 1/10, jam FAIL, logs PASS | `logs/phase5b_check_run4.log` |
+| `container/build_intrinsic.sh --test` (B1) | build OK; `ros2_hwm_logic_test` PASSED (3 new `VelocityEstimator` tests) | `logs/phase5b_addB_build.log` |
+| `pytest -q tests/` after run 4 | 77 passed | |
 | `phase5b_check.py` run 3 (Addendum A) | contact_table PASS, no_contact PASS, bad_speed PASS, insert FAIL 0/10, jam FAIL, logs FAIL (check bug, fixed after the run) | `logs/phase5b_check_run3.log` |
 | `pytest -q tests/` after run 3 | 77 passed | |
 | `phase5b_check.py` run 2 (final code) | contact_table FAIL, no_contact PASS, bad_speed PASS, insert FAIL 0/10, jam FAIL, logs PASS | `logs/phase5b_check_run2.log` |
@@ -31,6 +34,137 @@ Fixes made between run 1 and run 2 (implementation bugs, not design):
    condition to be false, so the abort wins.
 3. Sequences that ICON ended had no `force` log line. `run_force` now
    logs one with `force_along_push_n=nan` before re-raising.
+
+## Run 4 (Addendum B)
+
+Applied:
+- **B1:** `ros2_hwm_logic` gained `VelocityEstimator`. It takes the
+  finite difference of consecutive `/joint_states` positions over their
+  stamp difference and filters it (v ← 0.5·v + 0.5·v_fd). The first
+  sample after a reset and any non-increasing stamp leave v unchanged.
+  `ReadStatus` writes it to `joint_velocity_state`, and
+  `joint_acceleration_state` is now the difference of that filtered
+  velocity. The filter resets when the epoch baseline changes (that is,
+  `ClearFaults` after a reset; while the epochs differ `ReadStatus`
+  returns the fault before reading) and in `Prepare()`. Isaac's velocity
+  is still parsed into `StateSample` but no longer used. Unit tests:
+  constant position → 0, ramp → slope, repeated stamp keeps v, reset
+  clears. Rebuilt with `build_intrinsic.sh --test`, then
+  `stage_intrinsic.sh`, `stage_vendor.sh` (`stage_intrinsic.sh` deletes
+  `stage/vendor`), and `docker build`.
+- **B2:** `object.yaml` of `peg` and `hole_block` has
+  `friction_static: 0.3` and `friction_dynamic: 0.25`. These come from
+  `FRICTION` in `tools/build_catalog_meshes.py`, so regenerating keeps
+  them. `sim/tools/build_catalog.py` reads them, with a default of
+  0.5/0.4. Regenerating the USDs changed only `peg` and `hole_block`
+  (`logs/phase5b_build_catalog_b.log`). The search is now 2 mm below the
+  contact pose, at 2000 N/m and 30 N.
+- **B3:** the `jam` `MoveCompliant` uses `max_force` 60.
+
+**B1 works.** Every face `MoveToContact` was done after 5.3 s of sim time
+(run 3: 8/10 hit the 62 s deadline). `contact_table` was done after 3.32 s
+(run 3: 14.41 s). While the arm holds in contact, ICON's sensed joint
+velocity norm is 0–0.012 rad/s (run 3: a steady 0.06 rad/s on joint 7).
+
+### Insert, run 4, per trial
+
+Column meanings: start off axis = true peg position minus the hole axis
+before contact. Contact = `GetWrench` along the push after the face
+`MoveToContact`. x/y at contact = true peg position minus the axis.
+Depth = below the top face at the end of the trial.
+
+| # | Start off axis (mm), height | MoveToContact (face) | Contact force (N) | x/y off axis at contact (mm), peg bottom z | MoveCompliant (search) | Depth |
+|---|---|---|---|---|---|---|
+| 1 | +2.76, −0.17; 19.4 mm | done 5.35 s, 13.6 N | 13.49 | +2.94, −0.25; 0.0494 | DEADLINE_EXCEEDED 30.29 s, 3.3 N | 0.7 mm |
+| 2 | +2.85, −0.21; 19.5 mm | done 5.38 s, 12.9 N | 13.26 | +2.88, −0.37; 0.0497 | DEADLINE_EXCEEDED 30.29 s, 3.7 N | 0.5 mm |
+| 3 | +2.74, −0.20; 19.4 mm | done 5.34 s, 13.0 N | 13.08 | +2.77, −0.47; 0.0495 | ABORTED "settled before reaching the target (position error 0.0021 m)" 3.15 s, 3.7 N | 0.5 mm |
+| 4 | +2.89, −0.06; 19.8 mm | done 5.35 s, 13.3 N | 13.36 | +3.05, −0.08; 0.0495 | DEADLINE_EXCEEDED 30.30 s, 3.3 N | 0.6 mm |
+| 5 | +2.65, −0.30; 19.2 mm | done 5.32 s, 13.4 N | 13.29 | +2.75, −0.41; 0.0495 | DEADLINE_EXCEEDED 30.29 s, 3.9 N | 0.5 mm |
+| 6 | +3.05, +0.12; 20.0 mm | done 5.34 s, 12.8 N | 12.76 | +2.71, +0.16; 0.0500 | done 0.77 s; peg then −0.66, −0.40 mm, bottom z 0.0470; bottom `MoveToContact` done 4.78 s, 13.81 N | **33.4 mm (ok)** |
+| 7 | +3.14, −0.13; 19.9 mm | done 5.30 s, 13.3 N | 13.39 | +2.99, −0.21; 0.0497 | DEADLINE_EXCEEDED 30.29 s, 4.0 N | 0.4 mm |
+| 8 | +3.14, −0.20; 19.7 mm | done 5.26 s, 12.4 N | 12.43 | +3.35, −0.13; 0.0498 | DEADLINE_EXCEEDED 30.29 s, 3.8 N | 0.3 mm |
+| 9 | +2.75, −0.20; 19.5 mm | done 5.31 s, 13.3 N | 13.31 | +2.77, −0.41; 0.0496 | DEADLINE_EXCEEDED 30.29 s, 3.8 N | 0.5 mm |
+| 10 | +2.91, −0.11; 19.7 mm | done 5.32 s, 13.3 N | 13.13 | +3.07, −0.25; 0.0496 | DEADLINE_EXCEEDED 30.29 s, 3.4 N | 0.5 mm |
+
+No trial faulted ICON. Every face contact was on the top face, at
+12.4–13.5 N (inside 12–18 N).
+
+`jam`: `MoveToContact(10 N)` was done after 2.17 s, at 9.3 N.
+`MoveCompliant` (1000 N/m, 3 cm down, 60 N) returned ABORTED "force limit
+reached" after 4.58 s, at 43.6 N, with a `GetWrench` peak of 67.4 N.
+
+### Probes (read-only, while the check ran)
+
+- `logs/phase5b_probe_run4.log` (`/tmp/probe5b.py`, as in run 3) covered
+  trials 4–8. It sampled ICON joints, F/T and the true peg pose.
+- `logs/phase5b_probe_tilt_run4.log` (`/tmp/probe5b_tilt.py`) covered
+  trials 9–10 and `jam`. It sampled the true peg pose with its tilt from
+  vertical, `GetState.tool_pose` (TCP) and `GetWrench`, every 0.5 s.
+- For trial 4, `/tmp/fk5b.py` ran `ComputeFk` (TCP) on the joints at
+  contact and at the end of the search.
+
+### Findings 10–12 (for the lead)
+
+10. **The peg slips and pivots in the grasp. It does not slide on the
+    face.** Trials 9 and 10 measured the same thing:
+    - Free approach: the TCP is 59.1–59.4 mm above the peg bottom, and the
+      peg tilts 0.6°.
+    - Face `MoveToContact`: once the peg touches (`GetWrench` ≈ 2 N), the
+      TCP keeps going down 12–14 mm while the peg bottom stays at
+      z ≈ 0.0496. The TCP-to-peg-bottom distance drops to 45.3 mm, and
+      the tilt grows to 8.0°. The force reaches 13 N only after that,
+      probably when the peg top reaches the hand (not verified).
+    - Search `MoveCompliant`: the TCP moves −3.8 to −4.2 mm in x relative
+      to the peg, onto the hole axis. In trial 4 FK gives TCP x
+      0.60247 → 0.59852 and z −0.23 mm. The peg bottom moves < 0.1 mm,
+      and the tilt grows to 10.5–10.8°. `GetWrench` lateral stays at
+      about 1 N, where 6 N was expected.
+
+    So the spring pulls the hand, not the peg. The lower peg friction
+    (B2) is not shown to be the cause. PhysX combines friction by
+    averaging by default, so the finger-to-peg friction dropped by about
+    as much as the peg-to-block friction. But at a 30 N grasp force
+    (`ros2_hwm` gripper command; Isaac caps it at 70 N), slip at about 2 N
+    looks more like the peg rotating about the two-finger contact line
+    than like plain friction. Run 3 did not measure the TCP-to-peg
+    offset, so whether 0.5/0.4 friction slips the same way is unknown.
+    Trial 6 (bottom z 0.0500, the least penetration) slid into the hole.
+    It was not tilt-probed.
+11. **The F/T reading toggles between two levels while the TCP is still.**
+    During the search the TCP holds to 0.1 mm while `GetWrench` z
+    alternates between about 6.2 and 9.7 N. In `jam` the TCP holds
+    z 0.0119, and z alternates between 20–22 N and 53–58 N, with lateral
+    readings of ±4–10 N. The closed fingers creep 1.8 mm in +x along the
+    table over 6 s. The 60 N limit trips on the high level (peak 67.4 N),
+    so `jam` still ends as "force limit reached". The spring force is
+    30 N. This is likely chattering contact between the fingers and the
+    compliant table (not verified).
+12. **Search deadline instead of jam.** 8/9 failed searches hit the 30 s
+    deadline rather than the 1 s "settled" abort (trial 3 got it). The
+    hand is still in position, so the force toggling in finding 11
+    probably keeps `settled_for_seconds` from accumulating (not verified;
+    the client cannot read that state variable).
+
+Options, one decision per finding (not applied):
+- (10) Choose one:
+  - Make the grasp hold the peg: grasp force 70 N, a finger physics
+    material with higher friction, or a grasp height where the peg top
+    already touches the hand, so the peg cannot slide up and can only
+    pivot.
+  - Restore peg friction to 0.5/0.4 and lower only `hole_block` (for
+    example 0.1/0.1, which averages to 0.3/0.25 against the peg), so the
+    grip friction stays as before.
+  - Weld the peg to the hand in Isaac while attached (a fixed joint).
+    This is the least realistic option.
+- (11) Choose one:
+  - Raise the jam `max_force` above the measured 67 N, to 80 N (below
+    the 85 N excessive-force limit).
+  - Lower the jam stiffness to about 500 N/m (15 N spring).
+  - Look into the toggling in Isaac: finger material and contact
+    settings, or the solver iteration counts of the wrist F/T joint.
+- (12) Follows from (10) and (11). Alternatively, a server-side jam test
+  on TCP motion (< 0.5 mm in 1 s) instead of `settled_for_seconds`, as
+  run 3's option (7).
 
 ## Run 3 (Addendum A)
 
@@ -279,6 +413,13 @@ Modified:
 - `assets/objects/*/model.usd`: all 7 regenerated (again for A1)
 - `tests/e2e/phase5b_check.py` (run 3): Addendum A2–A4, failed trials
   report depth, `logs` reads the rotated log files
+- `tests/e2e/phase5b_check.py` (run 4): B2 search (2 mm, 2000 N/m) and B3
+  jam `max_force` 60
+- `ext/ros2_hwm/ros2_hwm_logic.{h,cc}`, `ros2_hwm_logic_test.cc`,
+  `ros2_hwm.{h,cc}`: `VelocityEstimator` (B1)
+- `tools/build_catalog_meshes.py`, `assets/objects/{peg,hole_block}/object.yaml`:
+  friction keys (B2); `sim/tools/build_catalog.py` reads them
+- `assets/objects/{peg,hole_block}/model.usd`: regenerated (B2)
 
 Regenerated `gen/`:
 - `intrinsic/icon/actions/{force_primitive,cartesian_admittance_action,cartesian_impedance,cartesian_impedance_reference_generators}_pb2*`
@@ -287,6 +428,8 @@ Regenerated `gen/`:
 - `robot_service/robot_service_pb2_grpc.py` (docstrings only)
 
 Other logs:
-- `logs/phase5b_build_catalog.log`, `logs/phase5b_build_catalog_a.log`
+- `logs/phase5b_build_catalog.log`, `logs/phase5b_build_catalog_a.log`,
+  `logs/phase5b_build_catalog_b.log`
+- `logs/phase5b_addB_{build,stage,stage_vendor,docker_build}.log`
 - `logs/phase5b_docker_build.log`
 - `logs/phase5b_robot_service.log`

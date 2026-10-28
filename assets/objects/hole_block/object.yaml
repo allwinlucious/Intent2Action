@@ -7,5 +7,7 @@ dims:
 - 0.08
 - 0.08
 - 0.05
+friction_dynamic: 0.25
+friction_static: 0.3
 mass: null
 static: true
