@@ -19,6 +19,32 @@ on the same tasks:
 Reference point: a frontier hosted model on the same tasks (5/5 on CUJ 1, about 1
 rejected call per run).
 
+## Two stages: choose locally, train the target in the cloud
+
+1.  **Choose the approach locally** with Qwen3 8B on the RTX 3080 (this
+    document's phases L0–L6): raw vs. fine-tuned vs. action head.
+2.  **Train the target model in the cloud** with the chosen approach:
+    **Muse Glimmer** (30B, open weights, Apache 2.0; owner requirement),
+    on a rented GPU (≥ 24 GB for 4-bit inference, more for training).
+
+So everything built here must be model-agnostic and portable:
+*   The agent loop, recorder, task suite, checkers and datasets do not
+    depend on the model. Swapping in Glimmer changes only the model
+    loader and its chat or tool-call template.
+*   Training scripts take the base model as a parameter, and run the same
+    on the local GPU and on a cloud GPU (containerised, no paths tied to
+    this machine).
+*   What does not transfer: the LoRA adapters and the action head's
+    weights (Glimmer's hidden size differs). The data, code and
+    hyperparameters found on Qwen transfer; the weights are retrained on
+    Glimmer.
+*   The sim (Isaac + container) stays on this machine. Cloud training
+    uses recorded data; cloud evaluation connects to the robot stack here
+    over the network, or the stack is deployed next to it (decided when
+    we get there).
+*   Glimmer has a vision encoder, so images can come back into the loop
+    after the text-only comparison.
+
 ## What "a mistake" means (the metrics)
 
 Every run is scored automatically:
