@@ -1,6 +1,130 @@
 # Phase 5c implementation notes
 
-Status: **stopped at Step 3.** Decisions 2–5 are built and the grasp
+Status: **stopped at Step 3 again, after Addendum A.** Addendum A is
+applied. Blockers 1 and 2 are gone, and `cube` passes 10/10. `peg` fails
+5/10, and the cause is Addendum A.2's 5 mm margin itself (blocker 3). The
+fix changes a value that the addendum fixed, so it needs a design decision,
+and this run stops here as instructed. A diagnostic build with a 0.5 mm
+margin passed every check, peg 10/10 included. The code and the image are
+back on 5 mm.
+
+`tests/e2e/phase5c_check.py` with Addendum A
+(`logs/phase5c_check_addA_run1.log`):
+
+| Check | Result |
+|---|---|
+| `planner_up` | PASS (server available 1 s after `robot_service` was ready) |
+| `cube` | PASS, 10/10 lifted (rose 99.6–100.0 mm, gripping at 50 mm) |
+| `peg` | FAIL, 5/10 (blocker 3) |
+| `too_wide` | PASS |
+| `logs` | FAIL, from a check bug (it counted the accept handler's "Accepted … goal" lines too); fixed, and PASS in the diagnostic run |
+| `errors` | PASS |
+
+The same check on a diagnostic image with a 0.5 mm margin
+(`logs/phase5c_diag_margin_0p5mm.log`) passed all six checks: cube 10/10
+and peg 10/10.
+
+Regression with Addendum A (5 mm image, `logs/phase5c_addA_regression_*.log`):
+
+- phase 3 cuj: 8/8. `cuj4` (Addendum A.3) passes: "Stop 1 s into a 4.47 s
+  MoveJoints → CANCELLED". The first run failed `obstacle` 1/20, the
+  known flake; the rerun (`…_phase3_cuj_check2.log`) passed 8/8.
+- phase 3 hwm: 7/7
+- phase 3 scene: 5/5
+- phase 4: 6/6
+- `pytest tests/`: 49 passed
+
+No container or Isaac process is left running. `intrinsic-core:dev` is
+built from the current tree (5 mm margin).
+
+## Addendum A changes
+
+- **A.1** (`container/services/robot/grasp.py`): every `CollisionObject`
+  (`ADD` and `REMOVE`) uses `header.frame_id = "base_link"`
+  (`PLANNING_FRAME`). The code never had a static TF; the one in the first
+  run was started by hand.
+- **A.2** (`grasp.py`): `lowered_m(static, bottom_z, dims)` returns
+  0.005 m when the catalog entry is `static: true` and the top
+  (`pose.z + dims.z`, object upright) is within 0.005 m of z = 0. The
+  MoveIt box's `primitive_poses[0].z` becomes `dims.z/2 − lowered`. Only
+  `table` qualifies. The first time per process, `robot_service.log` gets
+  "plan_grasp MoveIt box of table lowered by 0.005 m (its top is at the
+  robot base plane)". `catalog_static` reads `static` from `object.yaml`.
+  New unit test: `test_static_top_at_the_base_plane_is_lowered`.
+- **A.3** (`tests/e2e/phase3_cuj_check.py` `cuj4`): `Home`, then joint 1
+  +1.5 rad at `SetSpeed(0.2)`. At full speed the move takes under 1 s
+  (0.5 rad takes 0.41 s, `misc`), so the 3 s needs the slower speed. The
+  check asks `PlanOnly` for the planned duration and fails if it is under
+  3 s (it is 4.47 s). Then `MoveJoints` (no wait), `Stop` 1 s later, and
+  `SetSpeed(1.0)` in a `finally`.
+- **`phase5c_check.py` `logs`:** it now counts only main.cpp's per-goal
+  lines (`]: goal ` with ` target=`).
+
+## Blocker 3: the 5 mm margin lets MoveIt pick grasps that are in the table
+
+**Facts** (`logs/phase5c_check_addA_run1.log`):
+
+- In each peg trial, the planner's best grasp was either top-down at
+  z = 0.06 (quality about 0.11) or from the side at the peg's mid-height,
+  z = 0.04 (quality about 0.115–0.12). The two qualities are close, so the
+  choice changes from trial to trial.
+- All 5 top-down trials lifted the peg. All 5 side trials failed at the
+  first `MoveToPose` (pregrasp at y = 0.21, z = 0.04). Intrinsic's
+  planner returned `NOT_FOUND` "IK could not find a collision free
+  configuration": all 4 IK solutions have `panda_link6` in collision
+  with `table`.
+- FK of those solutions with the URDF collision meshes (`/tmp` script,
+  not kept) puts `panda_link6` 4.2 mm and `panda_link7` 3.9 mm below the
+  table top (z = 0). MoveIt's table top is at −0.005 (A.2), so MoveIt
+  sees 0.8 mm of clearance and returns the grasp. Intrinsic uses the real
+  table and rejects it correctly. The arm would hit the table.
+- Any margin δ lets MoveIt accept poses up to δ inside the table.
+  `panda_link0`'s collision mesh reaches only 0.03 mm below z = 0 at
+  home, so a much smaller margin still clears the start state.
+- Cube grasps are not affected: the best cube grasp was top-down
+  (z = 0.03) in all 10 trials.
+
+**Diagnostic** (temporary image with `BASE_PLANE_MARGIN_M = 0.0005`,
+reverted and rebuilt afterwards; `logs/phase5c_diag_margin_0p5mm.log`,
+`logs/phase5c_diag_margin_0p5mm_container.log`): all checks passed, and
+peg 10/10. MoveIt now rejected the side grasps, and every peg trial got
+the top-down grasp at z = 0.06.
+
+**Options for the designer:**
+
+- (a) Make the A.2 margin 0.0005 m (the threshold for "top within … of
+  z = 0" uses the same constant). Verified above. It is one constant in
+  `grasp.py`. It still allows poses up to 0.5 mm into the table, which
+  Intrinsic would reject.
+- (b) Leave the table box as it is and allow `table`–`panda_link0` in
+  the scene diff's `allowed_collision_matrix` (blocker 2 option (b)).
+  MoveIt would then see the true table for every other link. Not tried.
+  It is not checked that the planner's `/get_planning_scene` request
+  includes the ACM.
+- (c) In `robot_service`, check each returned grasp's pregrasp and grasp
+  with Intrinsic's IK, in quality order, and return the best one that
+  passes. This catches any mismatch between the two collision models,
+  but it changes decision 6.7 and adds planning time. Not tried.
+
+## Success rates and planning times
+
+PlanGrasp time is measured by the client: the whole RPC, including the
+scene update. The planner's own time is `duration_s` in
+`grasp_planner.log`.
+
+| Run | Object | Lifted | PlanGrasp median / max | Planner `duration_s` |
+|---|---|---|---|---|
+| 5 mm margin (Addendum A) | `red_cube` | 10/10 | 0.82 / 0.87 s | 0.51–0.62 s (first 6 goals) |
+| 5 mm margin (Addendum A) | `peg` | 5/10 | 1.37 / 1.43 s | not kept (log overwritten by the diagnostic) |
+| 0.5 mm margin (diagnostic) | `red_cube` | 10/10 | 0.84 / 0.88 s | median 0.62, max 0.66 s |
+| 0.5 mm margin (diagnostic) | `peg` | 10/10 | 2.09 / 2.12 s | median 1.87, max 1.90 s |
+
+With the true table, peg planning takes longer: MoveIt's collision checks
+now reject the side candidates.
+
+# First run (before Addendum A)
+
+Status then: stopped at Step 3. Decisions 2–5 are built and the grasp
 pipeline links and runs (`planner_up` passes). Decision 6 is implemented
 and unit-tested. The planner can't produce a grasp in Isaac's scene,
 though, for two reasons that the plan doesn't resolve. Each fix is a design
@@ -195,6 +319,8 @@ problems could still appear there.
 
 ## Regression: cuj4
 
+Resolved by Addendum A.3 (see "Addendum A changes").
+
 `phase3_cuj_check` `cuj4` sends `MoveJoints` (joint 1 to 1.0 rad), sleeps
 1.0 s, then calls `Stop` and expects the move to end `CANCELLED`. It failed
 on all three runs on the phase 5c image, once with `GRASP_PLANNER=off`, and
@@ -265,3 +391,12 @@ Modified:
 - `container/services/scene_sync.py`
 - `tools/build_catalog_meshes.py`
 - `assets/objects/*/object.yaml` (7 files: `dims`)
+
+Changed in the Addendum A run (all already in the lists above, except
+`phase3_cuj_check.py`):
+
+- `container/services/robot/grasp.py` (A.1, A.2)
+- `tests/test_plan_grasp.py` (A.2 test)
+- `tests/e2e/phase5c_check.py` (`logs` count)
+- `tests/e2e/phase3_cuj_check.py` (A.3, `cuj4`)
+- `docs/designs/phases/phase_5c_notes.md`

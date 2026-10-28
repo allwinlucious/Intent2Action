@@ -1,6 +1,7 @@
 """PlanGrasp (phase_5c.md decision 6): Intrinsic's MoveIt grasp pipeline over its ROS 2 action.
 
-robot_service applies `world`'s catalog objects to MoveIt's planning scene (/apply_planning_scene), asks
+robot_service applies `world`'s catalog objects to MoveIt's planning scene (/apply_planning_scene, in
+`base_link`), asks
 /grasp_planning/plan_grasps for box grasps of the target, keeps those the 0.075 m gripper can close on,
 moves each 2 cm deeper so the finger pads overlap the object, and returns the best one in the base frame
 (= world; the Franka stands at the origin).
@@ -31,6 +32,8 @@ MAX_DEPTH_M = 0.02
 DEPTH_MARGIN_M = 0.01
 TOO_WIDE = f"object wider than the gripper opening ({GRIPPER_OPENING_M} m) in every horizontal direction"
 ARM_JOINTS = [f"panda_joint{i}" for i in range(1, 8)]
+PLANNING_FRAME = "base_link"  # MoveIt's model frame; the Franka base is at the world origin (Addendum A.1)
+BASE_PLANE_MARGIN_M = 0.005  # Addendum A.2: static tops this close to z = 0 are lowered by this much in MoveIt
 SCENE_TIMEOUT_S = 5.0
 SERVER_TIMEOUT_S = 10.0
 RESULT_TIMEOUT_S = 30.0
@@ -51,15 +54,28 @@ class Grasp:
   joints: dict[str, float]
 
 
-def catalog_dims(catalog: str, catalog_dir: Path = CATALOG_DIR) -> np.ndarray:
-  """Bounding box [x, y, z] (m) from the catalog's object.yaml."""
+def _catalog_entry(catalog: str, catalog_dir: Path) -> tuple[Path, dict]:
   path = catalog_dir / catalog / "object.yaml"
   if not path.is_file():
     raise ApiError(grpc.StatusCode.NOT_FOUND, f"no catalog entry {catalog!r} ({path})")
-  dims = yaml.safe_load(path.read_text()).get("dims")
-  if dims is None:
+  return path, yaml.safe_load(path.read_text())
+
+
+def catalog_dims(catalog: str, catalog_dir: Path = CATALOG_DIR) -> np.ndarray:
+  """Bounding box [x, y, z] (m) from the catalog's object.yaml."""
+  path, entry = _catalog_entry(catalog, catalog_dir)
+  if entry.get("dims") is None:
     raise ApiError(grpc.StatusCode.FAILED_PRECONDITION, f"{path} has no dims")
-  return np.array(dims, dtype=float)
+  return np.array(entry["dims"], dtype=float)
+
+
+def catalog_static(catalog: str, catalog_dir: Path = CATALOG_DIR) -> bool:
+  return bool(_catalog_entry(catalog, catalog_dir)[1].get("static"))
+
+
+def lowered_m(static: bool, bottom_z: float, dims: np.ndarray) -> float:
+  """Addendum A.2: how far the MoveIt box of an upright object is lowered so the robot base does not touch it."""
+  return BASE_PLANE_MARGIN_M if static and abs(bottom_z + dims[2]) <= BASE_PLANE_MARGIN_M else 0.0
 
 
 def require_graspable(dims: np.ndarray) -> None:
@@ -165,6 +181,7 @@ class GraspPlanner:
     self.scene_client = self.node.create_client(ApplyPlanningScene, "/apply_planning_scene")
     self.action = ActionClient(self.node, PlanGrasps, "/grasp_planning/plan_grasps")
     self.in_moveit: set[str] = set()  # objects this process added to MoveIt's scene
+    self.lowered: set[str] = set()  # objects whose lowered box has been logged
     self.lock = threading.Lock()  # a scene update and its goal are not interleaved with another call's
     executor = SingleThreadedExecutor()
     executor.add_node(self.node)
@@ -203,17 +220,22 @@ class GraspPlanner:
       if catalog is None or o.parent.name != "root":
         continue
       dims = catalog_dims(catalog)
-      box = CollisionObject(id=o.name, operation=CollisionObject.ADD, pose=_ros_pose(world.pose(o.name)))
-      box.header.frame_id = "world"
+      pose = world.pose(o.name)
+      lowered = lowered_m(catalog_static(catalog), pose.z, dims)
+      if lowered and o.name not in self.lowered:
+        log.info("plan_grasp MoveIt box of %s lowered by %.3f m (its top is at the robot base plane)", o.name, lowered)
+        self.lowered.add(o.name)
+      box = CollisionObject(id=o.name, operation=CollisionObject.ADD, pose=_ros_pose(pose))
+      box.header.frame_id = PLANNING_FRAME
       box.primitives = [SolidPrimitive(type=SolidPrimitive.BOX, dimensions=dims.tolist())]
       centre = Pose()
-      centre.position.z, centre.orientation.w = dims[2] / 2, 1.0
+      centre.position.z, centre.orientation.w = dims[2] / 2 - lowered, 1.0
       box.primitive_poses = [centre]
       scene.world.collision_objects.append(box)
       names.add(o.name)
     for gone in sorted(self.in_moveit - names):
       remove = CollisionObject(id=gone, operation=CollisionObject.REMOVE)
-      remove.header.frame_id = "world"
+      remove.header.frame_id = PLANNING_FRAME
       scene.world.collision_objects.append(remove)
     if not self.scene_client.wait_for_service(timeout_sec=SCENE_TIMEOUT_S):
       raise ApiError(grpc.StatusCode.UNAVAILABLE,

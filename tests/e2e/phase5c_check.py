@@ -187,7 +187,9 @@ def check_too_wide() -> str:
 
 def check_logs() -> str:
   rpc = [line for line in _log_lines("robot_service")[_log_start["robot_service"]:] if "rpc PlanGrasp " in line]
-  goals = [line for line in _log_lines("grasp_planner")[_log_start["grasp_planner"]:] if "goal " in line]
+  # main.cpp's per-goal line ("goal <outcome> target=..."), not the accept handler's "Accepted ... goal ...".
+  goals = [line for line in _log_lines("grasp_planner")[_log_start["grasp_planner"]:]
+           if "]: goal " in line and " target=" in line]
   timed = [line for line in rpc if "status=" in line and "ms=" in line]
   if len(rpc) != _plan_calls[0] or len(timed) != len(rpc) or len(goals) != _goals[0]:
     raise RuntimeError(f"{len(rpc)} 'rpc PlanGrasp' lines ({len(timed)} with status and ms) for {_plan_calls[0]} calls;"

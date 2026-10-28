@@ -109,6 +109,16 @@ def test_graspable_catalog_objects():
   np.testing.assert_allclose(grasp.catalog_dims("red_cube", CATALOG), CUBE)
 
 
+def test_static_top_at_the_base_plane_is_lowered():
+  table = grasp.catalog_dims("table", CATALOG)
+  assert grasp.catalog_static("table", CATALOG) and not grasp.catalog_static("red_cube", CATALOG)
+  assert grasp.lowered_m(True, -0.75, table) == 0.005
+  assert grasp.lowered_m(True, -0.746, table) == 0.005  # top 4 mm above the plane
+  assert grasp.lowered_m(True, -0.7, table) == 0.0
+  assert grasp.lowered_m(False, -0.75, table) == 0.0
+  assert grasp.lowered_m(True, 0.0, grasp.catalog_dims("hole_block", CATALOG)) == 0.0  # standing on the table
+
+
 def test_unknown_catalog_is_not_found(tmp_path):
   with pytest.raises(ApiError) as e:
     grasp.catalog_dims("nope", tmp_path)

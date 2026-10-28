@@ -186,3 +186,16 @@ Bazel only via `container/build_intrinsic.sh`; Observability).
     planned duration is ≥ 3 s (e.g. joint 1 by 1.5 rad), issued 1 s after
     the start.
 Then rerun Step 3; all done criteria must pass.
+
+## Addendum B (blocker 3, phase_5c_notes.md)
+
+1.  Table lowering margin 0.005 → **0.0005 m** (the base link mesh dips
+    0.03 mm below z = 0; a bigger margin lets MoveIt accept poses inside
+    the table).
+2.  Before choosing (decision 6.7), keep only grasps whose `grasp_joints`
+    and `pregrasp_ik_solution` are collision-free in Intrinsic's world
+    (`MotionPlannerService.CheckCollisions`, as `RobotService.CheckCollisions`
+    does), so MoveIt's and Intrinsic's collision models cannot disagree.
+    None left → `ABORTED` "no grasp is collision-free in the robot's
+    world model". Unit test for the filter with a fake checker.
+Rerun `phase5c_check.py` (all pass) and the phase 3/4 checks.

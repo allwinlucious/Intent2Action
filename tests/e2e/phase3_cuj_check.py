@@ -41,6 +41,10 @@ DURATION_TOLERANCE = 0.05  # PlanOnly vs MoveWaypoints
 JOG = (1, 0.1, 1.0)  # joint, rad/s, s
 JOG_TOLERANCE_RAD = 0.01
 FK_TOLERANCE_M = 1e-4
+CUJ4_JOINT1_RAD = 1.5
+CUJ4_SPEED = 0.2  # at full speed joint 1 by 1.5 rad takes < 1 s; the Stop must land mid-move
+CUJ4_MIN_PLANNED_S = 3.0
+CUJ4_STOP_AFTER_S = 1.0
 FAULT_WAIT_S = 5.0
 MOTION_AFTER_FAULT_S = 1.0
 CUBE = "red_cube"
@@ -213,14 +217,21 @@ def check_cuj2() -> str:
 
 
 def check_cuj4() -> str:
+  """phase_5c.md Addendum A.3: Stop, 1 s after the start, a MoveJoints planned to take >= 3 s."""
+  _move("Home")
   goal = list(fso.HOME)
-  goal[0] += 1.0
-  operation = _call(
-      _robot, "MoveJoints",
-      api.MoveJointsRequest(joints=api.Joints(positions=goal), wait=False),
-  )
-  time.sleep(1.0)
-  _call(_robot, "Stop")
+  goal[0] += CUJ4_JOINT1_RAD
+  joints = api.Joints(positions=goal)
+  _call(_robot, "SetSpeed", api.SetSpeedRequest(factor=CUJ4_SPEED))
+  try:
+    planned = _call(_robot, "PlanOnly", api.PlanOnlyRequest(waypoints=[api.Waypoint(joints=joints)])).duration_s
+    if planned < CUJ4_MIN_PLANNED_S:
+      raise RuntimeError(f"MoveJoints planned {planned:.2f} s, need >= {CUJ4_MIN_PLANNED_S} s")
+    operation = _call(_robot, "MoveJoints", api.MoveJointsRequest(joints=joints, wait=False))
+    time.sleep(CUJ4_STOP_AFTER_S)
+    _call(_robot, "Stop")
+  finally:
+    _call(_robot, "SetSpeed", api.SetSpeedRequest(factor=1.0))
   operation = _call(
       _robot, "GetOperation", operations_pb2.GetOperationRequest(name=operation.name)
   )
@@ -233,8 +244,8 @@ def check_cuj4() -> str:
     )
   result = _move("Home")
   return (
-      f"Stop -> {operation.name} CANCELLED ({operation.error.message!r});"
-      f" next Home done in {result.duration_s:.2f} s"
+      f"Stop {CUJ4_STOP_AFTER_S:.0f} s into a {planned:.2f} s MoveJoints -> {operation.name} CANCELLED"
+      f" ({operation.error.message!r}); next Home done in {result.duration_s:.2f} s"
   )
 
 
