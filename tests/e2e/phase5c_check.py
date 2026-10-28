@@ -63,12 +63,12 @@ def _log_lines(name: str) -> list[str]:
   return out.splitlines()
 
 
-def _plan(name: str) -> api.PlanGraspResponse:
+def _plan(object_id: str) -> api.PlanGraspResponse:
   """PlanGrasp of a graspable object; counts the goals it sent to the grasp planner."""
   _plan_calls[0] += 1
   start = time.monotonic()
   try:
-    response = cuj._call(cuj._robot, "PlanGrasp", api.PlanGraspRequest(object=name))
+    response = cuj._call(cuj._robot, "PlanGrasp", api.PlanGraspRequest(object_id=object_id))
   except grpc.RpcError as error:
     # NOT_FOUND (step 1) and UNAVAILABLE (scene or server) end before a goal; every other error after it.
     _goals[0] += error.code() not in (grpc.StatusCode.NOT_FOUND, grpc.StatusCode.UNAVAILABLE)
@@ -79,48 +79,50 @@ def _plan(name: str) -> api.PlanGraspResponse:
   return response
 
 
-def _plan_error(name: str) -> grpc.RpcError:
+def _plan_error(object_id: str) -> grpc.RpcError:
   _plan_calls[0] += 1
   try:
-    response = cuj._call(cuj._robot, "PlanGrasp", api.PlanGraspRequest(object=name))
+    response = cuj._call(cuj._robot, "PlanGrasp", api.PlanGraspRequest(object_id=object_id))
   except grpc.RpcError as error:
     return error
-  raise RuntimeError(f"PlanGrasp({name!r}) returned OK: {response}")
+  raise RuntimeError(f"PlanGrasp({object_id!r}) returned OK: {response}")
 
 
-def _world_pose(name: str) -> api.Pose:
-  return {o.name: o for o in cuj._call(cuj._robot, "ListObjects").objects}[name].pose
+def _world_pose(object_id: str) -> api.Pose:
+  return {o.id: o for o in cuj._call(cuj._robot, "ListObjects").objects}[object_id].pose
 
 
-def _settled(name: str) -> None:
-  """After ResetScene: `world` (scene_sync) has caught up with Isaac's pose of `name`."""
+def _settled(object_id: str) -> None:
+  """After ResetScene: `world` (scene_sync) has caught up with Isaac's pose of the object."""
   deadline = time.monotonic() + SETTLE_TIMEOUT_S
   while True:
-    belief, truth = _world_pose(name), cuj._call(cuj._sim, "GetTruePose", api.GetTruePoseRequest(frame=name))
+    belief = _world_pose(object_id)
+    truth = cuj._call(cuj._sim, "GetTruePose", api.GetTruePoseRequest(frame=object_id))
     gap = float(np.linalg.norm([belief.x - truth.x, belief.y - truth.y, belief.z - truth.z]))
     if gap <= SETTLE_TOLERANCE_M:
       return
     if time.monotonic() > deadline:
-      raise RuntimeError(f"world's {name} {gap * 1e3:.1f} mm from Isaac's {SETTLE_TIMEOUT_S:.0f} s after ResetScene")
+      raise RuntimeError(f"world's {object_id} {gap * 1e3:.1f} mm from Isaac's {SETTLE_TIMEOUT_S:.0f} s after ResetScene")
     time.sleep(0.2)
 
 
-def _trial(name: str) -> str:
+def _trial(prim: str) -> str:
   cuj._call(cuj._sim, "ResetScene")
-  _settled(name)
-  plan = _plan(name)
+  object_id = cuj.ids(cuj._sim)[prim]
+  _settled(object_id)
+  plan = _plan(object_id)
   try:
     cuj._move("MoveToPose", pose=plan.pregrasp)
     cuj._move("MoveToPose", pose=plan.grasp, motion=api.LINEAR)
     grasped = cuj._gripper("Grasp")
-    cuj._call(cuj._robot, "AttachObject", api.ObjectRequest(name=name))
-    z0 = cuj._true_z(name)
+    cuj._call(cuj._robot, "AttachObject", api.ObjectRequest(id=object_id))
+    z0 = cuj._true_z(object_id)
     lifted = cuj._at(plan.grasp, plan.grasp.x, plan.grasp.y, plan.grasp.z + LIFT_M)
     cuj._move("MoveToPose", pose=lifted, motion=api.LINEAR)
-    rose = cuj._true_z(name) - z0
+    rose = cuj._true_z(object_id) - z0
     gripping = cuj._call(cuj._robot, "IsGripping")
   finally:
-    for method, request in (("Release", None), ("DetachObject", api.ObjectRequest(name=name))):
+    for method, request in (("Release", None), ("DetachObject", api.ObjectRequest(id=object_id))):
       try:
         cuj._gripper(method) if request is None else cuj._call(cuj._robot, method, request)
       except (grpc.RpcError, RuntimeError):
@@ -179,10 +181,11 @@ def check_peg() -> str:
 
 
 def check_too_wide() -> str:
-  error = _plan_error("plate")
+  plate = cuj.ids(cuj._sim)["plate"]
+  error = _plan_error(plate)
   if error.code() != grpc.StatusCode.ABORTED or "0.075" not in error.details():
-    raise RuntimeError(f"PlanGrasp('plate') -> {cuj._code(error)}")
-  return f"PlanGrasp('plate') -> {cuj._code(error)}"
+    raise RuntimeError(f"PlanGrasp(plate {plate}) -> {cuj._code(error)}")
+  return f"PlanGrasp(plate {plate}) -> {cuj._code(error)}"
 
 
 def check_logs() -> str:
@@ -212,10 +215,12 @@ def _check_errors(run: hwm._Run) -> str:
     cuj._wait_ready()
   finally:
     del os.environ["GRASP_PLANNER"]
-  off = _plan_error("red_cube")
+  cube = cuj.ids(cuj._sim)["red_cube"]
+  off = _plan_error(cube)
   if off.code() != grpc.StatusCode.UNAVAILABLE or "grasp planner not running" not in off.details():
-    raise RuntimeError(f"GRASP_PLANNER=off: PlanGrasp('red_cube') -> {cuj._code(off)}")
-  return f"PlanGrasp('nope') -> {cuj._code(missing)}; GRASP_PLANNER=off: PlanGrasp('red_cube') -> {cuj._code(off)}"
+    raise RuntimeError(f"GRASP_PLANNER=off: PlanGrasp(red_cube {cube}) -> {cuj._code(off)}")
+  return (f"PlanGrasp('nope') -> {cuj._code(missing)}; GRASP_PLANNER=off: PlanGrasp(red_cube {cube}) ->"
+          f" {cuj._code(off)}")
 
 
 def main() -> int:

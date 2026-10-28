@@ -22,6 +22,7 @@ import harness
 import phase3_hwm_check as hwm  # sets sys.path for gen/
 import phase1_check as p1
 import phase3_cuj_check as cuj
+import phase3_scene_check as scene
 from robot_service import robot_service_pb2 as api  # noqa: E402
 
 ISAAC_LOG = harness.LOG_DIR / "phase6_isaac.log"
@@ -78,6 +79,12 @@ async def check_calls(session: ClientSession) -> str:
   if len(joints) != 7:
     raise RuntimeError(f"get_state joints {joints}")
   details.append("get_state 7 joints")
+
+  listed = [o["id"] for o in _json(await call("list_objects"))["objects"]]
+  defaults = {prim: i for prim, i in cuj.ids(cuj._sim).items() if prim in scene.DEFAULT_OBJECTS}
+  if not all(cuj.ID.fullmatch(i) for i in listed) or not set(defaults.values()) <= set(listed):
+    raise RuntimeError(f"list_objects ids {listed}; default prims -> {defaults}")
+  details.append(f"list_objects ids {sorted(listed)}")
 
   _done(_json(await call("home")), "home")
   down = _json(await call("get_state"))["tool_pose"]

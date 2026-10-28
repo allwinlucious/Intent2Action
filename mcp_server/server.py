@@ -55,13 +55,15 @@ Controls a simulated Franka Panda arm with a parallel gripper (opening up to 0.0
 robot stack. Units: metres, radians, seconds, newtons, kilograms. Poses are a position (x, y, z) and a unit \
 quaternion (qx, qy, qz, qw). Frames: the robot base frame is the world frame (z up); every pose is in it. \
 The TCP (tool centre point, the default `tool`) is between the fingertips; FLANGE is the robot flange. \
-Object poses from list_objects / detect_objects are the objects' bottom centres.
+Object poses from list_objects / detect_objects are the objects' bottom centres. Objects are identified only \
+by an `id` (e.g. obj_42) with category, color, size and pose; ids change after a scene reset.
 Long-running calls (motions, grasp, release, calibrate_camera, detect_objects) take `wait`: true (the \
 default) blocks up to 60 s and returns the operation, false returns at once; then poll with get_operation \
 or block with wait_operation. A returned operation has `done`, `state` and, on failure, `error`.
-Typical pick and place: list_objects (or detect_objects) -> plan_grasp(object) -> move_to_pose to the \
-pregrasp -> move_to_pose to the grasp with motion LINEAR -> grasp -> attach_object -> move_to_pose up \
-(LINEAR) -> move_to_pose above the place position -> lower (LINEAR) -> release -> detach_object -> move up.
+Typical pick and place: list_objects, choose the id whose category, color, size and pose match the request, \
+then plan_grasp(object_id) -> move_to_pose to the pregrasp -> move_to_pose to the grasp with motion LINEAR -> \
+grasp -> attach_object(id) -> move_to_pose up (LINEAR) -> move_to_pose above the place position -> lower \
+(LINEAR) -> release -> detach_object(id) -> move up.
 After a fault (get_state shows faulted), call clear_faults before moving again."""
 
 log = logging.getLogger("mcp_server")

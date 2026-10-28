@@ -1,8 +1,10 @@
+category: table
 collision: none
 color:
 - 0.55
 - 0.45
 - 0.35
+color_name: brown
 dims:
 - 1.2
 - 0.8

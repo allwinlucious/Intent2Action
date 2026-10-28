@@ -58,6 +58,7 @@ TIMESTAMP = re.compile(r"\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d{3} ")
 TIMESTAMP_LEN = 23
 _calls = {"rpc": 0, "op": 0}
 _log_start = [""]  # timestamp of the last robot_service line before the checks
+_id: dict[str, str] = {}  # prim -> object ID, refreshed by every _reset()
 
 
 class _PeakForce:
@@ -146,12 +147,14 @@ def _push_force(direction=DOWN) -> float:
   return abs(float(np.dot([w.fx, w.fy, w.fz], cuj._matrix(flange)[:3, :3].T @ np.array(direction))))
 
 
-def _true(name: str) -> api.Pose:
-  return cuj._call(cuj._sim, "GetTruePose", api.GetTruePoseRequest(frame=name))
+def _true(prim: str) -> api.Pose:
+  return cuj._call(cuj._sim, "GetTruePose", api.GetTruePoseRequest(frame=_id[prim]))
 
 
 def _reset() -> None:
   cuj._call(cuj._sim, "ResetScene")
+  _id.clear()
+  _id.update(cuj.ids(cuj._sim))
 
 
 def _sim_seconds(message: str) -> float:
@@ -195,12 +198,12 @@ def check_bad_speed() -> str:
 
 def _peg_above_block(off_axis_m: float) -> tuple[api.Pose, list[str]]:
   """Grasps the peg and holds its bottom off_axis_m off the hole axis in +x, ABOVE_M above the top; returns (hole, facts)."""
-  p5c._settled(PEG)
-  plan = p5c._plan(PEG)
+  p5c._settled(_id[PEG])
+  plan = p5c._plan(_id[PEG])
   cuj._move("MoveToPose", pose=plan.pregrasp)
   cuj._move("MoveToPose", pose=plan.grasp, motion=api.LINEAR)
   cuj._gripper("Grasp")
-  cuj._call(cuj._robot, "AttachObject", api.ObjectRequest(name=PEG))
+  cuj._call(cuj._robot, "AttachObject", api.ObjectRequest(id=_id[PEG]))
   cuj._call(cuj._robot, "SetPayload", api.SetPayloadRequest(mass=PAYLOAD_KG))
   cuj._move("MoveToPose", pose=cuj._at(plan.grasp, plan.grasp.x, plan.grasp.y, plan.grasp.z + LIFT_M), motion=api.LINEAR)
   hole = _true(BLOCK)

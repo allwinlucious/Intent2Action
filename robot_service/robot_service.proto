@@ -179,7 +179,7 @@ message MoveCompliantRequest {
 }
 
 message PlanGraspRequest {
-  string object = 1;
+  string object_id = 1;  // an id from `list_objects`
 }
 
 message PlanGraspResponse {
@@ -214,7 +214,7 @@ message IsGrippingResponse {
 }
 
 message ObjectRequest {
-  string name = 1;
+  string id = 1;  // an id from `list_objects`
 }
 
 message SetPayloadRequest {
@@ -224,11 +224,18 @@ message SetPayloadRequest {
   double com_z = 4;
 }
 
+// `pose` is the bottom centre of the object; its bounding box (`size_*`, m) extends upward from it in the
+// object's frame.
 message WorldObject {
-  string name = 1;
+  string id = 1;      // e.g. "obj_42"; changes after a scene reset
   string source = 2;  // "ground_truth" or "perceived"
   Pose pose = 3;      // in the base frame
   string attached_to = 4;  // "" or the parent frame
+  string category = 5;  // e.g. "cube", "plate"
+  string color = 6;     // a colour word, e.g. "red"
+  double size_x = 7;    // m, along the object's x axis
+  double size_y = 8;    // m, along the object's y axis
+  double size_z = 9;    // m, upward from `pose`
 }
 
 message ListObjectsResponse {
@@ -283,14 +290,16 @@ message CalibrationResult {
 }
 
 message DetectObjectsRequest {
-  repeated string objects = 1;  // catalog names to look for; empty = all
+  reserved 1;
+  repeated string categories = 3;  // categories to look for (e.g. "cube"); empty = all
   bool wait = 2;
 }
 
 message Detection {
-  string object = 1;
+  string object_id = 1;  // the id in `list_objects`
   Pose pose = 2;
   double score = 3;
+  string category = 4;
 }
 
 message DetectionResult {
@@ -325,7 +334,7 @@ service RobotService {
   // Moves toward the TCP pose as a spring of `stiffness`, using the current tare; ends at the target, at
   // `max_force`, or when it stops moving (jam).
   rpc MoveCompliant(MoveCompliantRequest) returns (google.longrunning.Operation);
-  // Plan a grasp for an object in the world.
+  // Plan a grasp for an object in the world, given by an id from `list_objects`.
   rpc PlanGrasp(PlanGraspRequest) returns (PlanGraspResponse);
   // Stop the current motion (not a fault).
   rpc Stop(google.protobuf.Empty) returns (google.protobuf.Empty);
@@ -341,13 +350,14 @@ service RobotService {
   rpc Release(GripperRequest) returns (google.longrunning.Operation);
   // Whether the gripper holds something.
   rpc IsGripping(google.protobuf.Empty) returns (IsGrippingResponse);
-  // Treat an object as held by the gripper (planning).
+  // Treat an object (an id from `list_objects`) as held by the gripper (planning).
   rpc AttachObject(ObjectRequest) returns (google.protobuf.Empty);
-  // Release an attached object back into the scene (planning).
+  // Release an attached object (an id from `list_objects`) back into the scene (planning).
   rpc DetachObject(ObjectRequest) returns (google.protobuf.Empty);
   // Set the mass of what the robot carries.
   rpc SetPayload(SetPayloadRequest) returns (google.protobuf.Empty);
-  // Objects in the robot's world model.
+  // Objects in the robot's world model. Objects are identified only by `id`; match the user's words to
+  // `category`, `color`, `size` and `pose`; ids change after a scene reset.
   rpc ListObjects(google.protobuf.Empty) returns (ListObjectsResponse);
   // Take a camera image.
   rpc GetImage(GetImageRequest) returns (GetImageResponse);
@@ -370,19 +380,39 @@ service RobotService {
 // VLM.
 message AddObjectRequest {
   string catalog = 1;
-  string name = 2;
+  reserved 2;
   Pose pose = 3;  // bottom centre, in the world frame
 }
 
+message AddObjectResponse {
+  string id = 1;  // the new object's id
+}
+
 message GetTruePoseRequest {
-  string frame = 1;  // an object name, "panda_hand" or "Camera_Pseudo_Depth"
+  string frame = 1;  // an object id, "panda_hand" or "Camera_Pseudo_Depth"
+}
+
+// Isaac's objects with their ids (tests only).
+message TrueObject {
+  string id = 1;
+  string catalog = 2;
+  string prim = 3;  // Isaac prim name (= /tf frame)
+  Pose pose = 4;    // latest /tf pose; unset until the prim is on /tf
+}
+
+message TrueObjects {
+  repeated TrueObject objects = 1;
 }
 
 service SimService {
-  rpc AddObject(AddObjectRequest) returns (google.protobuf.Empty);
+  rpc AddObject(AddObjectRequest) returns (AddObjectResponse);
+  // An object id.
   rpc RemoveObject(ObjectRequest) returns (google.protobuf.Empty);
+  // Resets Isaac's scene; returns once the objects are back in the world model with new ids.
   rpc ResetScene(google.protobuf.Empty) returns (google.protobuf.Empty);
   rpc GetTruePose(GetTruePoseRequest) returns (Pose);
+  // Every Isaac object with its id, catalog and prim (tests only).
+  rpc ListTrueObjects(google.protobuf.Empty) returns (TrueObjects);
   rpc AttachCalibrationBoard(google.protobuf.Empty) returns (google.protobuf.Empty);
   rpc DetachCalibrationBoard(google.protobuf.Empty) returns (google.protobuf.Empty);
 }

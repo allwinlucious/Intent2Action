@@ -55,6 +55,7 @@ from robot import force  # noqa: E402
 from robot import grasp  # noqa: E402
 from robot import gripper  # noqa: E402
 from robot import png  # noqa: E402
+from robot import unknown_object  # noqa: E402
 from robot.grasp import matrix_pose  # noqa: E402
 from robot.icon import ARM, FT_SENSOR, GRIPPER, Icon  # noqa: E402
 from robot.motion import ROBOT, ArmChain, Planner, blending, from_pose_proto, joints, segment, duration_s  # noqa: E402
@@ -74,10 +75,14 @@ WAIT_S = 60.0  # wait=true blocks at most this long (wall)
 RPC_TIMEOUT_S = 10.0
 SUMMARY_MAX_CHARS = 200
 WORLD = "world"
+SIM_WORLD = "sim_world"
 ROBOT_OBJECTS = {"root", "franka", "franka_hand"}
 CAMERA_OBJECT = "d455"
 CALIB_BOARD = "calib_board"
+# World objects that are not scene objects: never listed, NOT_FOUND as an object argument (phase_ids.md A.6).
+NOT_SCENE_OBJECTS = ROBOT_OBJECTS | {CAMERA_OBJECT, CALIB_BOARD}
 OBJECT_WAIT_S = 5.0  # AddObject / RemoveObject / AttachCalibrationBoard / DetachObject wait this long for `world`
+RESET_OBJECTS_WAIT_S = 10.0  # ResetScene waits this long for the objects under their new IDs (Addendum A.4)
 SYNC_TOLERANCE_M = 0.005  # a detached object counts as back in sync within this of its true pose
 STOP_WAIT_S = 5.0
 STOP_SETTLE_TIMEOUT_S = 5.0  # sim
@@ -166,6 +171,12 @@ def _dependency_error(what: str, error: grpc.RpcError) -> ApiError:
   return ApiError(error.code(), f"{what}: {error.details()}")
 
 
+def require_scene_object(object_id: str) -> None:
+  """The robot, the camera and calib_board are no object argument (phase_ids.md Addendum A.6)."""
+  if object_id in NOT_SCENE_OBJECTS:
+    raise unknown_object(object_id)
+
+
 class World:
   """`world` in the world service: objects, poses, attach/detach (planning)."""
 
@@ -178,15 +189,15 @@ class World:
     except grpc.RpcError as error:
       raise _dependency_error(f"world service {method}", error) from error
 
-  def objects(self) -> list:
-    return [o for o in self._call("ListObjects", world_pb.ListObjectsRequest(world_id=WORLD, view=updates_pb.FULL)).objects
-            if o.name != "root"]
+  def objects(self, world_id: str = WORLD) -> list:
+    request = world_pb.ListObjectsRequest(world_id=world_id, view=updates_pb.FULL)
+    return [o for o in self._call("ListObjects", request).objects if o.name != "root"]
 
   def get(self, name: str):
-    """The object (FULL view); NOT_FOUND if `world` has none of that name."""
+    """The object (FULL view); NOT_FOUND (unknown_object) if `world` has none of that name."""
     found = [o for o in self.objects() if o.name == name]
     if not found:
-      raise ApiError(grpc.StatusCode.NOT_FOUND, f"no object {name!r} in world")
+      raise unknown_object(name)
     return found[0]
 
   def exists(self, name: str) -> bool:
@@ -260,11 +271,12 @@ class World:
     return [o.name for o in self.objects() if o.name not in ROBOT_OBJECTS and o.parent.name != "root"]
 
   @staticmethod
-  def source(o) -> str:
-    if "source" not in o.object_component.user_data:
+  def string(o, key: str) -> str:
+    """A StringValue in the object's user data ("" if absent): source, category, color (scene_sync)."""
+    if key not in o.object_component.user_data:
       return ""
     value = wrappers_pb2.StringValue()
-    o.object_component.user_data["source"].Unpack(value)
+    o.object_component.user_data[key].Unpack(value)
     return value.value
 
 
@@ -832,7 +844,8 @@ class RobotService(api_grpc.RobotServiceServicer):
     return self.r.reply(self.r.start_arm("MoveCompliant", work, detail=detail), request.wait)
 
   def PlanGrasp(self, request, context):
-    return self.r.grasps.plan_grasp(self.r.world, request.object, self.r.planner.check_collisions)
+    require_scene_object(request.object_id)
+    return self.r.grasps.plan_grasp(self.r.world, request.object_id, self.r.planner.check_collisions)
 
   def CalibrateCamera(self, request, context):
     def work(op: Operation) -> None:
@@ -911,27 +924,20 @@ class RobotService(api_grpc.RobotServiceServicer):
     width = self.r.gripper_width()
     return api.IsGrippingResponse(gripping=gripper.gripping(self.r.last_grasp, width), width=width)
 
-  @staticmethod
-  def _require_scene_object(name: str) -> None:
-    if name in ROBOT_OBJECTS:
-      raise ApiError(grpc.StatusCode.INVALID_ARGUMENT, f"{name!r} is part of the robot")
-    if name == CAMERA_OBJECT:
-      raise ApiError(grpc.StatusCode.INVALID_ARGUMENT, f"{name!r} is the camera, not a scene object")
-
   def AttachObject(self, request, context):
-    self._require_scene_object(request.name)
-    self.r.world.get(request.name)
-    self.r.world.attach(request.name)
-    self.r.sim("SetAttached", simlink_pb2.SetAttachedRequest(name=request.name, attached=True))
+    require_scene_object(request.id)
+    self.r.world.get(request.id)
+    self.r.world.attach(request.id)
+    self.r.sim("SetAttached", simlink_pb2.SetAttachedRequest(id=request.id, attached=True))
     return empty_pb2.Empty()
 
   def DetachObject(self, request, context):
-    self._require_scene_object(request.name)
-    if self.r.world.get(request.name).parent.name != "root":
-      self.r.world.detach(request.name)
-    self.r.sim("SetAttached", simlink_pb2.SetAttachedRequest(name=request.name, attached=False))
+    require_scene_object(request.id)
+    if self.r.world.get(request.id).parent.name != "root":
+      self.r.world.detach(request.id)
+    self.r.sim("SetAttached", simlink_pb2.SetAttachedRequest(id=request.id, attached=False))
     if self.r.mirror_world:
-      self._wait_synced(request.name)
+      self._wait_synced(request.id)
     return empty_pb2.Empty()
 
   def _wait_synced(self, name: str) -> None:
@@ -963,10 +969,14 @@ class RobotService(api_grpc.RobotServiceServicer):
   def ListObjects(self, request, context):
     response = api.ListObjectsResponse()
     for o in self.r.world.objects():
-      if o.name in ROBOT_OBJECTS or o.name == CAMERA_OBJECT:
+      if o.name in NOT_SCENE_OBJECTS:
         continue
-      response.objects.add(name=o.name, source=World.source(o), pose=self.r.world.pose(o.name),
-                           attached_to="" if o.parent.name == "root" else o.parent.name)
+      catalog = grasp.object_catalog(o)
+      size = grasp.catalog_dims(catalog) if catalog else (0.0, 0.0, 0.0)
+      response.objects.add(id=o.name, source=World.string(o, "source"), pose=self.r.world.pose(o.name),
+                           attached_to="" if o.parent.name == "root" else o.parent.name,
+                           category=World.string(o, "category"), color=World.string(o, "color"),
+                           size_x=size[0], size_y=size[1], size_z=size[2])
     return response
 
   def GetImage(self, request, context):
@@ -1020,17 +1030,22 @@ class SimService(api_grpc.SimServiceServicer):
       time.sleep(0.05)
 
   def AddObject(self, request, context):
-    self.r.sim("Spawn", simlink_pb2.SpawnRequest(catalog=request.catalog, name=request.name, pose=request.pose))
-    self._wait_in_world(request.name, True)
-    return empty_pb2.Empty()
+    object_id = self.r.sim("Spawn", simlink_pb2.SpawnRequest(catalog=request.catalog, pose=request.pose)).id
+    self._wait_in_world(object_id, True)
+    return api.AddObjectResponse(id=object_id)
 
   def RemoveObject(self, request, context):
-    self.r.sim("Delete", simlink_pb2.NameRequest(name=request.name))
-    self._wait_in_world(request.name, False)
+    require_scene_object(request.id)
+    self.r.sim("Delete", simlink_pb2.IdRequest(id=request.id))
+    self._wait_in_world(request.id, False)
     return empty_pb2.Empty()
 
+  def ListTrueObjects(self, request, context):
+    return self.r.sim("ListTrue", empty_pb2.Empty())
+
   def ResetScene(self, request, context):
-    """Decision 25: cancel, detach + release, SimLink.Reset, wait FAULTED, ClearFaults, payload and speed reset."""
+    """Decision 25: cancel, detach + release, SimLink.Reset, wait FAULTED, ClearFaults, payload and speed reset;
+    then the objects back under their new IDs (phase_ids.md Addendum A.4)."""
     r = self.r
     if not r.reset_lock.acquire(blocking=False):
       raise ApiError(grpc.StatusCode.FAILED_PRECONDITION, "another ResetScene is in progress")
@@ -1056,7 +1071,7 @@ class SimService(api_grpc.SimServiceServicer):
           raise ApiError(grpc.StatusCode.DEADLINE_EXCEEDED, f"{op.name} did not end within {STOP_WAIT_S:.0f} s")
     for name in r.world.attached():
       r.world.detach(name)
-      r.sim("SetAttached", simlink_pb2.SetAttachedRequest(name=name, attached=False))
+      r.sim("SetAttached", simlink_pb2.SetAttachedRequest(id=name, attached=False))
     if r.icon.operational()[0] == "ENABLED":
       release = r.start_gripper("Release", simple_gripper_pb2.SimpleGripperFixedParams.RELEASE, resetting_ok=True)
       r.ops.wait(release, WAIT_S)
@@ -1067,6 +1082,22 @@ class SimService(api_grpc.SimServiceServicer):
     r.icon.set_payload(0.0, (0.0, 0.0, 0.0))
     r.icon.set_speed(1.0)
     r.payload, r.speed, r.last_grasp = (0.0, (0.0, 0.0, 0.0)), 1.0, False
+    self._wait_objects_back()
+
+  def _wait_objects_back(self) -> None:
+    """Addendum A.4: every ID of SimLink.ListTrue in `world` (GROUND_TRUTH) or `sim_world` (PERCEPTION)."""
+    world_id = WORLD if self.r.mirror_world else SIM_WORLD
+    deadline = time.monotonic() + RESET_OBJECTS_WAIT_S
+    while True:
+      want = {o.id for o in self.r.sim("ListTrue", empty_pb2.Empty()).objects}
+      missing = want - {o.name for o in self.r.world.objects(world_id)}
+      if not missing:
+        log.info("reset: objects back in %s with ids %s", world_id, sorted(want))
+        return
+      if time.monotonic() > deadline:
+        raise ApiError(grpc.StatusCode.DEADLINE_EXCEEDED,
+                       f"objects {sorted(missing)} not in {world_id} {RESET_OBJECTS_WAIT_S:.0f} s after the reset")
+      time.sleep(0.05)
 
   def GetTruePose(self, request, context):
     return self.r.sim("GetTruePose", simlink_pb2.TruePoseRequest(frame=request.frame))
@@ -1076,12 +1107,12 @@ class SimService(api_grpc.SimServiceServicer):
     if self.r.mirror_world:
       self._wait_in_world(CALIB_BOARD, True)
       self.r.world.attach(CALIB_BOARD)
-      self.r.sim("SetAttached", simlink_pb2.SetAttachedRequest(name=CALIB_BOARD, attached=True))
+      self.r.sim("SetAttached", simlink_pb2.SetAttachedRequest(id=CALIB_BOARD, attached=True))
     return empty_pb2.Empty()
 
   def DetachCalibrationBoard(self, request, context):
     """Decision 10: scene_sync deletes calib_board from the worlds once it has left Isaac's /tf."""
-    self.r.sim("SetAttached", simlink_pb2.SetAttachedRequest(name=CALIB_BOARD, attached=False))
+    self.r.sim("SetAttached", simlink_pb2.SetAttachedRequest(id=CALIB_BOARD, attached=False))
     self.r.sim("DetachBoard", empty_pb2.Empty())
     return empty_pb2.Empty()
 

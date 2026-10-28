@@ -2,7 +2,7 @@
 
 For each object: assets/objects/<name>/mesh.glb (metres, Z up, origin at the
 bottom centre, except calib_board: box centre, as Isaac's board prim) and
-object.yaml (static, mass, color, collision, dims; origin: center if centred;
+object.yaml (static, mass, color, collision, dims, category, color_name; origin: center if centred;
 friction_static/friction_dynamic where not the default).
 sim/tools/build_catalog.py turns them into model.usd. Dev-time only:
   .venv/bin/python tools/build_catalog_meshes.py
@@ -52,6 +52,16 @@ OBJECTS = {
     "calib_board": (trimesh.creation.box(extents=(0.28, 0.20, 0.005)), False, 0.2, (1.0, 1.0, 1.0)),
     "obstacle": (_box(0.1, 0.1, 0.5), True, None, (0.5, 0.5, 0.5)),
 }
+# name: (category, colour word), the attributes list_objects reports (phase_ids.md decision 3).
+ATTRIBUTES = {
+    "table": ("table", "brown"),
+    "red_cube": ("cube", "red"),
+    "plate": ("plate", "white"),
+    "peg": ("peg", "blue"),
+    "hole_block": ("block_with_hole", "grey"),
+    "obstacle": ("box", "grey"),
+    "calib_board": ("calibration_board", "white"),
+}
 # Static/dynamic friction where not build_catalog.py's default 0.5/0.4: the peg
 # must slide on the block's face to the hole (phase_5b.md, Addendum B2).
 FRICTION = {"peg": (0.3, 0.25), "hole_block": (0.3, 0.25)}
@@ -73,6 +83,8 @@ def main() -> int:
         "collision": "none" if static else "convexHull",
         # Bounding box (m); robot_service's PlanGrasp reads it (phase_5c.md decision 5).
         "dims": [round(float(v), 6) for v in mesh.extents],
+        "category": ATTRIBUTES[name][0],
+        "color_name": ATTRIBUTES[name][1],
     }
     if name == "calib_board":
       description["origin"] = "center"

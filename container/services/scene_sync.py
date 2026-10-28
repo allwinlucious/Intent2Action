@@ -1,10 +1,14 @@
-"""Mirrors Isaac's objects into the world service and serves SimLink (phase_3.md decision 15).
+"""Mirrors Isaac's objects into the world service and serves SimLink (phase_3.md decision 15, phase_ids.md).
 
 A Fast DDS ROS 2 node in the image, started by container/entrypoint.sh:
-- /tf frames with parent `world` (except the camera and the hand) are objects. Catalog objects are
-  created in `sim_world` and, with belief_source GROUND_TRUTH, in `world`; their poses follow /tf; a
-  name absent from /tf for 2 s is deleted from both worlds.
-- SimLink on 127.0.0.1:18101 (robot_service/simlink.proto): every ROS 2 service call to Isaac.
+- /tf frames with parent `world` (except the camera and the hand) are objects (Isaac prims). Catalog
+  objects are created in `sim_world` and, with belief_source GROUND_TRUTH, in `world`; their poses follow
+  /tf; a prim absent from /tf for 2 s is deleted from both worlds.
+- Objects are named by a random ID obj_<k> in the worlds (user_data "prim" holds the prim name);
+  calib_board keeps its name. Internal structures are keyed by prim. IDs are adopted from persisted worlds
+  at start-up and redrawn on every SimLink.Reset.
+- SimLink on 127.0.0.1:18101 (robot_service/simlink.proto): every ROS 2 service call to Isaac; object
+  fields are IDs.
 """
 
 import argparse
@@ -20,6 +24,8 @@ import time
 # robot_service.py next to this file would shadow the generated (namespace) package `robot_service`.
 sys.path.pop(0)
 
+from container.services.scene_ids import ID_PATTERN
+from container.services.scene_ids import IdAllocator
 from google.protobuf import empty_pb2
 from google.protobuf import text_format
 from google.protobuf import wrappers_pb2
@@ -63,9 +69,10 @@ WORLD = "world"
 SIM_WORLD = "sim_world"
 NOT_OBJECTS = {"Camera_Pseudo_Depth", "panda_hand"}  # world children on /tf that are not objects
 ROBOT_OBJECTS = {"franka", "franka_hand"}
+CALIB_BOARD = "calib_board"  # internal: keeps its name, never given an ID
+GROUND_TRUTH = "ground_truth"
+SPAWN_PREFIX = "spawn_"  # prims created by Spawn: spawn_<n>
 VISUAL_SET, COLLISION_SET = "Intrinsic_Visual", "Intrinsic_Collision"
-# Object names in the world service: a letter, then letters, digits or '_'.
-NAME_PATTERN = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
 ABSENT_S = 2.0
 STALE_AFTER_S = 5.0  # after the first /tf, ground-truth objects not on /tf are left over from earlier runs
 CALL_TIMEOUT_S = 10.0
@@ -116,6 +123,23 @@ def _stamp(header: Header, t: float) -> None:
 
 def _by_name(name: str) -> refs_pb.ObjectReference:
   return refs_pb.ObjectReference(by_name=refs_pb.ObjectReferenceByName(object_name=name))
+
+
+def _user_string(o, key: str) -> str:
+  """A StringValue in a world object's user data ("" if absent)."""
+  if key not in o.object_component.user_data:
+    return ""
+  value = wrappers_pb2.StringValue()
+  o.object_component.user_data[key].Unpack(value)
+  return value.value
+
+
+def _api_pose(pose: Pose) -> robot_service_pb2.Pose:
+  return robot_service_pb2.Pose(**dict(zip(("x", "y", "z", "qx", "qy", "qz", "qw"), pose)))
+
+
+def unknown_object(object_id: str) -> str:
+  return f"no object with id {object_id}; list_objects shows the current ids"
 
 
 class Ros:
@@ -197,18 +221,27 @@ class Ros:
 
 
 class Sync:
-  """Keeps sim_world (and world with GROUND_TRUTH) equal to the objects on /tf."""
+  """Keeps sim_world (and world with GROUND_TRUTH) equal to the objects on /tf.
+
+  Every structure is keyed by Isaac prim name (= /tf frame); `ids` maps prims to the world object names.
+  """
 
   def __init__(self, ros: Ros, world, geometry, catalogs: dict[str, str], mirror_world: bool):
     self.ros = ros
     self.world = world
     self.geometry = geometry
-    self.catalogs = catalogs  # object name -> catalog name; Spawn adds to it
+    self.default_catalogs = dict(catalogs)  # the scene file's prims; Reset returns to these
+    self.catalogs = catalogs  # prim -> catalog name; Spawn adds to it
     self.worlds = [SIM_WORLD, WORLD] if mirror_world else [SIM_WORLD]
+    self.ids = IdAllocator()
+    # Held by the sync thread for each /tf pass and by SimLink calls that change the prim structures.
+    self.lock = threading.Lock()
     self.attached: set[str] = set()
     self.known: set[str] = set()  # objects created by this process
     self.last_seen: dict[str, float] = {}
+    self.spawned = 0  # last n of spawn_<n>
     self.geometry_refs = {}  # catalog -> GeometryStorageRefs
+    self.attributes: dict[str, tuple[str, str]] = {}  # catalog -> (category, color word) from object.yaml
     self.unknown_logged: set[str] = set()
     self.error_logged: dict[str, float] = {}
 
@@ -224,35 +257,63 @@ class Sync:
       self._delete(SIM_WORLD, name, reparent=True)
     log.info("world created world=%s cloned_from=%s removed=%s", SIM_WORLD, WORLD, removed)
 
+  def assign_ids(self) -> None:
+    """Addendum A.5: persisted ground-truth objects keep their ID; the other scene prims get a fresh one.
+
+    Ground-truth objects not adopted (e.g. named by prim before IDs existed) are deleted now rather than by
+    _delete_stale 5 s after the first /tf, so ListObjects never shows them."""
+    adopted, objects = {}, {w: self._full_objects(w) for w in (SIM_WORLD, WORLD)}
+    for w in self.worlds:
+      for o in objects[w]:
+        prim = _user_string(o, "prim")
+        if (prim in self.catalogs and prim != CALIB_BOARD and _user_string(o, "source") == GROUND_TRUTH
+            and ID_PATTERN.fullmatch(o.name) and o.name not in adopted.values()):
+          adopted.setdefault(prim, o.name)
+    self.ids.adopt(adopted)
+    drawn = {p: self.ids.add(p) for p in self.catalogs if p != CALIB_BOARD and p not in adopted}
+    log.info("ids adopted=%s drawn=%s", adopted, drawn)
+    for w, found in objects.items():
+      for o in found:
+        if _user_string(o, "source") == GROUND_TRUTH and o.name not in adopted.values():
+          self._delete(w, o.name)
+          log.info("object deleted id=%s prim=%s world=%s reason=not_adopted_at_start", o.name,
+                   _user_string(o, "prim"), w)
+
+  def name(self, prim: str) -> str:
+    """The world object name of a prim: its ID (calib_board keeps its name)."""
+    return self.ids.ids.get(prim, prim)
+
   def run(self) -> None:
     first_tf = None
     stale_removed = False
     while True:
       self.ros.tf_arrived.wait()
-      poses = self.ros.take_pending()
-      now = time.monotonic()
-      first_tf = first_tf or now
-      try:
-        self._sync(poses, now)
-        if not stale_removed and now - first_tf >= STALE_AFTER_S:
-          self._delete_stale(now)
-          stale_removed = True
-      except grpc.RpcError as error:
-        self._log_error(f"world update failed: {error.code().name}: {error.details()}")
-        # Objects removed from a world by someone else are re-created on their next sight.
+      with self.lock:
+        poses = self.ros.take_pending()
+        now = time.monotonic()
+        first_tf = first_tf or now
         try:
-          self.known.intersection_update(*(self._object_names(w) for w in self.worlds))
-        except grpc.RpcError:
-          pass  # the next failure is logged
+          self._sync(poses, now)
+          if not stale_removed and now - first_tf >= STALE_AFTER_S:
+            self._delete_stale(now)
+            stale_removed = True
+        except grpc.RpcError as error:
+          self._log_error(f"world update failed: {error.code().name}: {error.details()}")
+          # Objects removed from a world by someone else are re-created on their next sight.
+          try:
+            names = [self._object_names(w) for w in self.worlds]
+            self.known = {p for p in self.known if all(self.name(p) in n for n in names)}
+          except grpc.RpcError:
+            pass  # the next failure is logged
 
   def _sync(self, poses: dict[str, Pose], now: float) -> None:
-    for name in poses:
-      self.last_seen[name] = now
-    new = [n for n in poses if n not in self.known and self._catalog(n)]
+    for prim in poses:
+      self.last_seen[prim] = now
+    new = [p for p in poses if p not in self.known and self._catalog(p)]
     if new:
       existing = {w: self._object_names(w) for w in self.worlds}
-      for name in new:
-        self._create(name, poses[name], existing)
+      for prim in new:
+        self._create(prim, poses[prim], existing)
     for w in self.worlds:
       updates = [
           updates_pb.ObjectWorldUpdate(
@@ -260,14 +321,14 @@ class Sync:
                   node_a=refs_pb.TransformNodeReference(id="root"),
                   node_b=refs_pb.TransformNodeReference(
                       by_name=refs_pb.TransformNodeReferenceByName(
-                          object=refs_pb.ObjectReferenceByName(object_name=name)
+                          object=refs_pb.ObjectReferenceByName(object_name=self.name(prim))
                       )
                   ),
                   a_t_b=self._pose_proto(pose),
               )
           )
-          for name, pose in poses.items()
-          if name in self.known and name not in new and name not in self.attached
+          for prim, pose in poses.items()
+          if prim in self.known and prim not in new and prim not in self.attached
       ]
       if updates:
         self.world.UpdateWorldResources(
@@ -278,37 +339,87 @@ class Sync:
             ),
             timeout=RPC_TIMEOUT_S,
         )
-    for name in [n for n in self.known if now - self.last_seen[n] > ABSENT_S]:
-      self.known.discard(name)
+    for prim in [p for p in self.known if now - self.last_seen[p] > ABSENT_S]:
+      self.known.discard(prim)
       for w in self.worlds:
-        self._delete(w, name)
-      log.info("object deleted name=%s worlds=%s reason=absent_from_tf_%.0fs", name, self.worlds, ABSENT_S)
+        self._delete(w, self.name(prim))
+      log.info("object deleted id=%s prim=%s worlds=%s reason=absent_from_tf_%.0fs",
+               self.name(prim), prim, self.worlds, ABSENT_S)
 
   def _delete_stale(self, now: float) -> None:
-    on_tf = {n for n, t in self.last_seen.items() if now - t <= ABSENT_S}
+    on_tf = {p for p, t in self.last_seen.items() if now - t <= ABSENT_S}
     for w in (SIM_WORLD, WORLD):
-      objects = self.world.ListObjects(
-          world_pb.ListObjectsRequest(world_id=w, view=updates_pb.FULL), timeout=RPC_TIMEOUT_S
-      ).objects
-      for o in objects:
-        if o.name in on_tf or "source" not in o.object_component.user_data:
+      for o in self._full_objects(w):
+        prim = _user_string(o, "prim")
+        if _user_string(o, "source") != GROUND_TRUTH or (prim in on_tf and o.name == self.name(prim)):
           continue
-        source = wrappers_pb2.StringValue()
-        o.object_component.user_data["source"].Unpack(source)
-        if source.value == "ground_truth":
-          self._delete(w, o.name)
-          self.known.discard(o.name)
-          log.info("object deleted name=%s world=%s reason=stale_not_on_tf", o.name, w)
+        self._delete(w, o.name)
+        log.info("object deleted id=%s prim=%s world=%s reason=stale_not_on_tf", o.name, prim, w)
 
-  def _catalog(self, name: str) -> str | None:
-    catalog = self.catalogs.get(name)
-    if catalog is None and name not in self.unknown_logged:
-      self.unknown_logged.add(name)
-      log.warning("ignoring /tf frame %s: no catalog entry for it", name)
+  def reset(self) -> dict[str, str]:
+    """Addendum A.4, with the lock held after Isaac's reset: every ground-truth object out of both worlds,
+    the prim structures cleared, a new ID map; the next /tf re-creates the objects."""
+    deleted = []
+    for w in (SIM_WORLD, WORLD):
+      for o in self._full_objects(w):
+        if _user_string(o, "source") == GROUND_TRUTH:
+          self._delete(w, o.name)
+          deleted.append(o.name)
+    self.known.clear()
+    self.last_seen.clear()
+    self.attached.clear()
+    self.catalogs.clear()
+    self.catalogs.update(self.default_catalogs)  # Isaac's reset removed the spawned prims
+    with self.ros.lock:
+      self.ros.pending.clear()
+      for prim in [p for p in self.ros.poses if p not in NOT_OBJECTS]:
+        del self.ros.poses[prim]
+    ids = self.ids.draw([p for p in self.catalogs if p != CALIB_BOARD])
+    log.info("reset: deleted %d ground-truth objects from %s; ids=%s", len(deleted), (SIM_WORLD, WORLD), ids)
+    return ids
+
+  def spawn(self, catalog: str) -> tuple[str, str]:
+    """A new prim spawn_<n> (skipping prims Isaac already has, e.g. from an earlier run) and its ID."""
+    self.spawned += 1
+    while f"{SPAWN_PREFIX}{self.spawned}" in self.ros.poses or f"{SPAWN_PREFIX}{self.spawned}" in self.catalogs:
+      self.spawned += 1
+    prim = f"{SPAWN_PREFIX}{self.spawned}"
+    self.catalogs[prim] = catalog
+    return prim, self.ids.add(prim)
+
+  def forget(self, prim: str, reason: str) -> None:
+    """A prim deleted from Isaac: out of both worlds and every prim structure."""
+    name = self.name(prim)
+    if prim in self.known:
+      for w in self.worlds:
+        self._delete(w, name)
+    self.known.discard(prim)
+    self.attached.discard(prim)
+    self.last_seen.pop(prim, None)
+    self.catalogs.pop(prim, None)
+    with self.ros.lock:
+      self.ros.pending.pop(prim, None)
+      self.ros.poses.pop(prim, None)
+    self.ids.forget(prim)
+    log.info("object deleted id=%s prim=%s worlds=%s reason=%s", name, prim, self.worlds, reason)
+
+  def _catalog(self, prim: str) -> str | None:
+    catalog = self.catalogs.get(prim)
+    if catalog is None and prim not in self.unknown_logged:
+      self.unknown_logged.add(prim)
+      log.warning("ignoring /tf frame %s: no catalog entry for it", prim)
     return catalog
 
-  def _create(self, name: str, pose: Pose, existing: dict[str, set[str]]) -> None:
-    catalog = self.catalogs[name]
+  def _attributes(self, catalog: str) -> tuple[str, str]:
+    if catalog not in self.attributes:
+      entry = yaml.safe_load((CATALOG_DIR / catalog / "object.yaml").read_text())
+      self.attributes[catalog] = (entry["category"], entry["color_name"])
+    return self.attributes[catalog]
+
+  def _create(self, prim: str, pose: Pose, existing: dict[str, set[str]]) -> None:
+    catalog = self.catalogs[prim]
+    name = self.name(prim)
+    category, color = self._attributes(catalog)
     refs = self._geometry(catalog)
     for w in self.worlds:
       if name in existing[w]:
@@ -327,14 +438,16 @@ class Sync:
       geometries = request.create_single_entity_object.geometry_component.named_geometries
       for set_name in (VISUAL_SET, COLLISION_SET):
         geometries[set_name].named_geometries[catalog].geometry.geo_ref.CopyFrom(refs)
-      request.user_data["source"].Pack(wrappers_pb2.StringValue(value="ground_truth"))
-      request.user_data["catalog"].Pack(wrappers_pb2.StringValue(value=catalog))  # PlanGrasp reads its dims
+      # catalog: PlanGrasp and ListObjects read its dims; category and color: ListObjects.
+      for key, value in (("source", GROUND_TRUTH), ("catalog", catalog), ("prim", prim), ("category", category),
+                         ("color", color)):
+        request.user_data[key].Pack(wrappers_pb2.StringValue(value=value))
       self.world.CreateObject(request, timeout=RPC_TIMEOUT_S)
       log.info(
-          "object created name=%s catalog=%s world=%s replaced=%s pose=%s",
-          name, catalog, w, name in existing[w], [round(v, 4) for v in pose],
+          "object created id=%s prim=%s catalog=%s world=%s replaced=%s pose=%s",
+          name, prim, catalog, w, name in existing[w], [round(v, 4) for v in pose],
       )
-    self.known.add(name)
+    self.known.add(prim)
 
   def _geometry(self, catalog: str):
     if catalog not in self.geometry_refs:
@@ -345,6 +458,11 @@ class Sync:
       )
       self.geometry_refs[catalog] = response.geometry_storage_refs
     return self.geometry_refs[catalog]
+
+  def _full_objects(self, world_id: str) -> list:
+    return self.world.ListObjects(
+        world_pb.ListObjectsRequest(world_id=world_id, view=updates_pb.FULL), timeout=RPC_TIMEOUT_S
+    ).objects
 
   def _object_names(self, world_id: str) -> set[str]:
     objects = self.world.ListObjects(world_pb.ListObjectsRequest(world_id=world_id), timeout=RPC_TIMEOUT_S).objects
@@ -403,15 +521,27 @@ class SimLink(simlink_pb2_grpc.SimLinkServicer):
     self.ros = ros
     self.sync = sync
 
+  def _prim(self, object_id: str, context, also=()) -> str:
+    """The prim of an object ID (or a name in `also`, passed through); NOT_FOUND for anything else."""
+    if object_id in also:
+      return object_id
+    prim = self.sync.ids.prim(object_id)
+    if prim is None:
+      context.abort(grpc.StatusCode.NOT_FOUND, unknown_object(object_id))
+    return prim
+
+  @staticmethod
+  def _world_failed(context, error: grpc.RpcError) -> None:
+    context.abort(error.code(), f"world service: {error.details()}")
+
   @_logged
   def Spawn(self, request, context):
-    if not NAME_PATTERN.fullmatch(request.name):
-      context.abort(grpc.StatusCode.INVALID_ARGUMENT, f"invalid object name {request.name!r} (want {NAME_PATTERN.pattern})")
     if not (CATALOG_DIR / request.catalog / "mesh.glb").is_file():
       context.abort(grpc.StatusCode.NOT_FOUND, f"no catalog entry {request.catalog!r} in {CATALOG_DIR}")
-    self.sync.catalogs[request.name] = request.catalog
+    with self.sync.lock:
+      prim, object_id = self.sync.spawn(request.catalog)
     spawn = SpawnEntity.Request(
-        name=f"{OBJECTS_PRIM}/{request.name}",
+        name=f"{OBJECTS_PRIM}/{prim}",
         allow_renaming=False,
         uri=f"{ISAAC_CATALOG_DIR}/{request.catalog}/model.usd",
     )
@@ -421,35 +551,50 @@ class SimLink(simlink_pb2_grpc.SimLinkServicer):
     o.x, o.y, o.z, o.w = (p.qx, p.qy, p.qz, p.qw) if any((p.qx, p.qy, p.qz, p.qw)) else (0.0, 0.0, 0.0, 1.0)
     result = self.ros.call(context, "/spawn_entity", spawn, request_renders=True).result
     if result.result != Result.RESULT_OK:
+      with self.sync.lock:
+        self.sync.forget(prim, "spawn_failed")
       context.abort(
           SPAWN_CODES.get(result.result, grpc.StatusCode.INTERNAL),
-          f"Isaac SpawnEntity {request.name}: result {result.result}: {result.error_message}",
+          f"Isaac SpawnEntity {prim}: result {result.result}: {result.error_message}",
       )
-    return empty_pb2.Empty()
+    log.info("spawned id=%s prim=%s catalog=%s", object_id, prim, request.catalog)
+    return simlink_pb2.SpawnResponse(id=object_id)
 
   @_logged
   def Delete(self, request, context):
-    delete = DeleteEntity.Request(entity=f"{OBJECTS_PRIM}/{request.name}")
+    prim = self._prim(request.id, context, also={CALIB_BOARD})
+    delete = DeleteEntity.Request(entity=f"{OBJECTS_PRIM}/{prim}")
     result = self.ros.call(context, "/delete_entity", delete, request_renders=True).result
     if result.result != Result.RESULT_OK:
       context.abort(
           SPAWN_CODES.get(result.result, grpc.StatusCode.INTERNAL),
-          f"Isaac DeleteEntity {request.name}: result {result.result}: {result.error_message}",
+          f"Isaac DeleteEntity {prim}: result {result.result}: {result.error_message}",
       )
+    if prim != CALIB_BOARD:  # calib_board stays in the catalogs (AttachBoard re-creates it)
+      with self.sync.lock:
+        try:
+          self.sync.forget(prim, "Delete")
+        except grpc.RpcError as error:
+          self._world_failed(context, error)
     return empty_pb2.Empty()
 
   @_logged
   def Reset(self, request, context):
-    before = self.ros.epoch
-    self._trigger(context, "/sim/reset")
-    deadline = time.monotonic() + RESET_EPOCH_TIMEOUT_S
-    while self.ros.epoch == before:
-      if time.monotonic() > deadline:
-        context.abort(
-            grpc.StatusCode.DEADLINE_EXCEEDED,
-            f"/sim/reset succeeded but /sim/epoch stayed {before} for {RESET_EPOCH_TIMEOUT_S} s",
-        )
-      time.sleep(0.01)
+    with self.sync.lock:
+      before = self.ros.epoch
+      self._trigger(context, "/sim/reset")
+      deadline = time.monotonic() + RESET_EPOCH_TIMEOUT_S
+      while self.ros.epoch == before:
+        if time.monotonic() > deadline:
+          context.abort(
+              grpc.StatusCode.DEADLINE_EXCEEDED,
+              f"/sim/reset succeeded but /sim/epoch stayed {before} for {RESET_EPOCH_TIMEOUT_S} s",
+          )
+        time.sleep(0.01)
+      try:
+        self.sync.reset()
+      except grpc.RpcError as error:
+        self._world_failed(context, error)
     return simlink_pb2.ResetResponse(epoch=self.ros.epoch)
 
   @_logged
@@ -464,24 +609,35 @@ class SimLink(simlink_pb2_grpc.SimLinkServicer):
 
   @_logged
   def SetAttached(self, request, context):
+    prim = self._prim(request.id, context, also={CALIB_BOARD})
     if request.attached:
-      self.sync.attached.add(request.name)
+      self.sync.attached.add(prim)
     else:
-      self.sync.attached.discard(request.name)
+      self.sync.attached.discard(prim)
     return empty_pb2.Empty()
 
   @_logged
   def GetTruePose(self, request, context):
-    pose = self.ros.poses.get(request.frame)
+    frame = self._prim(request.frame, context, also=NOT_OBJECTS | {CALIB_BOARD})
+    pose = self.ros.poses.get(frame)
     if pose is None:
-      context.abort(grpc.StatusCode.NOT_FOUND, f"no /tf frame {request.frame!r} with parent {WORLD}")
-    return robot_service_pb2.Pose(**dict(zip(("x", "y", "z", "qx", "qy", "qz", "qw"), pose)))
+      context.abort(grpc.StatusCode.NOT_FOUND, f"no /tf frame {frame!r} with parent {WORLD} ({request.frame})")
+    return _api_pose(pose)
 
   @_logged
   def GetClock(self, request, context):
     if self.ros.clock is None:
       context.abort(grpc.StatusCode.UNAVAILABLE, "no /clock received from Isaac yet")
     return simlink_pb2.ClockResponse(sim_time=self.ros.clock)
+
+  @_logged
+  def ListTrue(self, request, context):
+    response = robot_service_pb2.TrueObjects()
+    for prim, object_id in sorted(dict(self.sync.ids.ids).items(), key=lambda item: item[1]):
+      true = response.objects.add(id=object_id, catalog=self.sync.catalogs.get(prim, ""), prim=prim)
+      if (pose := self.ros.poses.get(prim)) is not None:
+        true.pose.CopyFrom(_api_pose(pose))
+    return response
 
   def _trigger(self, context, service: str) -> None:
     reply = self.ros.call(context, service, Trigger.Request(), request_renders=False)
@@ -499,7 +655,7 @@ def main() -> int:
       stream=sys.stdout, level=logging.INFO, format="%(asctime)s %(levelname)s scene_sync %(message)s"
   )
   catalogs = {name: spec["catalog"] for name, spec in yaml.safe_load(SCENE_PATH.read_text())["objects"].items()}
-  catalogs["calib_board"] = "calib_board"
+  catalogs[CALIB_BOARD] = CALIB_BOARD
   belief_source = yaml.safe_load(SETTINGS_PATH.read_text())["belief_source"]
   if belief_source not in ("GROUND_TRUTH", "PERCEPTION"):
     log.error("belief_source must be GROUND_TRUTH or PERCEPTION, got %r (%s)", belief_source, SETTINGS_PATH)
@@ -519,14 +675,15 @@ def main() -> int:
       mirror_world=belief_source == "GROUND_TRUTH",
   )
   sync.ensure_sim_world()
+  sync.assign_ids()
 
   server = grpc.server(futures.ThreadPoolExecutor(max_workers=8))
   simlink_pb2_grpc.add_SimLinkServicer_to_server(SimLink(ros, sync), server)
   server.add_insecure_port(f"127.0.0.1:{args.port}")
   server.start()
   log.info(
-      "started simlink=127.0.0.1:%d belief_source=%s worlds=%s catalog_names=%s",
-      args.port, belief_source, sync.worlds, sorted(catalogs),
+      "started simlink=127.0.0.1:%d belief_source=%s worlds=%s prims=%s ids=%s",
+      args.port, belief_source, sync.worlds, sorted(catalogs), sync.ids.ids,
   )
   sync.run()
   return 0

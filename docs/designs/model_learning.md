@@ -61,10 +61,11 @@ Every run is scored automatically:
 ## Object identity (owner decision D10)
 
 All tasks and training data use perception-style objects: neutral IDs
-(`obj_<n>`, random per episode) with attributes (class, colour, size, pose),
-plus `find_objects(query)`. Prompts describe objects ("the red cube"); the
-model must ground them to IDs itself. This needs the API change below (a
-new phase before L0).
+(`obj_<k>`, random per episode) with attributes (`category`, `color`, size,
+pose). Prompts describe objects ("the red cube"); the model must ground
+them to IDs itself: it calls `list_objects` and picks the ID whose
+attributes match (there is no `find_objects`). This needs the API change
+below (phase L−1, [phases/phase_ids.md](phases/phase_ids.md)).
 
 ## The building blocks
 
@@ -184,7 +185,7 @@ first trial.
         joint values) by regression, squashed into each parameter's valid
         range (so out-of-range values are impossible by construction);
     *   **choices** (enums such as `LINEAR`/`ANY`) by classification;
-    *   **object names** by pointing at one of the objects the model has
+    *   **object IDs** by pointing at one of the objects the model has
         already seen in a `list_objects` result.
 *   Training: hidden states are computed once and cached, then the head
     trains in minutes per epoch. Same stage-1 and stage-2 data, same replay
@@ -206,7 +207,7 @@ memory.
 
 | # | What | Needs sim? | Done when |
 |---|---|---|---|
-| L−1 | API change for D10: `list_objects` returns IDs + attributes, `find_objects(query)`, scene_sync assigns random IDs in sim; all checks updated | yes | phase 3–6 checks pass with IDs |
+| L−1 | API change for D10: `list_objects` returns IDs + attributes (`category`, `color`, size, pose), every object argument takes an ID, scene_sync assigns random IDs in sim; all checks updated | yes | phase 3–6 checks pass with IDs |
 | L0 | Physics-only mode, MCP vision filter, agent loop + recorder, task suite + checkers, the frontier model reference run | yes | the frontier model scores on the held-out suite; GPU use measured |
 | L1 | **A: raw Qwen3 8B** | yes | metrics for A |
 | L2 | Dry-run backend + call generator + stage-1 dataset and benchmark | no | ~20 000 recorded calls; benchmark scores for A and the frontier model |

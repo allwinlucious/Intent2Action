@@ -152,7 +152,7 @@ connect them to Isaac Sim over ROS 2, and put one gRPC API
 | D7 | 2026-10-27 | Isaac I/O only through the ROS 2 bridge's own components; script `rclpy` only where the bridge has none (listed in phase 2) | One integration surface in Isaac; nothing custom serving data from the simulator |
 | D8 | 2026-10-27 | No depth noise model: depth stays clean unless a prebuilt noise model becomes available | Isaac's prebuilt D455 sensor is unusable (phase 2), and a hand-written model is not wanted |
 | D9 | 2026-10-27 | Perception uses Intrinsic's current pose-estimation path (`nvidia_pose_estimator`: SAM 3 + FoundationStereo + FoundationPose on TensorRT), not the older `ioc_pose_estimator` + Triton | Current upstream path; FoundationPose weights under the NVIDIA Open Model License (commercial use); the older path's weights are under a restrictive EULA and the path is deprecated (phase 5 inventory) |
-| D10 | 2026-10-28 | Objects are identified by **neutral IDs assigned by perception** (`obj_<n>`) with attributes (class, colour, size, pose), never by hand-given names. The sim fills the same format from ground truth with random IDs per episode; The model grounds descriptions itself: it lists the objects and picks the ID whose attributes match (no `find_objects` call). IDs persist while an object stays in place (re-identification) | A real robot sees arbitrary objects; models trained in sim must face the same interface |
+| D10 | 2026-10-28 | Objects are identified by **neutral IDs assigned by perception** (`obj_<k>`) with attributes (`category`, `color`, size, pose), never by hand-given names. The sim fills the same format from ground truth with random IDs, redrawn on every scene reset; the model grounds descriptions itself: it lists the objects and picks the ID whose attributes match (no `find_objects` call). IDs persist while an object stays in place (re-identification; also across a container restart) ([phases/phase_ids.md](phases/phase_ids.md)) | A real robot sees arbitrary objects; models trained in sim must face the same interface |
 
 
 ## Open Questions
@@ -448,18 +448,18 @@ Typical durations: a motion 1–10 s, `CalibrateCamera` 2–5 min,
 | `GetWrench()`, `TareWrench()` | ICON F/T part status; ICON `intrinsic.tare_force_torque_sensor` | `/wrist_wrench` → `ros2_hwm` F/T interface → ICON. Tare removes static load only (not acceleration effects) |
 | `MoveToContact(direction, max_force, speed, wait)` | ICON `intrinsic.force_primitive` | moves along `direction` until the measured force along it reaches `max_force` |
 | `MoveCompliant(target_pose, stiffness, max_force, wait)` | ICON `intrinsic.cartesian_admittance_action` | moves toward the target while yielding to contact forces |
-| `PlanGrasp(object)` | Intrinsic's MoveIt grasp pipeline (ROS 2 action `/grasp_planning/plan_grasps`) | object pose from `world`, box dims from the catalog; graspable check, width filter, depth offset (phase 5c) |
+| `PlanGrasp(object_id)` | Intrinsic's MoveIt grasp pipeline (ROS 2 action `/grasp_planning/plan_grasps`) | object pose from `world`, box dims from the catalog; graspable check, width filter, depth offset (phase 5c) |
 | `Stop()` | ICON `intrinsic.stop` | controlled stop; ends the session; the motion task ends `CANCELLED`; not a fault |
 | `SetSpeed(factor)` | ICON speed override | scales following motions; re-applied after ICON recovery |
 | `ClearFaults()` | ICON `ClearFaults` | see CUJ 5 |
 | `Jog(joint, velocity, duration)` | ICON `JoggingService` (joint jogging; Cartesian jogging does not exist in this Intrinsic version) | ICON |
 | `Grasp(wait)`, `Release(wait)`, `IsGripping()` | ICON gripper part (`HalLinearGripperPart`), `intrinsic.simple_gripper` (GRASP/RELEASE to configured widths, force 30 N) | ICON → `ros2_hwm` gripper interface → `/gripper_command`. `Grasp` returns when the fingers stop; `IsGripping` = fingers stopped open > 1 mm after a GRASP (phase 3) |
-| `AttachObject(name)`, `DetachObject(name)`, `SetPayload(mass, com, inertia)` | `ObjectWorldService.ReparentObject` on `world`; ICON payload | the planner treats a held object as part of the arm |
-| `ListObjects` | `ObjectWorldService.ListObjects` on `world` | each object marked `ground_truth` or `perceived` |
+| `AttachObject(id)`, `DetachObject(id)`, `SetPayload(mass, com, inertia)` | `ObjectWorldService.ReparentObject` on `world`; ICON payload | the planner treats a held object as part of the arm |
+| `ListObjects` | `ObjectWorldService.ListObjects` on `world` | each object: `id` (`obj_<k>`), `category`, `color`, `size_x/y/z` (catalog bounding box), `pose`, `attached_to`, marked `ground_truth` or `perceived`; the robot, the camera and the calibration board are not listed. Every object argument of the API is such an `id`; anything else is `NOT_FOUND` "no object with id X; list_objects shows the current ids" |
 | `GetImage(rgb\|depth)` | `CameraService.Capture` | returns only a frame rendered at or after the request's simulation time + 50 ms (arm settled) |
 | `GetPointCloud()` | `CameraService.Capture` (depth + intrinsics) | `robot_service` back-projects depth; points in the camera frame, plus the camera's pose in `world` |
 | `CalibrateCamera(wait)` | `CalibrationService` (`Initialize`, `CaptureData`, `Calibrate`, `Save`), Intrinsic's `pose_sampling` library | see "Calibration flow"; precondition: a board is attached |
-| `DetectObjects(wait)` | `PoseEstimationService.RunPoseEstimation` | `robot_service` writes each estimate into `world` (create or update, marked `perceived`) |
+| `DetectObjects(categories, wait)` | `PoseEstimationService.RunPoseEstimation` | `robot_service` writes each estimate into `world` (create or update, marked `perceived`); each detection has its `object_id` and `category` |
 | `GetOperation`, `WaitOperation`, `CancelOperation` | — | `google.longrunning.Operations` served by `robot_service` |
 
 **`SimService`** (same process, same port; for developers and test
@@ -467,16 +467,18 @@ scripts; not exposed to the VLM):
 
 | Call | Path |
 |---|---|
-| `AddObject(catalog_name, name, pose)`, `RemoveObject(name)` | Isaac `SpawnEntity` / `DeleteEntity` with the catalog entry's USD |
-| `ResetScene()` | ICON stop → `/sim/reset` → wait for the new epoch → `ClearFaults`. Removes objects added with `AddObject` (the default scene is rebuilt), detaches held objects, clears payload and tare. Camera calibration is kept |
-| `GetTruePose(entity)` | latest `/tf` pose from Isaac (ground truth, for tests) |
+| `AddObject(catalog_name, pose)` → `id`, `RemoveObject(id)` | Isaac `SpawnEntity` / `DeleteEntity` with the catalog entry's USD (prim `spawn_<n>`, a fresh ID) |
+| `ResetScene()` | ICON stop → `/sim/reset` → wait for the new epoch → `ClearFaults`. Removes objects added with `AddObject` (the default scene is rebuilt), detaches held objects, clears payload and tare; returns once the objects are back in the belief world under **new IDs**. Camera calibration is kept |
+| `GetTruePose(frame)` | latest `/tf` pose from Isaac (ground truth, for tests); `frame` is an object ID, `panda_hand` or `Camera_Pseudo_Depth` |
+| `ListTrueObjects()` | every Isaac object: `id`, `catalog`, `prim`, `pose` (tests map scene names to IDs with it; never in MCP) |
 | `AttachCalibrationBoard()`, `DetachCalibrationBoard()` | `/sim/attach_board`, `/sim/detach_board`: `run_scene.py` creates/removes the board rigidly fixed to `panda_hand`, offset clear of the fingers; `robot_service` adds/removes it in `world` attached to the flange |
 
 ### Object catalog
 
 `assets/objects/<catalog_name>/` holds, per object type: `mesh.glb` (the
 single source of geometry: collision and visual geometry for Intrinsic,
-CAD for FoundationPose), `object.yaml` (mass, color, physics material), and
+CAD for FoundationPose), `object.yaml` (mass, color, physics material,
+`category` and `color_name` for `ListObjects`), and
 `model.usd`, generated from the two by `sim/tools/build_catalog.py` with
 Isaac's `omni.kit.asset_converter` (never edited by hand). The default
 scene (`sim/scenes/default.yaml`) lists the table, red cube, plate, peg and
@@ -489,6 +491,15 @@ into Intrinsic; the robot, the camera and the ground are not.
     `/tf` (which objects exist and their poses) and mirrors catalog objects
     into `sim_world` (geometry from the catalog via CAS); details in
     phase 3 decision 15.
+*   Objects in the worlds are named by an ID `obj_<k>` (k a random
+    two-digit number, D10), never by their Isaac prim (`red_cube`); the
+    prim, catalog, `category` and `color` (from the catalog's
+    `object.yaml`) are in the object's `user_data`. `scene_sync` keeps the
+    prim ↔ ID map: persisted objects keep their ID across a container
+    restart, every `SimLink.Reset` draws a new map that shares no ID with
+    the previous one, and each spawned object gets a fresh ID
+    ([phases/phase_ids.md](phases/phase_ids.md)). The calibration board
+    keeps its name and is never listed.
 *   `world` is the belief world the planner uses. `belief_source` is a
     start-up setting (`config/robot_service.yaml`, read by `scene_sync` and
     `robot_service`; changing it means restarting the container):

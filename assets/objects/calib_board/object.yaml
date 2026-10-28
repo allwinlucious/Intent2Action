@@ -1,8 +1,10 @@
+category: calibration_board
 collision: convexHull
 color:
 - 1.0
 - 1.0
 - 1.0
+color_name: white
 dims:
 - 0.28
 - 0.2

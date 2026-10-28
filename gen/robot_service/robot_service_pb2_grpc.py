@@ -289,7 +289,7 @@ class RobotServiceServicer:
         raise NotImplementedError('Method not implemented!')
 
     def PlanGrasp(self, request, context):
-        """Plan a grasp for an object in the world.
+        """Plan a grasp for an object in the world, given by an id from `list_objects`.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -345,14 +345,14 @@ class RobotServiceServicer:
         raise NotImplementedError('Method not implemented!')
 
     def AttachObject(self, request, context):
-        """Treat an object as held by the gripper (planning).
+        """Treat an object (an id from `list_objects`) as held by the gripper (planning).
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def DetachObject(self, request, context):
-        """Release an attached object back into the scene (planning).
+        """Release an attached object (an id from `list_objects`) back into the scene (planning).
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -366,7 +366,8 @@ class RobotServiceServicer:
         raise NotImplementedError('Method not implemented!')
 
     def ListObjects(self, request, context):
-        """Objects in the robot's world model.
+        """Objects in the robot's world model. Objects are identified only by `id`; match the user's words to
+        `category`, `color`, `size` and `pose`; ids change after a scene reset.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -1436,7 +1437,7 @@ class SimServiceStub:
         self.AddObject = channel.unary_unary(
                 '/robot.v1.SimService/AddObject',
                 request_serializer=robot__service_dot_robot__service__pb2.AddObjectRequest.SerializeToString,
-                response_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+                response_deserializer=robot__service_dot_robot__service__pb2.AddObjectResponse.FromString,
                 _registered_method=True)
         self.RemoveObject = channel.unary_unary(
                 '/robot.v1.SimService/RemoveObject',
@@ -1452,6 +1453,11 @@ class SimServiceStub:
                 '/robot.v1.SimService/GetTruePose',
                 request_serializer=robot__service_dot_robot__service__pb2.GetTruePoseRequest.SerializeToString,
                 response_deserializer=robot__service_dot_robot__service__pb2.Pose.FromString,
+                _registered_method=True)
+        self.ListTrueObjects = channel.unary_unary(
+                '/robot.v1.SimService/ListTrueObjects',
+                request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+                response_deserializer=robot__service_dot_robot__service__pb2.TrueObjects.FromString,
                 _registered_method=True)
         self.AttachCalibrationBoard = channel.unary_unary(
                 '/robot.v1.SimService/AttachCalibrationBoard',
@@ -1475,19 +1481,28 @@ class SimServiceServicer:
         raise NotImplementedError('Method not implemented!')
 
     def RemoveObject(self, request, context):
-        """Missing associated documentation comment in .proto file."""
+        """An object id.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def ResetScene(self, request, context):
-        """Missing associated documentation comment in .proto file."""
+        """Resets Isaac's scene; returns once the objects are back in the world model with new ids.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def GetTruePose(self, request, context):
         """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListTrueObjects(self, request, context):
+        """Every Isaac object with its id, catalog and prim (tests only).
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -1510,7 +1525,7 @@ def add_SimServiceServicer_to_server(servicer, server):
             'AddObject': grpc.unary_unary_rpc_method_handler(
                     servicer.AddObject,
                     request_deserializer=robot__service_dot_robot__service__pb2.AddObjectRequest.FromString,
-                    response_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+                    response_serializer=robot__service_dot_robot__service__pb2.AddObjectResponse.SerializeToString,
             ),
             'RemoveObject': grpc.unary_unary_rpc_method_handler(
                     servicer.RemoveObject,
@@ -1526,6 +1541,11 @@ def add_SimServiceServicer_to_server(servicer, server):
                     servicer.GetTruePose,
                     request_deserializer=robot__service_dot_robot__service__pb2.GetTruePoseRequest.FromString,
                     response_serializer=robot__service_dot_robot__service__pb2.Pose.SerializeToString,
+            ),
+            'ListTrueObjects': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListTrueObjects,
+                    request_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+                    response_serializer=robot__service_dot_robot__service__pb2.TrueObjects.SerializeToString,
             ),
             'AttachCalibrationBoard': grpc.unary_unary_rpc_method_handler(
                     servicer.AttachCalibrationBoard,
@@ -1564,7 +1584,7 @@ class SimService:
             target,
             '/robot.v1.SimService/AddObject',
             robot__service_dot_robot__service__pb2.AddObjectRequest.SerializeToString,
-            google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+            robot__service_dot_robot__service__pb2.AddObjectResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -1646,6 +1666,33 @@ class SimService:
             '/robot.v1.SimService/GetTruePose',
             robot__service_dot_robot__service__pb2.GetTruePoseRequest.SerializeToString,
             robot__service_dot_robot__service__pb2.Pose.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListTrueObjects(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/robot.v1.SimService/ListTrueObjects',
+            google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+            robot__service_dot_robot__service__pb2.TrueObjects.FromString,
             options,
             channel_credentials,
             insecure,

@@ -26,7 +26,7 @@ from google.protobuf import empty_pb2 as google_dot_protobuf_dot_empty__pb2
 from robot_service import robot_service_pb2 as robot__service_dot_robot__service__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1brobot_service/simlink.proto\x12\x10robot.simlink.v1\x1a\x1bgoogle/protobuf/empty.proto\x1a!robot_service/robot_service.proto\"K\n\x0cSpawnRequest\x12\x0f\n\x07\x63\x61talog\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x1c\n\x04pose\x18\x03 \x01(\x0b\x32\x0e.robot.v1.Pose\"\x1b\n\x0bNameRequest\x12\x0c\n\x04name\x18\x01 \x01(\t\"\x1e\n\rResetResponse\x12\r\n\x05\x65poch\x18\x01 \x01(\r\"4\n\x12SetAttachedRequest\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x10\n\x08\x61ttached\x18\x02 \x01(\x08\" \n\x0fTruePoseRequest\x12\r\n\x05\x66rame\x18\x01 \x01(\t\"!\n\rClockResponse\x12\x10\n\x08sim_time\x18\x01 \x01(\x01\x32\x9f\x04\n\x07SimLink\x12?\n\x05Spawn\x12\x1e.robot.simlink.v1.SpawnRequest\x1a\x16.google.protobuf.Empty\x12?\n\x06\x44\x65lete\x12\x1d.robot.simlink.v1.NameRequest\x1a\x16.google.protobuf.Empty\x12@\n\x05Reset\x12\x16.google.protobuf.Empty\x1a\x1f.robot.simlink.v1.ResetResponse\x12=\n\x0b\x41ttachBoard\x12\x16.google.protobuf.Empty\x1a\x16.google.protobuf.Empty\x12=\n\x0b\x44\x65tachBoard\x12\x16.google.protobuf.Empty\x1a\x16.google.protobuf.Empty\x12K\n\x0bSetAttached\x12$.robot.simlink.v1.SetAttachedRequest\x1a\x16.google.protobuf.Empty\x12@\n\x0bGetTruePose\x12!.robot.simlink.v1.TruePoseRequest\x1a\x0e.robot.v1.Pose\x12\x43\n\x08GetClock\x12\x16.google.protobuf.Empty\x1a\x1f.robot.simlink.v1.ClockResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1brobot_service/simlink.proto\x12\x10robot.simlink.v1\x1a\x1bgoogle/protobuf/empty.proto\x1a!robot_service/robot_service.proto\"C\n\x0cSpawnRequest\x12\x0f\n\x07\x63\x61talog\x18\x01 \x01(\t\x12\x1c\n\x04pose\x18\x03 \x01(\x0b\x32\x0e.robot.v1.PoseJ\x04\x08\x02\x10\x03\"\x1b\n\rSpawnResponse\x12\n\n\x02id\x18\x01 \x01(\t\"\x17\n\tIdRequest\x12\n\n\x02id\x18\x01 \x01(\t\"\x1e\n\rResetResponse\x12\r\n\x05\x65poch\x18\x01 \x01(\r\"2\n\x12SetAttachedRequest\x12\n\n\x02id\x18\x01 \x01(\t\x12\x10\n\x08\x61ttached\x18\x02 \x01(\x08\" \n\x0fTruePoseRequest\x12\r\n\x05\x66rame\x18\x01 \x01(\t\"!\n\rClockResponse\x12\x10\n\x08sim_time\x18\x01 \x01(\x01\x32\xe1\x04\n\x07SimLink\x12H\n\x05Spawn\x12\x1e.robot.simlink.v1.SpawnRequest\x1a\x1f.robot.simlink.v1.SpawnResponse\x12=\n\x06\x44\x65lete\x12\x1b.robot.simlink.v1.IdRequest\x1a\x16.google.protobuf.Empty\x12@\n\x05Reset\x12\x16.google.protobuf.Empty\x1a\x1f.robot.simlink.v1.ResetResponse\x12=\n\x0b\x41ttachBoard\x12\x16.google.protobuf.Empty\x1a\x16.google.protobuf.Empty\x12=\n\x0b\x44\x65tachBoard\x12\x16.google.protobuf.Empty\x1a\x16.google.protobuf.Empty\x12K\n\x0bSetAttached\x12$.robot.simlink.v1.SetAttachedRequest\x1a\x16.google.protobuf.Empty\x12@\n\x0bGetTruePose\x12!.robot.simlink.v1.TruePoseRequest\x1a\x0e.robot.v1.Pose\x12\x43\n\x08GetClock\x12\x16.google.protobuf.Empty\x1a\x1f.robot.simlink.v1.ClockResponse\x12\x39\n\x08ListTrue\x12\x16.google.protobuf.Empty\x1a\x15.robot.v1.TrueObjectsb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -34,17 +34,19 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'robot_service.simlink_pb2',
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
   _globals['_SPAWNREQUEST']._serialized_start=113
-  _globals['_SPAWNREQUEST']._serialized_end=188
-  _globals['_NAMEREQUEST']._serialized_start=190
-  _globals['_NAMEREQUEST']._serialized_end=217
-  _globals['_RESETRESPONSE']._serialized_start=219
-  _globals['_RESETRESPONSE']._serialized_end=249
-  _globals['_SETATTACHEDREQUEST']._serialized_start=251
-  _globals['_SETATTACHEDREQUEST']._serialized_end=303
-  _globals['_TRUEPOSEREQUEST']._serialized_start=305
-  _globals['_TRUEPOSEREQUEST']._serialized_end=337
-  _globals['_CLOCKRESPONSE']._serialized_start=339
-  _globals['_CLOCKRESPONSE']._serialized_end=372
-  _globals['_SIMLINK']._serialized_start=375
-  _globals['_SIMLINK']._serialized_end=918
+  _globals['_SPAWNREQUEST']._serialized_end=180
+  _globals['_SPAWNRESPONSE']._serialized_start=182
+  _globals['_SPAWNRESPONSE']._serialized_end=209
+  _globals['_IDREQUEST']._serialized_start=211
+  _globals['_IDREQUEST']._serialized_end=234
+  _globals['_RESETRESPONSE']._serialized_start=236
+  _globals['_RESETRESPONSE']._serialized_end=266
+  _globals['_SETATTACHEDREQUEST']._serialized_start=268
+  _globals['_SETATTACHEDREQUEST']._serialized_end=318
+  _globals['_TRUEPOSEREQUEST']._serialized_start=320
+  _globals['_TRUEPOSEREQUEST']._serialized_end=352
+  _globals['_CLOCKRESPONSE']._serialized_start=354
+  _globals['_CLOCKRESPONSE']._serialized_end=387
+  _globals['_SIMLINK']._serialized_start=390
+  _globals['_SIMLINK']._serialized_end=999
 # @@protoc_insertion_point(module_scope)

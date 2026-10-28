@@ -1,8 +1,10 @@
+category: peg
 collision: convexHull
 color:
 - 0.2
 - 0.4
 - 0.8
+color_name: blue
 dims:
 - 0.02
 - 0.02

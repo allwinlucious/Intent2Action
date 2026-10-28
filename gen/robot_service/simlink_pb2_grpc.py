@@ -39,11 +39,11 @@ class SimLinkStub:
         self.Spawn = channel.unary_unary(
                 '/robot.simlink.v1.SimLink/Spawn',
                 request_serializer=robot__service_dot_simlink__pb2.SpawnRequest.SerializeToString,
-                response_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+                response_deserializer=robot__service_dot_simlink__pb2.SpawnResponse.FromString,
                 _registered_method=True)
         self.Delete = channel.unary_unary(
                 '/robot.simlink.v1.SimLink/Delete',
-                request_serializer=robot__service_dot_simlink__pb2.NameRequest.SerializeToString,
+                request_serializer=robot__service_dot_simlink__pb2.IdRequest.SerializeToString,
                 response_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
                 _registered_method=True)
         self.Reset = channel.unary_unary(
@@ -76,6 +76,11 @@ class SimLinkStub:
                 request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
                 response_deserializer=robot__service_dot_simlink__pb2.ClockResponse.FromString,
                 _registered_method=True)
+        self.ListTrue = channel.unary_unary(
+                '/robot.simlink.v1.SimLink/ListTrue',
+                request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+                response_deserializer=robot__service_dot_robot__service__pb2.TrueObjects.FromString,
+                _registered_method=True)
 
 
 class SimLinkServicer:
@@ -94,7 +99,9 @@ class SimLinkServicer:
         raise NotImplementedError('Method not implemented!')
 
     def Reset(self, request, context):
-        """Missing associated documentation comment in .proto file."""
+        """Resets Isaac, deletes the ground-truth objects from both worlds and draws new ids; the sync thread
+        re-creates the objects from the next /tf.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -129,17 +136,24 @@ class SimLinkServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ListTrue(self, request, context):
+        """Every mapped object (calib_board excluded).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_SimLinkServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'Spawn': grpc.unary_unary_rpc_method_handler(
                     servicer.Spawn,
                     request_deserializer=robot__service_dot_simlink__pb2.SpawnRequest.FromString,
-                    response_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+                    response_serializer=robot__service_dot_simlink__pb2.SpawnResponse.SerializeToString,
             ),
             'Delete': grpc.unary_unary_rpc_method_handler(
                     servicer.Delete,
-                    request_deserializer=robot__service_dot_simlink__pb2.NameRequest.FromString,
+                    request_deserializer=robot__service_dot_simlink__pb2.IdRequest.FromString,
                     response_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
             ),
             'Reset': grpc.unary_unary_rpc_method_handler(
@@ -172,6 +186,11 @@ def add_SimLinkServicer_to_server(servicer, server):
                     request_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
                     response_serializer=robot__service_dot_simlink__pb2.ClockResponse.SerializeToString,
             ),
+            'ListTrue': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListTrue,
+                    request_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+                    response_serializer=robot__service_dot_robot__service__pb2.TrueObjects.SerializeToString,
+            ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
             'robot.simlink.v1.SimLink', rpc_method_handlers)
@@ -199,7 +218,7 @@ class SimLink:
             target,
             '/robot.simlink.v1.SimLink/Spawn',
             robot__service_dot_simlink__pb2.SpawnRequest.SerializeToString,
-            google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+            robot__service_dot_simlink__pb2.SpawnResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -225,7 +244,7 @@ class SimLink:
             request,
             target,
             '/robot.simlink.v1.SimLink/Delete',
-            robot__service_dot_simlink__pb2.NameRequest.SerializeToString,
+            robot__service_dot_simlink__pb2.IdRequest.SerializeToString,
             google_dot_protobuf_dot_empty__pb2.Empty.FromString,
             options,
             channel_credentials,
@@ -389,6 +408,33 @@ class SimLink:
             '/robot.simlink.v1.SimLink/GetClock',
             google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
             robot__service_dot_simlink__pb2.ClockResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListTrue(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/robot.simlink.v1.SimLink/ListTrue',
+            google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+            robot__service_dot_robot__service__pb2.TrueObjects.FromString,
             options,
             channel_credentials,
             insecure,

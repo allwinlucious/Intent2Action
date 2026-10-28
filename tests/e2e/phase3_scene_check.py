@@ -9,6 +9,7 @@ SimLink, CameraService and ICON over gRPC from WSL. Stops the container and
 Isaac at the end.
 """
 
+import re
 import subprocess
 import sys
 import time
@@ -36,6 +37,7 @@ ISAAC_LOG = harness.LOG_DIR / "phase3_scene_isaac.log"
 CONTAINER_LOG = harness.LOG_DIR / "phase3_scene_container.log"
 RESTARTED_CONTAINER_LOG = harness.LOG_DIR / "phase3_scene_container_restarted.log"
 SIMLINK_PORT, CAMERA_PORT = 18101, 18005
+ID = re.compile(r"obj_\d{2}")
 WORLDS = ("sim_world", "world")
 DEFAULT_OBJECTS = tuple(
     yaml.safe_load((harness.ROOT / "sim/scenes/default.yaml").read_text())[
@@ -46,7 +48,6 @@ ROBOT_OBJECTS = ("franka", "franka_hand")
 CAMERA_OBJECT = "d455"
 POSITION_TOLERANCE_M = 0.005
 SYNC_TIMEOUT_S = 60
-EXTRA = "extra_cube"
 # A free spot on the table (as phase2_peer_io.py).
 EXTRA_POSE = robot_service_pb2.Pose(x=0.30, y=-0.30, z=0.0, qw=1.0)
 APPEAR_S = 5.0
@@ -77,24 +78,33 @@ def _camera(method: str, request, timeout: float = 30):
     )
 
 
-def _objects(world_id: str) -> dict[str, list]:
-  """Name -> objects with that name (FULL view), without root."""
+def _prim(o) -> str:
+  """scene_sync's objects: their Isaac prim (user_data "prim"); the robot and the camera: their name."""
+  if "prim" not in o.object_component.user_data:
+    return o.name
+  value = wrappers_pb2.StringValue()
+  o.object_component.user_data["prim"].Unpack(value)
+  return value.value
+
+
+def _objects(world_id: str, key=_prim) -> dict[str, list]:
+  """Prim (or key(o)) -> objects with it (FULL view), without root."""
   found = {}
   for o in p1._world(
       "ListObjects",
       world_pb.ListObjectsRequest(world_id=world_id, view=updates_pb.FULL),
   ).objects:
     if o.name != "root":
-      found.setdefault(o.name, []).append(o)
+      found.setdefault(key(o), []).append(o)
   return found
 
 
-def _wait_objects(names, present: bool, timeout_s: float) -> float:
-  """Seconds until every name is present (or absent) in both worlds."""
+def _wait_objects(names, present: bool, timeout_s: float, key=_prim) -> float:
+  """Seconds until every prim (or key(o)) is present (or absent) in both worlds."""
   start = time.monotonic()
   while True:
     try:
-      worlds = [_objects(w) for w in WORLDS]
+      worlds = [_objects(w, key) for w in WORLDS]
       if all((n in objects) == present for objects in worlds for n in names):
         return time.monotonic() - start
     except grpc.RpcError:
@@ -134,26 +144,35 @@ def check_objects() -> str:
       p = o.object_component.parent_t_this.position
       error = float(np.linalg.norm(np.array([p.x, p.y, p.z]) - truth[name][:3]))
       worst = max(worst, error)
-      ok &= o.parent.name == "root" and _source(o) == "ground_truth"
+      ok &= o.parent.name == "root" and _source(o) == "ground_truth" and bool(ID.fullmatch(o.name))
     ok &= worst <= POSITION_TOLERANCE_M
-    details.append(f"{w}: worst {worst * 1e3:.2f} mm, sources ground_truth")
+    details.append(f"{w}: worst {worst * 1e3:.2f} mm, sources ground_truth, named"
+                   f" {sorted(objects[n][0].name for n in DEFAULT_OBJECTS)}")
   if not ok:
     raise RuntimeError("; ".join(details))
   return "; ".join(details)
 
 
+def _name(o) -> str:
+  return o.name
+
+
 def check_spawn() -> str:
-  _simlink(
-      "Spawn",
-      simlink_pb2.SpawnRequest(catalog="red_cube", name=EXTRA, pose=EXTRA_POSE),
-  )
-  appeared = _wait_objects([EXTRA], True, APPEAR_S)
-  _simlink("Delete", simlink_pb2.NameRequest(name=EXTRA))
-  gone = _wait_objects([EXTRA], False, GONE_TIMEOUT_S)
+  extra = _simlink(
+      "Spawn", simlink_pb2.SpawnRequest(catalog="red_cube", pose=EXTRA_POSE)
+  ).id
+  appeared = _wait_objects([extra], True, APPEAR_S, key=_name)
+  _simlink("Delete", simlink_pb2.IdRequest(id=extra))
+  gone = _wait_objects([extra], False, GONE_TIMEOUT_S, key=_name)
   return (
-      f"{EXTRA} in both worlds {appeared:.1f} s after Spawn, gone"
-      f" {gone:.1f} s after Delete"
+      f"second red_cube {extra} in both worlds {appeared:.1f} s after Spawn,"
+      f" gone {gone:.1f} s after Delete"
   )
+
+
+def _ids() -> dict[str, str]:
+  """Prim -> ID from SimLink.ListTrue."""
+  return {o.prim: o.id for o in _simlink("ListTrue", empty_pb2.Empty()).objects}
 
 
 def check_joints() -> str:
@@ -268,6 +287,7 @@ def _object_ids() -> dict[tuple[str, str], set[str]]:
 
 def check_restart() -> str:
   before = _object_ids()
+  ids_before = _ids()
   subprocess.run(
       harness.docker("docker restart intrinsic"), check=True, capture_output=True
   )
@@ -294,10 +314,14 @@ def check_restart() -> str:
   wanted = {w: want for w in WORLDS} | {"world": want | {CAMERA_OBJECT: 1}}
   if counts != wanted:
     raise RuntimeError(f"object counts after restart: {counts}")
+  ids_after = _ids()
+  if ids_after != ids_before:
+    raise RuntimeError(f"ids changed by the restart: {ids_before} -> {ids_after}")
   return (
       f"objects re-created {time.monotonic() - start - RESTART_SETTLE_S:.0f} s"
       " after docker restart;"
-      f" exactly one of each in both worlds: {sorted(want)} (and {CAMERA_OBJECT} in world)"
+      f" exactly one of each in both worlds: {sorted(want)} (and {CAMERA_OBJECT} in world);"
+      f" ids kept {ids_after}"
   )
 
 

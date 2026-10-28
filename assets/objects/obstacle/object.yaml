@@ -1,8 +1,10 @@
+category: box
 collision: none
 color:
 - 0.5
 - 0.5
 - 0.5
+color_name: grey
 dims:
 - 0.1
 - 0.1

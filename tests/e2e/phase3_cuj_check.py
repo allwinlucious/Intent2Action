@@ -11,6 +11,7 @@ and Isaac at the end.
 """
 
 import math
+import re
 import struct
 import subprocess
 import sys
@@ -71,6 +72,12 @@ UNREACHABLE = api.Pose(x=2.0, y=0.0, z=0.5, qw=1.0)
 _channel = grpc.insecure_channel(ADDRESS)  # default 4 MB receive limit (GetPointCloud must fit)
 _robot = api_grpc.RobotServiceStub(_channel)
 _sim = api_grpc.SimServiceStub(_channel)
+ID = re.compile(r"obj_\d{2}")
+
+
+def ids(sim) -> dict[str, str]:
+  """Isaac prim name -> object ID (SimService.ListTrueObjects); IDs change on every reset (phase_ids.md)."""
+  return {o.prim: o.id for o in sim.ListTrueObjects(EMPTY, timeout=CALL_TIMEOUT_S).objects}
 
 
 def _call(stub, method: str, request=EMPTY):
@@ -312,19 +319,20 @@ def check_cuj7() -> str:
 
 def check_grasp() -> str:
   down = _down()
-  cube = {o.name: o for o in _call(_robot, "ListObjects").objects}[CUBE].pose
+  cube_id = ids(_sim)[CUBE]
+  cube = {o.id: o for o in _call(_robot, "ListObjects").objects}[cube_id].pose
   centre = _at(down, cube.x, cube.y, cube.z + CUBE_HALF_M)
   _move("MoveToPose", pose=_at(down, cube.x, cube.y, centre.z + PREGRASP_UP_M))
   _move("MoveToPose", pose=centre, motion=api.LINEAR)
   grasped = _gripper("Grasp")
   if not grasped.gripping:
     raise RuntimeError(f"Grasp: width {grasped.width:.4f} m, not gripping")
-  _call(_robot, "AttachObject", api.ObjectRequest(name=CUBE))
-  z0 = _true_z(CUBE)
+  _call(_robot, "AttachObject", api.ObjectRequest(id=cube_id))
+  z0 = _true_z(cube_id)
   _move("MoveToPose", pose=_at(centre, centre.x, centre.y, centre.z + LIFT_M), motion=api.LINEAR)
-  rose = _true_z(CUBE) - z0
+  rose = _true_z(cube_id) - z0
   _gripper("Release")
-  _call(_robot, "DetachObject", api.ObjectRequest(name=CUBE))
+  _call(_robot, "DetachObject", api.ObjectRequest(id=cube_id))
   _move("Home")
   if rose < LIFT_MIN_M:
     raise RuntimeError(f"cube rose {rose * 1e3:.1f} mm on a {LIFT_M * 1e3:.0f} mm lift")
@@ -335,7 +343,7 @@ def check_obstacle() -> str:
   down = _down()
   a, b = (_at(down, OBSTACLE_POSE.x, y, OBSTACLE_Z) for y in OBSTACLE_SIDES_Y)
   _move("MoveToPose", pose=a)
-  _call(_sim, "AddObject", api.AddObjectRequest(catalog=OBSTACLE, name=OBSTACLE, pose=OBSTACLE_POSE))
+  obstacle = _call(_sim, "AddObject", api.AddObjectRequest(catalog=OBSTACLE, pose=OBSTACLE_POSE)).id
   try:
     blocked = _call(
         _robot, "CheckCollisions",
@@ -364,7 +372,7 @@ def check_obstacle() -> str:
     _done(operation, api.MotionResult)
   finally:
     _call(_robot, "Stop")
-    _call(_sim, "RemoveObject", api.ObjectRequest(name=OBSTACLE))
+    _call(_sim, "RemoveObject", api.ObjectRequest(id=obstacle))
   _move("Home")
   if colliding:
     raise RuntimeError(f"{len(colliding)}/{PATH_SAMPLES} path samples in collision: {colliding[:3]}")
@@ -422,10 +430,12 @@ def check_misc() -> str:
   details.append("ResetScene ok")
   objects = _call(_robot, "ListObjects").objects
   sources = {o.source for o in objects}
-  names = {o.name for o in objects}
-  if sources != {"ground_truth"} or not set(scene.DEFAULT_OBJECTS) <= names:
-    raise RuntimeError(f"ListObjects: {sorted(names)} sources {sources}")
-  details.append(f"ListObjects {sorted(names)} ground_truth")
+  listed = {o.id for o in objects}
+  defaults = {prim: i for prim, i in ids(_sim).items() if prim in scene.DEFAULT_OBJECTS}
+  if (sources != {"ground_truth"} or not all(ID.fullmatch(i) for i in listed)
+      or set(defaults) != set(scene.DEFAULT_OBJECTS) or not set(defaults.values()) <= listed):
+    raise RuntimeError(f"ListObjects: {sorted(listed)} sources {sources}; default prims -> {defaults}")
+  details.append(f"ListObjects {sorted(listed)} ground_truth, default prims -> {defaults}")
   for kind, want in ((api.RGB, (8, 2)), (api.DEPTH, (16, 0))):
     image = _call(_robot, "GetImage", api.GetImageRequest(kind=kind))
     decoded = _png(image.png)

@@ -81,7 +81,9 @@ def _describe(error: tuple[float, float]) -> str:
 
 
 def _restart() -> float:
-  """docker restart intrinsic; seconds until robot_service is enabled again."""
+  """docker restart intrinsic; seconds until robot_service is enabled again. The object IDs must be kept
+  (phase_ids.md Addendum A.5)."""
+  ids = cuj.ids(cuj._sim)
   start = time.monotonic()
   subprocess.run(harness.docker("docker restart intrinsic"), check=True, capture_output=True)
   p1._wait_for_ports()
@@ -90,6 +92,8 @@ def _restart() -> float:
   took = time.monotonic() - start
   if took > RESTART_TIMEOUT_S:
     raise RuntimeError(f"robot_service enabled {took:.0f} s after docker restart (limit {RESTART_TIMEOUT_S} s)")
+  if (after := cuj.ids(cuj._sim)) != ids:
+    raise RuntimeError(f"object ids changed by docker restart: {ids} -> {after}")
   return took
 
 

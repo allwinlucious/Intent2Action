@@ -22,6 +22,7 @@ import numpy as np
 from robot_service import robot_service_pb2 as api
 import yaml
 
+from robot import unknown_object
 from robot.motion import pose_matrix
 from robot.ops import ApiError
 
@@ -208,10 +209,11 @@ class GraspPlanner:
     threading.Thread(target=executor.spin, daemon=True).start()
 
   def plan_grasp(self, world, name: str, check: Callable[[list[float]], tuple[bool, str]]) -> api.PlanGraspResponse:
-    """Decision 6 steps 1-7; `world` is robot_service's World, `check` Intrinsic's CheckCollisions (Addendum B.2)."""
+    """Decision 6 steps 1-7; `world` is robot_service's World, `name` an object ID, `check` Intrinsic's
+    CheckCollisions (Addendum B.2)."""
     catalog = object_catalog(world.get(name))
-    if catalog is None:
-      raise ApiError(grpc.StatusCode.NOT_FOUND, f"object {name!r} in world has no catalog entry (user_data {CATALOG_KEY!r})")
+    if catalog is None:  # the robot or the camera: not a catalog object
+      raise unknown_object(name)
     dims = catalog_dims(catalog)
     require_graspable(dims)
     with self.lock:

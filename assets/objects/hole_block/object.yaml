@@ -1,8 +1,10 @@
+category: block_with_hole
 collision: none
 color:
 - 0.3
 - 0.3
 - 0.3
+color_name: grey
 dims:
 - 0.08
 - 0.08
