@@ -32,6 +32,14 @@ Every run is scored automatically:
 | **Recovery rate** | after an error, does the next call fix it? |
 | **Stage-1 call validity** | offline benchmark (no sim): given a situation and an intent, does the produced call succeed? Used to detect forgetting |
 
+## Object identity (owner decision D10)
+
+All tasks and training data use perception-style objects: neutral IDs
+(`obj_<n>`, random per episode) with attributes (class, colour, size, pose),
+plus `find_objects(query)`. Prompts describe objects ("the red cube"); the
+model must ground them to IDs itself. This needs the API change below (a
+new phase before L0).
+
 ## The building blocks
 
 ### 1. Physics-only sim (no rendering, no vision)
@@ -172,6 +180,7 @@ memory.
 
 | # | What | Needs sim? | Done when |
 |---|---|---|---|
+| L−1 | API change for D10: `list_objects` returns IDs + attributes, `find_objects(query)`, scene_sync assigns random IDs in sim; all checks updated | yes | phase 3–6 checks pass with IDs |
 | L0 | Physics-only mode, MCP vision filter, agent loop + recorder, task suite + checkers, the frontier model reference run | yes | the frontier model scores on the held-out suite; GPU use measured |
 | L1 | **A: raw Qwen3 8B** | yes | metrics for A |
 | L2 | Dry-run backend + call generator + stage-1 dataset and benchmark | no | ~20 000 recorded calls; benchmark scores for A and the frontier model |

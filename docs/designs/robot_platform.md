@@ -152,6 +152,8 @@ connect them to Isaac Sim over ROS 2, and put one gRPC API
 | D7 | 2026-10-27 | Isaac I/O only through the ROS 2 bridge's own components; script `rclpy` only where the bridge has none (listed in phase 2) | One integration surface in Isaac; nothing custom serving data from the simulator |
 | D8 | 2026-10-27 | No depth noise model: depth stays clean unless a prebuilt noise model becomes available | Isaac's prebuilt D455 sensor is unusable (phase 2), and a hand-written model is not wanted |
 | D9 | 2026-10-27 | Perception uses Intrinsic's current pose-estimation path (`nvidia_pose_estimator`: SAM 3 + FoundationStereo + FoundationPose on TensorRT), not the older `ioc_pose_estimator` + Triton | Current upstream path; FoundationPose weights under the NVIDIA Open Model License (commercial use); the older path's weights are under a restrictive EULA and the path is deprecated (phase 5 inventory) |
+| D10 | 2026-10-28 | Objects are identified by **neutral IDs assigned by perception** (`obj_<n>`) with attributes (class, colour, size, pose), never by hand-given names. The sim fills the same format from ground truth with random IDs per episode; `find_objects(query)` resolves a description to IDs (ground truth in sim, SAM 3 + pose estimator on real data). IDs persist while an object stays in place (re-identification) | A real robot sees arbitrary objects; models trained in sim must face the same interface |
+
 
 ## Open Questions
 
