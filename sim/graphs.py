@@ -178,7 +178,7 @@ class Graphs:
 
     # Evaluated once here: that creates the writers, which then publish on
     # every render() (Inv §3.4, §4.5).
-    self.camera = _graph(
+    self.camera = None if render_product is None else _graph(
         "camera",
         [
             ("Rgb", f"{BRIDGE}.ROS2CameraHelper"),
@@ -208,7 +208,8 @@ class Graphs:
         ],
         evaluator="push",
     )
-    og.Controller.evaluate_sync(self.camera)
+    if self.camera is not None:
+      og.Controller.evaluate_sync(self.camera)
 
     # Subscribers create their output attributes when they first compute
     # (Inv §6.1). Publishers in graphs evaluated every cycle need no warm-up;
@@ -313,6 +314,8 @@ class Graphs:
 
   def set_image_publishing(self, enabled: bool) -> None:
     """Whether the next render() publishes /camera/rgb and /camera/depth."""
+    if self._render_product is None:
+      return
     for gate in IMAGE_GATES:
       omni.syntheticdata.SyntheticData.Get().set_node_attributes(
           gate, {"inputs:step": int(enabled)}, self._render_product

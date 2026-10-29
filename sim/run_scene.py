@@ -15,6 +15,9 @@ REPO = r"C:\isaac-sim-work\repo"
 # --gui: open the viewer window, render ~30 fps and save viewer frames to
 # GUI_FRAMES (for demo videos). Slower than headless; not used by the checks.
 GUI = "--gui" in sys.argv
+# --physics-only: no camera, no image graphs, a tiny render target and no AA: Isaac leaves the GPU to a
+# model (the images and the vision tools are unavailable).
+PHYSICS_ONLY = "--physics-only" in sys.argv
 GUI_FRAMES = r"C:\isaac-sim-work\viewer_frames"
 GUI_RENDER_PERIOD_S = 1 / 30
 GUI_FRAME_PERIOD_S = 0.2
@@ -37,7 +40,8 @@ simulation_app = SimulationApp(
         # upscaling smears the ChArUco markers (phase_4.md, Addendum A).
         # SimulationApp sets this setting from its config after start-up, so
         # it cannot go in extra_args.
-        "anti_aliasing": 4,
+        "anti_aliasing": 0 if PHYSICS_ONLY else 4,
+        **({"width": 64, "height": 64} if PHYSICS_ONLY else {}),
         "extra_args": [
             "--/app/vulkan=false",
             "--/app/asyncRendering=0",
@@ -116,7 +120,7 @@ class Scene:
     )
     self.stage = omni.usd.get_context().get_stage()
     self.camera = scene_lib.build(
-        self.stage, self.scene, get_assets_root_path()
+        self.stage, self.scene, get_assets_root_path(), camera=not PHYSICS_ONLY
     )
     while is_stage_loading():
       simulation_app.update()
@@ -133,13 +137,15 @@ class Scene:
     self.hand_rot = quat_to_matrix(rot1.GetReal(), *rot1.GetImaginary())
     self.hand_pos = np.array(joint.GetLocalPos1Attr().Get(), dtype=float)
     print(f"panda_hand_joint localPos1 {self.hand_pos.tolist()}", flush=True)
-    print(
-        f"camera intrinsics {self.camera.get_intrinsics_matrix().tolist()}",
-        flush=True,
-    )
+    if self.camera is not None:
+      print(
+          f"camera intrinsics {self.camera.get_intrinsics_matrix().tolist()}",
+          flush=True,
+      )
 
     self.graphs = graphs_lib.Graphs(
-        scene_lib.ROBOT_PRIM, self.camera.get_render_product_path()
+        scene_lib.ROBOT_PRIM,
+        None if self.camera is None else self.camera.get_render_product_path(),
     )
     # The first render activates the Camera Helper writers and their image
     # gates; from then on images are published only on request (the second
