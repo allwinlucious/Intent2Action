@@ -303,7 +303,7 @@ on failure, logged as today):
     It writes the events (with attributes: colour, shape, size) and the intent rule in the schema above.
     SAM tells it *what moved where*; the VLM explains *why* (the rule).
 *   **Muse Spark Open** (hosted, through its API) is the comparison model for reading demos, and the
-    teacher that produces whole-task executor episodes (kept only when the rule checker passes).
+    teacher that writes programs and recoveries (kept only when they run correctly in the sim).
 
 ### Synthetic demo videos (Isaac; fallback)
 
@@ -312,12 +312,12 @@ Built only if the real-clip results of the SAM + VLM path are too weak to train 
 *   A **kinematic human hand** (a rigged hand mesh) does the demo in a random scene: reach, close, carry the
     object along a natural path, open, leave the frame. The object is attached to the hand while carried;
     no physics grasp is needed.
-*   **Rendered from the robot's D455 camera** (rendering is on here; physics-only mode stays for executor
+*   **Rendered from the robot's D455 camera** (rendering is on here; physics-only mode stays for program
     runs). The video is downsampled to the model's frame rate, about 1–2 frames per second plus the first
     and last frame.
 *   **Randomised:** layouts, object sets and counts, distractors, lighting, table texture, hand skin tone
     and size, speed, order, camera pose (±5 cm, ±5°).
-*   **Labelled automatically** from the sim: the events, the intent, and the executor's program for the new
+*   **Labelled automatically** from the sim: the events, the intent, and the program for the new
     scene.
 *   **Size:** a few thousand clips. Generation runs unattended in the sim windows (`learn/supervisor.py`).
 
@@ -350,7 +350,7 @@ They are used only for evaluation, plus a small fine-tuning split if needed.
     the 3080 or Kaggle's 2× T4 at 4-bit (for example a Qwen VL model of 4–8B).
     *   First zero-shot on the real clips (the baseline).
     *   Then SFT on synthetic demos.
-*   **Executor:** the text model from the learning run, retrained with the new data.
+*   **Program writing and recovery:** the text model from the selection study, retrained on the new data.
 *   **Final:** Glimmer for both steps in the cloud with the recipe's settings (LoRA/QLoRA SFT, then
     episode-level GRPO with the rule checker as reward), on H100s.
 
