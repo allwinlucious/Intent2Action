@@ -87,14 +87,21 @@ The result must be *reliable*:
 
 ## Owner Decisions
 
-*   **D11 (proposed):** two steps with a typed intent in between (video → events + intent → API calls),
-    instead of one model going from video straight to tool calls. Both steps can be the same model with
-    two prompts. See Alternative A.
+*   **D11 (owner, 2026-10-29):** one VLM does the whole job, in order:
+    1.  It captures the intent from the video as events plus a typed rule, shown to the user.
+    2.  It turns the intent into API calls in the new scene.
+    3.  It watches every reply and recovers from failures.
+    4.  It verifies the result before reporting.
+
+    The typed intent sits between steps 1 and 2 (see Alternative A for the one-step variant).
 *   **D12 (owner, 2026-10-29):** object-level calls `Pick(object_id)` and `Place(object_id, target_id)` in
     the API, backed by the grasp planner, the motion planner and a new place planner. The model says *what*
     and *where* ("pick obj_12", "place obj_12 in box obj_07"); the planners compute *how*. This removes the
     pose arithmetic that caused most whole-task failures in the learning run.
     *   The low-level calls stay for fine control and special cases: contact moves, insertion, jogging.
+    *   `pick` and `place` make one planned attempt and never retry or improvise. On failure they return a
+        clear reason, and every recovery decision belongs to the VLM, which can only learn recovery if it
+        sees the failures.
     *   This **changes D4** ("no executive, skills or behaviour trees"). There is still no executive and
         there are no behaviour trees, and the model still sequences the calls. `pick` and `place` are the
         only composite calls, implemented in plain code in `robot_service`.
