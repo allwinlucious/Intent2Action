@@ -232,7 +232,21 @@ The whole-task data comes from two sources:
     randomly injected failures and their recoveries.
 *   **A strong hosted model as teacher**, keeping only episodes the rule checker passes.
 
-### Synthetic demo videos (Isaac)
+### Reading a demo video (SAM 3.1 + VLM)
+
+*   **SAM 3.1** (through its model API) segments and tracks every object across the clip. Prompting it with
+    the catalog's object words ("cube", "box", "cylinder") gives a mask track per object. Each object's
+    start and end position, and whether it ended inside a box's mask, give candidate **events** directly
+    from pixels.
+*   **The VLM (Glimmer)** gets selected frames with the masks drawn and numbered, plus the track summary.
+    It writes the events (with attributes: colour, shape, size) and the intent rule in the schema above.
+    SAM tells it *what moved where*; the VLM explains *why* (the rule).
+*   **Muse Spark Open** (hosted, through its API) is the comparison model for reading demos, and the
+    teacher that produces whole-task executor episodes (kept only when the rule checker passes).
+
+### Synthetic demo videos (Isaac; fallback)
+
+Built only if the real-clip results of the SAM + VLM path are too weak to train on (decided after V0).
 
 *   A **kinematic human hand** (a rigged hand mesh) does the demo in a random scene: reach, close, carry the
     object along a natural path, open, leave the frame. The object is attached to the hand while carried;
@@ -298,12 +312,13 @@ They are used only for evaluation, plus a small fine-tuning split if needed.
 | V1 | `Pick` and `Place` (place planner included) in `robot_service`, the proto and MCP; open boxes in the catalog ([phases/phase_v1.md](phases/phase_v1.md)) | — | pick → place into a box ≥ 9/10, a box filled 4/4, stacking ≥ 4/5, error checks |
 | V1b | The owner's real object kinds (shapes, sizes) in the catalog, size classes, the rule checker | V1, Open Question 1 | rule checker verified on every task family |
 | V2 | Executor: intent schema, rule-following expert with failure injection and recovery, reasoning lines, final verify; SFT; sim eval on the task families | V1 | executor success and reliability metrics in the sim |
-| V3 | Synthetic demo videos: hand asset and animation, renderer, randomisation, labels | V1 | a few thousand labelled clips, spot-checked |
+| V3 | Demo reading: SAM 3.1 tracking → events; VLM → events + intent (schema, prompts); synthetic hand videos only if V0 shows they are needed | V0 | event and intent accuracy on the owner's clips |
 | V4 | Video → events + intent: SFT of the small VLM on synthetic clips (+ Something-Something if licensed); eval on held-out synthetic and real clips | V0, V3 | intent accuracy, sim-to-real gap |
 | V5 | End to end, plus the confirmation and ask-when-unclear flow (CUJ 2, 3) | V2, V4 | end-to-end scores |
 | V6 | Glimmer in the cloud, both steps, recipe SFT, then GRPO on whole episodes | V5 | Glimmer scores on all metrics |
+| V7 | Demo UI: one screen with the demo clip + SAM masks, events and rule, a confirm step, the live Isaac viewer, the live call log (failures and recoveries highlighted) and the final verified checklist; recording of the 3-minute video | V5 | a full run recorded end to end from the UI |
 
-V0, V1 and V3 can run in parallel; V2 needs V1.
+V0 and V1 run in parallel; V2 needs V1; V3 needs the clips from V0; V7 starts with V2 and is finished last.
 
 ## Risks and Mitigations
 
