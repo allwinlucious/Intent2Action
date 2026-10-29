@@ -295,7 +295,8 @@ They are used only for evaluation, plus a small fine-tuning split if needed.
 | # | What | Needs | Done when |
 |---|---|---|---|
 | V0 | Owner films the clips; labels CSV; zero-shot baseline of a small VLM and of Glimmer (Glimmer 4-bit on Kaggle 2× T4 for inference) on events and intent | the clips | baseline scores for both models |
-| V1 | Catalog (boxes, shapes, sizes), size classes, rule checker; `Pick` and `Place` (place planner included) in `robot_service`, the proto and MCP; checks updated | — | `pick`/`place` checks pass (e.g. ≥ 9/10 per object kind into a box), rule checker verified |
+| V1 | `Pick` and `Place` (place planner included) in `robot_service`, the proto and MCP; open boxes in the catalog ([phases/phase_v1.md](phases/phase_v1.md)) | — | pick → place into a box ≥ 9/10, a box filled 4/4, stacking ≥ 4/5, error checks |
+| V1b | The owner's real object kinds (shapes, sizes) in the catalog, size classes, the rule checker | V1, Open Question 1 | rule checker verified on every task family |
 | V2 | Executor: intent schema, rule-following expert with failure injection and recovery, reasoning lines, final verify; SFT; sim eval on the task families | V1 | executor success and reliability metrics in the sim |
 | V3 | Synthetic demo videos: hand asset and animation, renderer, randomisation, labels | V1 | a few thousand labelled clips, spot-checked |
 | V4 | Video → events + intent: SFT of the small VLM on synthetic clips (+ Something-Something if licensed); eval on held-out synthetic and real clips | V0, V3 | intent accuracy, sim-to-real gap |
