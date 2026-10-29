@@ -8,5 +8,5 @@ ros_ws/src/franka_grasp_config/meshes/
 shots/
 __pycache__/
 *.pyc
-.venv-ml/
+.venv-ml
 runs/
