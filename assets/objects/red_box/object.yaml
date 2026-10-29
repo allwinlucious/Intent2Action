@@ -1,0 +1,16 @@
+category: box
+collision: none
+color:
+- 0.8
+- 0.15
+- 0.15
+color_name: red
+container:
+  floor: 0.01
+  wall: 0.01
+dims:
+- 0.25
+- 0.21
+- 0.08
+mass: null
+static: true

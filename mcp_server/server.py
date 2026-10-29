@@ -57,13 +57,15 @@ quaternion (qx, qy, qz, qw). Frames: the robot base frame is the world frame (z 
 The TCP (tool centre point, the default `tool`) is between the fingertips; FLANGE is the robot flange. \
 Object poses from list_objects / detect_objects are the objects' bottom centres. Objects are identified only \
 by an `id` (e.g. obj_42) with category, color, size and pose; ids change after a scene reset.
-Long-running calls (motions, grasp, release, calibrate_camera, detect_objects) take `wait`: true (the \
-default) blocks up to 60 s and returns the operation, false returns at once; then poll with get_operation \
-or block with wait_operation. A returned operation has `done`, `state` and, on failure, `error`.
-Typical pick and place: list_objects, choose the id whose category, color, size and pose match the request, \
-then plan_grasp(object_id) -> move_to_pose to the pregrasp -> move_to_pose to the grasp with motion LINEAR -> \
-grasp -> attach_object(id) -> move_to_pose up (LINEAR) -> move_to_pose above the place position -> lower \
-(LINEAR) -> release -> detach_object(id) -> move up.
+Long-running calls (motions, pick, place, grasp, release, calibrate_camera, detect_objects) take `wait`: \
+true (the default) blocks up to 60 s and returns the operation, false returns at once; then poll with \
+get_operation or block with wait_operation. A returned operation has `done`, `state` and, on failure, `error`.
+Typical pick and place: list_objects, choose the ids whose category, color, size and pose match the \
+request, then pick(object_id) -> place(object_id, target_id) (a target with category box: put inside; \
+any other object: on top) -> list_objects to check the result. pick and place make one attempt; if one \
+fails, read its error and decide what to do (e.g. after "closed on nothing", call release, then pick \
+again). Objects inside a box cannot be picked again in this version. The low-level calls (plan_grasp, \
+move_to_pose, grasp, release, attach_object, detach_object) remain for special cases.
 After a fault (get_state shows faulted), call clear_faults before moving again."""
 
 log = logging.getLogger("mcp_server")

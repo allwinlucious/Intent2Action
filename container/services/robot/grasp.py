@@ -67,6 +67,11 @@ def _catalog_entry(catalog: str, catalog_dir: Path) -> tuple[Path, dict]:
   return path, yaml.safe_load(path.read_text())
 
 
+def catalog_entry(catalog: str, catalog_dir: Path = CATALOG_DIR) -> dict:
+  """The catalog's object.yaml."""
+  return _catalog_entry(catalog, catalog_dir)[1]
+
+
 def catalog_dims(catalog: str, catalog_dir: Path = CATALOG_DIR) -> np.ndarray:
   """Bounding box [x, y, z] (m) from the catalog's object.yaml."""
   path, entry = _catalog_entry(catalog, catalog_dir)

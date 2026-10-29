@@ -52,6 +52,12 @@ def test_names_and_tool_set(tools):
     assert tool.description and tool.input_schema["type"] == "object"
 
 
+def test_pick_and_place_tools(tools):
+  assert "object_id" in tools.by_name["pick"][2].input_schema["properties"]
+  place = tools.by_name["place"][2].input_schema["properties"]
+  assert "object_id" in place and "target_id" in place
+
+
 def test_move_to_pose_schema(tools):
   schema = tools.by_name["move_to_pose"][2].input_schema
   pose = schema["properties"]["pose"]

@@ -3,7 +3,7 @@
 For each object: assets/objects/<name>/mesh.glb (metres, Z up, origin at the
 bottom centre, except calib_board: box centre, as Isaac's board prim) and
 object.yaml (static, mass, color, collision, dims, category, color_name; origin: center if centred;
-friction_static/friction_dynamic where not the default).
+friction_static/friction_dynamic where not the default; container: wall and floor of the open boxes).
 sim/tools/build_catalog.py turns them into model.usd. Dev-time only:
   .venv/bin/python tools/build_catalog_meshes.py
 """
@@ -40,6 +40,13 @@ def _hole_block() -> trimesh.Trimesh:
   return trimesh.boolean.difference([block, hole], engine="manifold")
 
 
+def _open_box(x: float, y: float, z: float, wall: float, floor: float) -> trimesh.Trimesh:
+  # The inner box reaches past the top, so the box is open and the mesh stays watertight.
+  inner = _box(x - 2 * wall, y - 2 * wall, z)
+  inner.apply_translation((0.0, 0.0, floor))
+  return trimesh.boolean.difference([_box(x, y, z), inner], engine="manifold")
+
+
 # name: (mesh, static, mass kg, colour RGB)
 OBJECTS = {
     "table": (_box(1.2, 0.8, 0.75), True, None, (0.55, 0.45, 0.35)),
@@ -54,6 +61,9 @@ OBJECTS = {
     # origin at the box centre like its prim, so /tf poses match).
     "calib_board": (trimesh.creation.box(extents=(0.28, 0.20, 0.005)), False, 0.2, (1.0, 1.0, 1.0)),
     "obstacle": (_box(0.1, 0.1, 0.5), True, None, (0.5, 0.5, 0.5)),
+    # Static: Isaac uses the exact triangle mesh, so the walls collide and the inside is free.
+    "red_box": (_open_box(0.25, 0.21, 0.08, 0.01, 0.01), True, None, (0.8, 0.15, 0.15)),
+    "blue_box": (_open_box(0.25, 0.21, 0.08, 0.01, 0.01), True, None, (0.15, 0.25, 0.8)),
 }
 # name: (category, colour word), the attributes list_objects reports (phase_ids.md decision 3).
 ATTRIBUTES = {
@@ -65,12 +75,16 @@ ATTRIBUTES = {
     "plate": ("plate", "white"),
     "peg": ("peg", "blue"),
     "hole_block": ("block_with_hole", "grey"),
-    "obstacle": ("box", "grey"),
+    "obstacle": ("pillar", "grey"),
     "calib_board": ("calibration_board", "white"),
+    "red_box": ("box", "red"),
+    "blue_box": ("box", "blue"),
 }
 # Static/dynamic friction where not build_catalog.py's default 0.5/0.4: the peg
 # must slide on the block's face to the hole (phase_5b.md, Addendum B2).
 FRICTION = {"peg": (0.3, 0.25), "hole_block": (0.3, 0.25)}
+# name: (wall, floor) thickness (m) of the open boxes.
+CONTAINERS = {"red_box": (0.01, 0.01), "blue_box": (0.01, 0.01)}
 
 
 def main() -> int:
@@ -96,6 +110,10 @@ def main() -> int:
       description["origin"] = "center"
     if name in FRICTION:
       description["friction_static"], description["friction_dynamic"] = FRICTION[name]
+    if name in CONTAINERS:
+      # robot_service's place planner reads it.
+      wall, floor = CONTAINERS[name]
+      description["container"] = {"wall": wall, "floor": floor}
     (out / "object.yaml").write_text(yaml.safe_dump(description))
     bounds = trimesh.load(glb, force="mesh").bounds
     ok = np.allclose(bounds, mesh.bounds, atol=TOLERANCE_M, rtol=0)

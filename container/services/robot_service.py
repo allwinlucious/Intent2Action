@@ -54,6 +54,7 @@ from robot import calibration  # noqa: E402
 from robot import force  # noqa: E402
 from robot import grasp  # noqa: E402
 from robot import gripper  # noqa: E402
+from robot import place  # noqa: E402
 from robot import png  # noqa: E402
 from robot import unknown_object  # noqa: E402
 from robot.grasp import matrix_pose  # noqa: E402
@@ -120,6 +121,12 @@ SYNC_POLL_S = 0.02
 SYNC_TIMEOUT_S = 2.0
 # Planner codes that reject a calibration pose (unreachable, no plan); anything else fails the calibration.
 POSE_REJECTED_CODES = (grpc.StatusCode.ABORTED, grpc.StatusCode.NOT_FOUND, grpc.StatusCode.INVALID_ARGUMENT)
+# Pick and Place (phase_v1.md decision 6): one planned attempt each, no retries.
+PICK_LIFT_M = 0.10
+PLACE_CANDIDATES = 40
+OPEN_TOLERANCE_M = 0.005  # Pick opens the gripper first if it is narrower than its opening by more than this
+GRASP = simple_gripper_pb2.SimpleGripperFixedParams.GRASP
+RELEASE = simple_gripper_pb2.SimpleGripperFixedParams.RELEASE
 CLOCK_QOS = QoSProfile(
     reliability=ReliabilityPolicy.RELIABLE, history=HistoryPolicy.KEEP_LAST, depth=1,
     durability=DurabilityPolicy.VOLATILE,
@@ -480,13 +487,17 @@ class Robot:
       raise ApiError(code, message)
     self.ops.finish(op, api.MotionResult(final_joints=api.Joints(positions=q), duration_s=took), message)
 
+  def require_gripper_free(self) -> None:
+    """FAILED_PRECONDITION while a gripper operation runs; call with self.lock held."""
+    if self.gripper_op is not None and not self.gripper_op.worker_done.is_set():
+      raise ApiError(grpc.StatusCode.FAILED_PRECONDITION, f"another gripper call is running ({self.gripper_op.name})")
+
   def start_gripper(self, kind: str, command: int, resetting_ok: bool = False) -> Operation:
     self.icon.require_enabled()
     with self.lock:
       if self.resetting.is_set() and not resetting_ok:
         raise ApiError(grpc.StatusCode.FAILED_PRECONDITION, "ResetScene is in progress")
-      if self.gripper_op is not None and not self.gripper_op.worker_done.is_set():
-        raise ApiError(grpc.StatusCode.FAILED_PRECONDITION, f"another gripper call is running ({self.gripper_op.name})")
+      self.require_gripper_free()
       op = self.gripper_op = self.ops.create(kind, EXECUTING, f"{kind} started")
       self.last_grasp = command == simple_gripper_pb2.SimpleGripperFixedParams.GRASP
     self._worker(op, lambda op: self._run_gripper(op, command))
@@ -496,7 +507,14 @@ class Robot:
     return self.icon.status().part_status[GRIPPER].linear_gripper_state.sensed_width
 
   def _run_gripper(self, op: Operation, command: int) -> None:
+    width, holding, took = self.gripper_action(command, op.cancel)
+    self.ops.finish(op, api.GripperResult(width=width, gripping=holding),
+                    f"width {width * 1e3:.1f} mm after {took:.2f} s, gripping {holding}")
+
+  def gripper_action(self, command: int, cancel: threading.Event) -> tuple[float, bool, float]:
+    """Runs intrinsic.simple_gripper; returns (width, holding, sim seconds)."""
     grasp = command == simple_gripper_pb2.SimpleGripperFixedParams.GRASP
+    self.last_grasp = grasp
     state = {}
 
     def started() -> None:
@@ -511,11 +529,44 @@ class Robot:
 
     action = icon_actions.Action(1, "intrinsic.simple_gripper", GRIPPER,
                                  simple_gripper_pb2.SimpleGripperFixedParams(command=command))
-    self.icon.run_action([GRIPPER], action, complete, op.cancel, on_started=started)
+    self.icon.run_action([GRIPPER], action, complete, cancel, on_started=started)
     width = self.gripper_width()
-    holding = gripper.gripping(grasp, width)
-    self.ops.finish(op, api.GripperResult(width=width, gripping=holding),
-                    f"width {width * 1e3:.1f} mm after {self.clock.now() - state['start']:.2f} s, gripping {holding}")
+    return width, gripper.gripping(grasp, width), self.clock.now() - state["start"]
+
+  # ---- objects ----
+
+  def attach(self, object_id: str) -> None:
+    self.world.attach(object_id)
+    self.sim("SetAttached", simlink_pb2.SetAttachedRequest(id=object_id, attached=True))
+
+  def detach(self, object_id: str) -> None:
+    if self.world.get(object_id).parent.name != "root":
+      self.world.detach(object_id)
+    self.sim("SetAttached", simlink_pb2.SetAttachedRequest(id=object_id, attached=False))
+    if self.mirror_world:
+      self._wait_synced(object_id)
+
+  def _wait_synced(self, name: str) -> None:
+    """Waits until scene_sync (which skips attached objects) has moved `name` to its true pose."""
+    deadline = time.monotonic() + OBJECT_WAIT_S
+    while True:
+      true = self.sim("GetTruePose", simlink_pb2.TruePoseRequest(frame=name))
+      belief = self.world.pose(name)
+      error = math.dist((true.x, true.y, true.z), (belief.x, belief.y, belief.z))
+      if error <= SYNC_TOLERANCE_M:
+        return
+      if time.monotonic() > deadline:
+        raise ApiError(grpc.StatusCode.DEADLINE_EXCEEDED,
+                       f"{name!r} in world is {error * 1e3:.0f} mm from its true pose {OBJECT_WAIT_S:.0f} s after detaching")
+      time.sleep(0.05)
+
+  def held(self) -> list[str]:
+    """Scene objects attached to the robot."""
+    return [name for name in self.world.attached() if name not in NOT_SCENE_OBJECTS]
+
+  def move(self, op: Operation, pose: api.Pose, motion: int, detail: str) -> float:
+    """One TCP motion as part of `op`; returns the sim seconds taken."""
+    return self.execute(op, [segment(api.Waypoint(pose=pose, motion=motion), api.TCP)], detail=detail)[0]
 
   # ---- faults ----
 
@@ -847,6 +898,141 @@ class RobotService(api_grpc.RobotServiceServicer):
     require_scene_object(request.object_id)
     return self.r.grasps.plan_grasp(self.r.world, request.object_id, self.r.planner.check_collisions)
 
+  def _catalog(self, object_id: str) -> str:
+    """The object's catalog name (NOT_FOUND for an unknown id or a non-catalog object)."""
+    catalog = grasp.object_catalog(self.r.world.get(object_id))
+    if catalog is None:
+      raise unknown_object(object_id)
+    return catalog
+
+  def _require_gripper_free(self) -> None:
+    with self.r.lock:
+      self.r.require_gripper_free()
+
+  def _gripper(self, op: Operation, command: int) -> tuple[float, bool, float]:
+    """A gripper action inside the arm operation `op`; owning gripper_op rejects concurrent Grasp and Release RPCs."""
+    with self.r.lock:
+      if self.r.gripper_op is not op:  # a Grasp/Release RPC may have started since the pre-check
+        self.r.require_gripper_free()
+        self.r.gripper_op = op
+    return self.r.gripper_action(command, op.cancel)
+
+  def _feasible(self, pose: api.Pose) -> bool:
+    """A collision-free IK solution of the TCP pose; planner errors other than a rejected pose propagate."""
+    try:
+      q = self.r.planner.ik(pose, api.TCP, self.r.icon.arm_joints())
+      in_collision, debug = self.r.planner.check_collisions(q)
+    except ApiError as error:
+      if error.code not in POSE_REJECTED_CODES:
+        raise
+      log.info("place: pose rejected: %s %s", error.code.name, error.message)
+      return False
+    if in_collision:
+      log.info("place: pose rejected: IK solution in collision: %s", debug)
+    return not in_collision
+
+  def Pick(self, request, context):
+    object_id = request.object_id
+    require_scene_object(object_id)
+    self.r.world.get(object_id)
+    held = self.r.held()
+    if held:
+      raise ApiError(grpc.StatusCode.FAILED_PRECONDITION, f"already holding {', '.join(held)}; place or detach it first")
+    self._require_gripper_free()
+
+    def work(op: Operation) -> None:
+      start = self.r.clock.now()
+      try:
+        if self.r.gripper_width() < grasp.GRIPPER_OPENING_M - OPEN_TOLERANCE_M:
+          self.r.ops.update(op, EXECUTING, "opening the gripper")
+          self._gripper(op, RELEASE)
+        plan = self.r.grasps.plan_grasp(self.r.world, object_id, self.r.planner.check_collisions)
+        self.r.move(op, plan.pregrasp, api.ANY, "moving to the pre-grasp pose")
+        self.r.move(op, plan.grasp, api.LINEAR, "approaching the grasp pose")
+        width, holding, _ = self._gripper(op, GRASP)
+        if not holding:
+          raise ApiError(grpc.StatusCode.ABORTED,
+                         f"the gripper closed on nothing (width {width * 1e3:.1f} mm); the object may have moved; "
+                         "the gripper is still closed (call release before trying again)")
+        self.r.attach(object_id)
+        lift = api.Pose()
+        lift.CopyFrom(plan.grasp)
+        lift.z += PICK_LIFT_M
+        self.r.move(op, lift, api.LINEAR, "lifting")
+      except ApiError as error:
+        log.warning("pick object=%s target=%s status=%s duration_s=%.3f message=%s",
+                    object_id, "", error.code.name, self.r.clock.now() - start, error.message)
+        raise
+      took = self.r.clock.now() - start
+      message = f"picked {object_id} (width {width * 1e3:.1f} mm) in {took:.1f} s of sim time"
+      self.r.ops.finish(op, api.PickResult(object_id=object_id, grasp=plan.grasp, width=width, duration_s=took), message)
+      log.info("pick object=%s target=%s status=%s duration_s=%.3f message=%s", object_id, "", "OK", took, message)
+
+    return self.r.reply(self.r.start_arm("Pick", work), request.wait)
+
+  def Place(self, request, context):
+    object_id, target_id = request.object_id, request.target_id
+    for name in (object_id, target_id):
+      require_scene_object(name)
+    held_catalog, target_catalog = self._catalog(object_id), self._catalog(target_id)
+    if object_id == target_id:
+      raise ApiError(grpc.StatusCode.INVALID_ARGUMENT, f"cannot place {object_id} on itself")
+    held = self.r.held()
+    if object_id not in held:
+      raise ApiError(grpc.StatusCode.FAILED_PRECONDITION,
+                     f"not holding {object_id} (holding: {', '.join(held) or 'nothing'}); pick it first")
+    if target_id in held:
+      raise ApiError(grpc.StatusCode.INVALID_ARGUMENT, f"{target_id} is held by the gripper")
+    self._require_gripper_free()
+
+    def work(op: Operation) -> None:
+      start = self.r.clock.now()
+      world = self.r.world
+      try:
+        tcp = self.r.planner.fk(self.r.icon.arm_joints(), api.TCP)
+        held_pose = world.pose(object_id)
+        held_dims = grasp.catalog_dims(held_catalog)
+        target_pose = world.pose(target_id)
+        target_dims = grasp.catalog_dims(target_catalog)
+        container = grasp.catalog_entry(target_catalog).get("container")
+        others = []
+        for o in world.objects():
+          catalog = grasp.object_catalog(o)
+          if catalog is not None and o.parent.name == "root" and o.name not in (target_id, object_id):
+            others.append((world.pose(o.name), grasp.catalog_dims(catalog)))
+        taken = place.occupied(target_pose, target_dims, others)
+        footprint = place.held_footprint(held_dims, place.yaw(held_pose), place.yaw(tcp), place.yaw(target_pose))
+        spots = place.candidates(target_pose, target_dims, container, footprint, taken)[:PLACE_CANDIDATES]
+        for spot in spots:
+          release = place.release_pose(tcp, held_pose, spot)
+          approach = place.above(release)
+          if self._feasible(release) and self._feasible(approach):
+            break
+        else:
+          if container:
+            raise ApiError(grpc.StatusCode.ABORTED, f"no free collision-free spot in {target_id} (the box is full or "
+                                                    f"out of reach; tried {len(spots)} spots)")
+          raise ApiError(grpc.StatusCode.ABORTED, f"no collision-free place pose on top of {target_id}")
+        self.r.move(op, approach, api.ANY, "moving above the place spot")
+        self.r.move(op, release, api.LINEAR, "lowering")
+        self._gripper(op, RELEASE)
+        self.r.detach(object_id)
+        self.r.move(op, approach, api.LINEAR, "retreating")
+        object_pose = world.pose(object_id)
+      except ApiError as error:
+        log.warning("place object=%s target=%s status=%s duration_s=%.3f message=%s",
+                    object_id, target_id, error.code.name, self.r.clock.now() - start, error.message)
+        raise
+      took = self.r.clock.now() - start
+      message = (f"placed {object_id} {'in' if container else 'on'} {target_id} at ({object_pose.x:.3f}, "
+                 f"{object_pose.y:.3f}) in {took:.1f} s of sim time")
+      self.r.ops.finish(op, api.PlaceResult(object_id=object_id, target_id=target_id, place=release,
+                                            object_pose=object_pose, duration_s=took), message)
+      log.info("place object=%s target=%s status=%s duration_s=%.3f message=%s", object_id, target_id, "OK", took,
+               message)
+
+    return self.r.reply(self.r.start_arm("Place", work), request.wait)
+
   def CalibrateCamera(self, request, context):
     def work(op: Operation) -> None:
       result = calibration.run(CalibrationArm(self.r, op), self.r.calibration)
@@ -927,32 +1113,13 @@ class RobotService(api_grpc.RobotServiceServicer):
   def AttachObject(self, request, context):
     require_scene_object(request.id)
     self.r.world.get(request.id)
-    self.r.world.attach(request.id)
-    self.r.sim("SetAttached", simlink_pb2.SetAttachedRequest(id=request.id, attached=True))
+    self.r.attach(request.id)
     return empty_pb2.Empty()
 
   def DetachObject(self, request, context):
     require_scene_object(request.id)
-    if self.r.world.get(request.id).parent.name != "root":
-      self.r.world.detach(request.id)
-    self.r.sim("SetAttached", simlink_pb2.SetAttachedRequest(id=request.id, attached=False))
-    if self.r.mirror_world:
-      self._wait_synced(request.id)
+    self.r.detach(request.id)
     return empty_pb2.Empty()
-
-  def _wait_synced(self, name: str) -> None:
-    """Waits until scene_sync (which skips attached objects) has moved `name` to its true pose."""
-    deadline = time.monotonic() + OBJECT_WAIT_S
-    while True:
-      true = self.r.sim("GetTruePose", simlink_pb2.TruePoseRequest(frame=name))
-      belief = self.r.world.pose(name)
-      error = math.dist((true.x, true.y, true.z), (belief.x, belief.y, belief.z))
-      if error <= SYNC_TOLERANCE_M:
-        return
-      if time.monotonic() > deadline:
-        raise ApiError(grpc.StatusCode.DEADLINE_EXCEEDED,
-                       f"{name!r} in world is {error * 1e3:.0f} mm from its true pose {OBJECT_WAIT_S:.0f} s after detaching")
-      time.sleep(0.05)
 
   def SetPayload(self, request, context):
     values = (request.mass, request.com_x, request.com_y, request.com_z)

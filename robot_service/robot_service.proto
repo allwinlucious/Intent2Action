@@ -188,6 +188,36 @@ message PlanGraspResponse {
   Joints grasp_joints = 3;
 }
 
+message PickRequest {
+  string object_id = 1;  // an id from `list_objects`
+  bool wait = 2;
+}
+
+// Operation.response of Pick.
+message PickResult {
+  string object_id = 1;
+  Pose grasp = 2;        // the TCP pose it grasped at
+  double width = 3;      // gripper width after closing (m)
+  double duration_s = 4; // sim time of the whole pick
+}
+
+message PlaceRequest {
+  string object_id = 1;  // the held object (picked or attached)
+  // Where to put it, an id from `list_objects`: a box (put inside, on a free spot) or any object or plate
+  // (put on its top).
+  string target_id = 2;
+  bool wait = 3;
+}
+
+// Operation.response of Place.
+message PlaceResult {
+  string object_id = 1;
+  string target_id = 2;
+  Pose place = 3;        // the TCP pose it released at
+  Pose object_pose = 4;  // the object's pose after release (world model)
+  double duration_s = 5; // sim time of the whole place
+}
+
 message SetSpeedRequest {
   double factor = 1;  // (0, 1]
 }
@@ -336,6 +366,14 @@ service RobotService {
   rpc MoveCompliant(MoveCompliantRequest) returns (google.longrunning.Operation);
   // Plan a grasp for an object in the world, given by an id from `list_objects`.
   rpc PlanGrasp(PlanGraspRequest) returns (PlanGraspResponse);
+  // Pick an object: plan a grasp, move to the pre-grasp and grasp poses, close the gripper, attach the object
+  // in the world model and lift it. One planned attempt, no retries; on failure the operation's error says
+  // why (no grasp found, object too wide, grasp blocked, gripper closed on nothing, a fault).
+  rpc Pick(PickRequest) returns (google.longrunning.Operation);
+  // Place the held object in a box (a free, collision-free spot inside) or on top of another object or plate:
+  // move above the spot, lower, open the gripper, detach and retreat. One planned attempt, no retries; on
+  // failure the error says why (target full, no reachable spot, not holding the object, a fault).
+  rpc Place(PlaceRequest) returns (google.longrunning.Operation);
   // Stop the current motion (not a fault).
   rpc Stop(google.protobuf.Empty) returns (google.protobuf.Empty);
   // Scale the speed of following motions.

@@ -106,6 +106,16 @@ class RobotServiceStub:
                 request_serializer=robot__service_dot_robot__service__pb2.PlanGraspRequest.SerializeToString,
                 response_deserializer=robot__service_dot_robot__service__pb2.PlanGraspResponse.FromString,
                 _registered_method=True)
+        self.Pick = channel.unary_unary(
+                '/robot.v1.RobotService/Pick',
+                request_serializer=robot__service_dot_robot__service__pb2.PickRequest.SerializeToString,
+                response_deserializer=google_dot_longrunning_dot_operations__pb2.Operation.FromString,
+                _registered_method=True)
+        self.Place = channel.unary_unary(
+                '/robot.v1.RobotService/Place',
+                request_serializer=robot__service_dot_robot__service__pb2.PlaceRequest.SerializeToString,
+                response_deserializer=google_dot_longrunning_dot_operations__pb2.Operation.FromString,
+                _registered_method=True)
         self.Stop = channel.unary_unary(
                 '/robot.v1.RobotService/Stop',
                 request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
@@ -290,6 +300,24 @@ class RobotServiceServicer:
 
     def PlanGrasp(self, request, context):
         """Plan a grasp for an object in the world, given by an id from `list_objects`.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Pick(self, request, context):
+        """Pick an object: plan a grasp, move to the pre-grasp and grasp poses, close the gripper, attach the object
+        in the world model and lift it. One planned attempt, no retries; on failure the operation's error says
+        why (no grasp found, object too wide, grasp blocked, gripper closed on nothing, a fault).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Place(self, request, context):
+        """Place the held object in a box (a free, collision-free spot inside) or on top of another object or plate:
+        move above the spot, lower, open the gripper, detach and retreat. One planned attempt, no retries; on
+        failure the error says why (target full, no reachable spot, not holding the object, a fault).
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -490,6 +518,16 @@ def add_RobotServiceServicer_to_server(servicer, server):
                     servicer.PlanGrasp,
                     request_deserializer=robot__service_dot_robot__service__pb2.PlanGraspRequest.FromString,
                     response_serializer=robot__service_dot_robot__service__pb2.PlanGraspResponse.SerializeToString,
+            ),
+            'Pick': grpc.unary_unary_rpc_method_handler(
+                    servicer.Pick,
+                    request_deserializer=robot__service_dot_robot__service__pb2.PickRequest.FromString,
+                    response_serializer=google_dot_longrunning_dot_operations__pb2.Operation.SerializeToString,
+            ),
+            'Place': grpc.unary_unary_rpc_method_handler(
+                    servicer.Place,
+                    request_deserializer=robot__service_dot_robot__service__pb2.PlaceRequest.FromString,
+                    response_serializer=google_dot_longrunning_dot_operations__pb2.Operation.SerializeToString,
             ),
             'Stop': grpc.unary_unary_rpc_method_handler(
                     servicer.Stop,
@@ -955,6 +993,60 @@ class RobotService:
             '/robot.v1.RobotService/PlanGrasp',
             robot__service_dot_robot__service__pb2.PlanGraspRequest.SerializeToString,
             robot__service_dot_robot__service__pb2.PlanGraspResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Pick(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/robot.v1.RobotService/Pick',
+            robot__service_dot_robot__service__pb2.PickRequest.SerializeToString,
+            google_dot_longrunning_dot_operations__pb2.Operation.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Place(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/robot.v1.RobotService/Place',
+            robot__service_dot_robot__service__pb2.PlaceRequest.SerializeToString,
+            google_dot_longrunning_dot_operations__pb2.Operation.FromString,
             options,
             channel_credentials,
             insecure,
