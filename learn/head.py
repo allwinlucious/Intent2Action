@@ -116,7 +116,7 @@ class Head(nn.Module):
 
 def _hidden(lm, tokenizer, text: str) -> tuple[torch.Tensor, list[tuple[int, int]]]:
   enc = tokenizer(text, add_special_tokens=False, return_offsets_mapping=True)
-  ids = torch.tensor([enc["input_ids"]], device=lm.model.embed_tokens.weight.device)
+  ids = torch.tensor([enc["input_ids"]], device="cuda:0")  # a CPU embedding table moves them itself (qwen.load)
   with torch.no_grad():
     h = lm.model(input_ids=ids).last_hidden_state[0]
   return h, enc["offset_mapping"]
@@ -218,7 +218,7 @@ class Policy:
     tool, slots, motion, pointer = self.head(h[-1][None], h[cand_pos] if cand_pos else None)
     name = self.names[int(tool.argmax())]
     if name == FINISH:
-      ids = self.tokenizer(text, add_special_tokens=False, return_tensors="pt")["input_ids"]
+      ids = self.tokenizer(text, add_special_tokens=False, return_tensors="pt")["input_ids"].to("cuda:0")
       out = self.lm.generate(ids, attention_mask=torch.ones_like(ids), max_new_tokens=200, do_sample=False,
                              temperature=None, top_p=None, top_k=None)
       words, _ = qwen.parse(self.tokenizer.decode(out[0, ids.shape[1]:], skip_special_tokens=True))
