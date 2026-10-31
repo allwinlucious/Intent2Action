@@ -124,6 +124,7 @@ SYNC_TIMEOUT_S = 2.0
 POSE_REJECTED_CODES = (grpc.StatusCode.ABORTED, grpc.StatusCode.NOT_FOUND, grpc.StatusCode.INVALID_ARGUMENT)
 # Pick and Place (phase_v1.md decision 6): one planned attempt each, no retries.
 PICK_LIFT_M = 0.10
+PLACE_PATH_ATTEMPTS = 3  # spots tried when the lowering path to a feasible spot cannot be planned
 PLACE_CANDIDATES = 40
 OPEN_TOLERANCE_M = 0.005  # Pick opens the gripper first if it is narrower than its opening by more than this
 GRASP = simple_gripper_pb2.SimpleGripperFixedParams.GRASP
@@ -1054,17 +1055,31 @@ class RobotService(api_grpc.RobotServiceServicer):
         spots = place.candidates(target_pose, target_dims, container, footprint, taken)[:PLACE_CANDIDATES]
         clearances = place.BOX_RELEASE_CLEARANCES_M if container else (place.RELEASE_CLEARANCE_M,)
         poses = ((place.release_pose(tcp, held_pose, spot, c), spot) for spot in spots for c in clearances)
+        planned, path_failures = False, 0
         for release, _ in poses:
           approach = place.above(release)
-          if self._feasible(release) and self._feasible(approach):
-            break
-        else:
+          if not (self._feasible(release) and self._feasible(approach)):
+            continue
+          # Feasible end poses can still have no straight lowering path (e.g. a wrist flip): then the next free
+          # spot is planned. Nothing has touched the object or the target yet, so this is planning, not a retry.
+          try:
+            self.r.move(op, approach, api.ANY, "moving above the place spot")
+            self.r.move(op, release, api.LINEAR, "lowering")
+          except ApiError as error:
+            if not (error.code in POSE_REJECTED_CODES and error.message.startswith("planning failed")):
+              raise
+            path_failures += 1
+            log.info("place: no path to spot %d: %s", path_failures, error.message[:200])
+            if path_failures >= PLACE_PATH_ATTEMPTS:
+              raise
+            continue
+          planned = True
+          break
+        if not planned:
           if container:
             raise ApiError(grpc.StatusCode.ABORTED, f"no free collision-free spot in {target_id} (the box is full or "
                                                     f"out of reach; tried {len(spots)} spots)")
           raise ApiError(grpc.StatusCode.ABORTED, f"no collision-free place pose on top of {target_id}")
-        self.r.move(op, approach, api.ANY, "moving above the place spot")
-        self.r.move(op, release, api.LINEAR, "lowering")
         self._gripper(op, RELEASE)
         self.r.detach(object_id)
         self.r.move(op, approach, api.LINEAR, "retreating")

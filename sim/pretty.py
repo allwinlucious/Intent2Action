@@ -23,7 +23,7 @@ LOOKS = "/World/Looks"
 # category -> (colour or None for the catalog's, reflection roughness)
 FINISH = {"cube": (None, 0.28), "box": (None, 0.55), "table": ((0.78, 0.78, 0.76), 0.6)}
 FLOOR_COLOR = (0.2, 0.2, 0.21)
-EYE, TARGET = [1.12, 0.78, 0.62], [0.47, -0.02, 0.06]
+EYE, TARGET = [2.0, 1.4, 1.2], [0.4, -0.05, -0.05]  # the whole table, both boxes, the robot and some room around
 
 _bound: set[str] = set()
 

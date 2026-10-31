@@ -241,6 +241,9 @@ def _setup_viewer() -> None:
     from sim import pretty  # pylint: disable=g-import-not-at-top
 
     set_camera_view(eye=pretty.EYE, target=pretty.TARGET)
+    import carb.settings  # pylint: disable=g-import-not-at-top
+
+    carb.settings.get_settings().set("/app/window/hideUi", True)  # viewport only, as F7 does
   else:
     set_camera_view(eye=[1.35, 1.05, 0.85], target=[0.45, 0.05, 0.05])
   os.makedirs(GUI_FRAMES, exist_ok=True)
