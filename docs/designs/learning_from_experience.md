@@ -62,12 +62,30 @@ the language model, lr 2e-4 cosine, warmup 0.1, micro-batch 1 × 4, seq 4096, 8-
 on Modal. Serving: the same vLLM endpoint with the LoRA adapter (`--enable-lora`); if the Glimmer image does not
 support LoRA, the merged weights are served instead. DPO is optional, after SFT.
 
+## Model versions
+
+Each step is a separate LoRA adapter on the same base, all served by one vLLM endpoint (`--lora-modules`), so
+every version runs the identical evaluation and each step's gain is measured on its own.
+
+| Version | Trained on | Question it answers |
+|---|---|---|
+| G0 | nothing (zero-shot, the same prompts) | the baseline: what a capable model does from the API docs |
+| G1 | expert program-writing episodes | does learning the robot's limits from the planner help? |
+| G2 | G1 data + Glimmer's own successful episodes (rejection sampling) | does self-generated experience add to the expert? |
+| G3 | G2 data + recovery episodes (expert decisions after failures) | does recovery improve, and does it hurt program writing? |
+| G4 | G3 data + sim-tier episodes | does physics experience add over planning experience? |
+| G5 (optional) | G3/G4 + DPO on failure/fix pairs | do preference pairs fix the remaining mistakes? |
+
 ## Evaluation
 
-On held-out seeds of every family and the held-out family: zero-shot Glimmer vs fine-tuned Glimmer, same prompts.
+On held-out seeds of every family and the held-out family: every version, same prompts, same tasks.
 - plan tier: 50 tasks per family; sim tier: 20 tasks in total; 3 rendered videos (before/after on the same layout).
 - Metrics: task success (rule checker), first-program success, recovery success, handoffs, repeated failing calls,
   protocol errors, robot calls, time; tier agreement.
+- Per version, per family, with 95 % confidence intervals (Wilson); a failure breakdown by kind (grasp, reach,
+  collision, place, verify, protocol); learning curves (success vs number of training examples, from G2's data
+  at 25 / 50 / 100 %); program-writing quality kept on the simple tasks of `glimmer_program_test.py` (no
+  regression); generalisation gap train-family vs held-out-family.
 
 ## Phases
 
