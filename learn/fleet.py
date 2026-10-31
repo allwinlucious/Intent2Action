@@ -26,9 +26,11 @@ import grpc  # noqa: E402
 from google.protobuf import empty_pb2  # noqa: E402
 
 from learn.episodes import in_shard, read_jsonl  # noqa: E402
+from robot_service import robot_service_pb2 as api  # noqa: E402
 from robot_service import robot_service_pb2_grpc as api_grpc  # noqa: E402
 
 READY_TIMEOUT_S = 300
+WORKER_RESTARTS = 2  # a failed worker resumes its shard
 LOGS = ROOT / "logs" / "fleet"
 
 
@@ -56,7 +58,9 @@ def containers(n: int, base_port: int):
       stub = api_grpc.RobotServiceStub(grpc.insecure_channel(address))
       while True:
         try:
+          # The scene and the motion planner (it starts last and slowest when many containers boot together).
           if stub.ListObjects(empty_pb2.Empty(), timeout=5).objects:
+            stub.ComputeFk(api.ComputeFkRequest(joints=api.Joints(positions=[0.0] * 7), tool=api.TCP), timeout=10)
             print(f"{name} ready on {address}", flush=True)
             break
         except grpc.RpcError:
@@ -111,19 +115,31 @@ def main() -> int:
   shards = split(out, args.workers)
   failed = 0
   with containers(args.workers, args.base_port) as addresses:
-    procs = []
-    for k, address in enumerate(addresses):
+    def start(k: int, address: str) -> subprocess.Popen:
       argv = list(command)
       argv[argv.index("--out") + 1] = str(shards[k])
       argv += ["--shard", f"{k}/{args.workers}"]
-      log = open(LOGS / f"worker_{k}.log", "w")
-      procs.append(subprocess.Popen([sys.executable, *argv], cwd=ROOT, env={**os.environ, "ROBOT_ADDRESS": address},
-                                    stdout=log, stderr=subprocess.STDOUT))
+      log = open(LOGS / f"worker_{k}.log", "a")  # noqa: SIM115 (kept open for the child)
       print(f"worker {k}: {address} -> {shards[k]} (log {LOGS / f'worker_{k}.log'})", flush=True)
-    for k, proc in enumerate(procs):
-      code = proc.wait()
-      failed += code != 0
-      print(f"worker {k} exited {code}", flush=True)
+      return subprocess.Popen([sys.executable, *argv], cwd=ROOT, env={**os.environ, "ROBOT_ADDRESS": address},
+                              stdout=log, stderr=subprocess.STDOUT)
+
+    procs = {k: start(k, address) for k, address in enumerate(addresses)}
+    restarts = dict.fromkeys(procs, 0)
+    while procs:
+      time.sleep(5)
+      for k, proc in list(procs.items()):
+        code = proc.poll()
+        if code is None:
+          continue
+        print(f"worker {k} exited {code}", flush=True)
+        if code != 0 and restarts[k] < WORKER_RESTARTS:  # e.g. a service in its container was not up yet
+          restarts[k] += 1
+          time.sleep(30)
+          procs[k] = start(k, addresses[k])
+          continue
+        failed += code != 0
+        del procs[k]
   print(f"merged {merge(out, shards)} records into {out}", flush=True)
   return 1 if failed else 0
 
