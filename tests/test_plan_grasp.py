@@ -191,3 +191,13 @@ def test_matrix_pose_round_trip(axis, degrees):
   back = grasp.matrix_pose(pose_matrix(pose))
   np.testing.assert_allclose(pose_matrix(back), pose_matrix(pose), atol=1e-12)
   assert back.qw >= 0
+
+
+def test_deepened_grasp_is_checked_too():
+  checker = _FakeChecker(0.6)
+  # 0.9: no IK at the deepened grasp; 0.7: deepened joints collide; 0.5: all free, chosen.
+  deep = {0.9: None, 0.7: [0.6] * 7, 0.5: [0.3] * 7}
+  kept = grasp.choose([_grasp(_side(CUBE), quality=q, joints=_joints(q)) for q in (0.9, 0.7, 0.5)], CUBE, checker,
+                      lambda g: deep[g.quality])
+  assert kept.quality == 0.5
+  assert [q[0] for q in checker.calls][-1] == 0.3

@@ -79,6 +79,21 @@ def _program_text(content: str) -> str:
   return (match.group(1) if match else content).strip() + "\n"
 
 
+def program_messages(intent: dict, objects: list[Obj]) -> list[dict]:
+  """The program writer's prompt (also the training prompt: one source for both)."""
+  system = (
+    "Write a short Python program using only this API and the listed builtins. Do not import or define "
+    "functions. Resolve objects by attributes, never by ids or coordinates. End with verify(lambda: ...).\n\n"
+    f"Builtins: {', '.join(sorted(BUILTINS))}\n\nProgram API:\n{_api_reference()}\n\n"
+    f"Examples:\n{_examples()}"
+  )
+  scene = "\n".join(f"{obj.id} {obj.category} {obj.color} {obj.size}" for obj in objects)
+  return [
+    {"role": "system", "content": system},
+    {"role": "user", "content": f"Intent:\n{json.dumps(intent)}\nScene:\n{scene}"},
+  ]
+
+
 class ProgramWriter:
   """Writes policy-checked programs from intents and perceived scenes."""
 
@@ -88,17 +103,7 @@ class ProgramWriter:
 
   def write(self, intent: dict, objects: list[Obj]) -> str:
     """Returns a program, retrying once after static-check problems or a dry-run error."""
-    system = (
-      "Write a short Python program using only this API and the listed builtins. Do not import or define "
-      "functions. Resolve objects by attributes, never by ids or coordinates. End with verify(lambda: ...).\n\n"
-      f"Builtins: {', '.join(sorted(BUILTINS))}\n\nProgram API:\n{_api_reference()}\n\n"
-      f"Examples:\n{_examples()}"
-    )
-    scene = "\n".join(f"{obj.id} {obj.category} {obj.color} {obj.size}" for obj in objects)
-    messages = [
-      {"role": "system", "content": system},
-      {"role": "user", "content": f"Intent:\n{json.dumps(intent)}\nScene:\n{scene}"},
-    ]
+    messages = program_messages(intent, objects)
     last = ""
     for attempt in range(1, 3):
       self.last_attempts = attempt

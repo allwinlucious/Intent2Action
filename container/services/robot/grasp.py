@@ -116,16 +116,25 @@ def arm_positions(joints: dict[str, float]) -> list[float]:
   return [joints[n] for n in ARM_JOINTS]
 
 
-def choose(grasps: list[Grasp], dims: np.ndarray, check: Callable[[list[float]], tuple[bool, str]]) -> Grasp:
+def choose(grasps: list[Grasp], dims: np.ndarray, check: Callable[[list[float]], tuple[bool, str]],
+           deep: Callable[[Grasp], list[float] | None] | None = None) -> Grasp:
   """Decision 6.5, Addendum B.2 and 6.7: the best grasp whose object extent along the finger axis (tool y) fits and
-  whose grasp and pregrasp joints are collision-free by `check` (Intrinsic's CheckCollisions: in_collision, debug)."""
+  whose grasp and pregrasp joints are collision-free by `check` (Intrinsic's CheckCollisions: in_collision, debug).
+  `deep(g)`: joints at the deepened grasp Pick moves to (None: no IK solution); also checked when given."""
   kept = [g for g in grasps if extent_along(dims, g.object_t_tool[:3, 1]) <= GRIPPER_OPENING_M + WIDTH_TOLERANCE_M]
   if not kept:
     raise ApiError(grpc.StatusCode.ABORTED, TOO_WIDE)
   # Checked best first, stopping at the first free one: the same choice as filtering all, with fewer calls.
   for g in sorted(kept, key=lambda g: g.quality, reverse=True):
-    for what, joints in (("grasp", g.joints), ("pregrasp", g.pregrasp_joints)):
-      in_collision, debug = check(arm_positions(joints))
+    candidates = [("grasp", arm_positions(g.joints)), ("pregrasp", arm_positions(g.pregrasp_joints))]
+    if deep is not None:
+      deep_joints = deep(g)
+      if deep_joints is None:
+        log.info("plan_grasp grasp quality=%.4f dropped: no IK solution at the deepened grasp", g.quality)
+        continue
+      candidates.append(("deepened grasp", deep_joints))
+    for what, joints in candidates:
+      in_collision, debug = check(joints)
       if in_collision:
         log.info("plan_grasp grasp quality=%.4f dropped: %s joints in collision in world: %s", g.quality, what, debug)
         break
@@ -161,6 +170,7 @@ def response(world_t_object: api.Pose, grasp: Grasp, dims: np.ndarray) -> api.Pl
       grasp=matrix_pose(world @ deepened(grasp.object_t_tool, dims)),
       pregrasp=matrix_pose(world @ grasp.object_t_pregrasp),
       grasp_joints=api.Joints(positions=arm_positions(grasp.joints)),
+      pregrasp_joints=api.Joints(positions=arm_positions(grasp.pregrasp_joints)),
   )
 
 
@@ -213,9 +223,11 @@ class GraspPlanner:
     executor.add_node(self.node)
     threading.Thread(target=executor.spin, daemon=True).start()
 
-  def plan_grasp(self, world, name: str, check: Callable[[list[float]], tuple[bool, str]]) -> api.PlanGraspResponse:
+  def plan_grasp(self, world, name: str, check: Callable[[list[float]], tuple[bool, str]],
+                 ik: Callable[[api.Pose, list[float]], list[float]] | None = None) -> api.PlanGraspResponse:
     """Decision 6 steps 1-7; `world` is robot_service's World, `name` an object ID, `check` Intrinsic's
-    CheckCollisions (Addendum B.2)."""
+    CheckCollisions (Addendum B.2), `ik(tcp_pose, seed)` Intrinsic's IK: the deepened grasp is checked too (the
+    hand reaches 2 cm lower than the grasp MoveIt checked, e.g. into a taller neighbour of a small cube)."""
     catalog = object_catalog(world.get(name))
     if catalog is None:  # the robot or the camera: not a catalog object
       raise unknown_object(name)
@@ -224,8 +236,16 @@ class GraspPlanner:
     with self.lock:
       self._apply_scene(world)
       grasps = self._plan(name, dims)
-    best = choose(grasps, dims, check)
-    result = response(world.pose(name), best, dims)
+    world_t_object = world.pose(name)
+    deep = None
+    if ik is not None:
+      def deep(g: Grasp) -> list[float] | None:
+        try:
+          return ik(matrix_pose(pose_matrix(world_t_object) @ deepened(g.object_t_tool, dims)), arm_positions(g.joints))
+        except ApiError:
+          return None
+    best = choose(grasps, dims, check, deep)
+    result = response(world_t_object, best, dims)
     log.info("plan_grasp object=%s grasps=%d quality=%.4f grasp=%s", name, len(grasps), best.quality,
              [round(v, 4) for v in (result.grasp.x, result.grasp.y, result.grasp.z)])
     return result

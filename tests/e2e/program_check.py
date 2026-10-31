@@ -1,4 +1,8 @@
-"""Phase V2 program runtime check; requires the simulator and robot stack."""
+"""Phase V2 program runtime check; requires the simulator and robot stack.
+
+  .venv/bin/python tests/e2e/program_check.py [--gui] [--only cubes_in_box:2 ...]
+      --gui: viewer + video (logs/runs/program_check.mp4); --only: just these scripted layouts (no 8/9 gate)
+"""
 
 import json
 import math
@@ -88,11 +92,16 @@ def _source(name: str) -> tuple[dict, str]:
   return json.loads((EXAMPLES / f"{name}.json").read_text()), (EXAMPLES / f"{name}.py").read_text()
 
 
+ONLY: set[tuple[str, int]] = set()
+
+
 def check_scripted() -> str:
   successes = 0
   for name in SCENES:
     intent, source = _source(name)
     for layout in range(3):
+      if ONLY and (name, layout) not in ONLY:
+        continue
       _scene(name, layout)
       before = truth_snapshot(cuj._sim)
       stream, logger = _log(f"{name}_{layout}")
@@ -107,6 +116,8 @@ def check_scripted() -> str:
         f"  {'PASS' if passed else 'FAIL'} {name} layout {layout}: "
         f"runtime={result.ok} rules={rules.summary}", flush=True,
       )
+  if ONLY:
+    return f"{successes}/{len(ONLY)} selected programs passed"
   if successes < 8:
     raise RuntimeError(f"{successes}/9 programs passed, need 8")
   return f"{successes}/9 programs passed"
@@ -151,8 +162,26 @@ def check_stop() -> str:
   return "one handoff stopped with a logged failure"
 
 
+def _video(path: Path) -> None:
+  import demo_gui
+  import imageio.v2 as imageio
+  frames = sorted(demo_gui.FRAMES.glob("frame_*.png"))
+  with imageio.get_writer(path, fps=15, codec="libx264", quality=8, macro_block_size=8) as writer:
+    for frame in frames:
+      try:
+        writer.append_data(imageio.imread(frame)[..., :3])
+      except (OSError, ValueError):
+        continue
+  print(f"video {path} ({len(frames)} frames)")
+
+
 def main() -> int:
   start = time.monotonic()
+  gui = "--gui" in sys.argv
+  ONLY.update((a.split(":")[0], int(a.split(":")[1])) for a in sys.argv[1:] if ":" in a)
+  if gui:
+    harness.ISAAC_COMMAND[-1] += " --gui --pretty"
+    harness.READY_TIMEOUT_S = 900
   harness.sync_isaac()
   hwm.CONTAINER_LOG = CONTAINER_LOG
   stack = hwm._Run()
@@ -164,6 +193,7 @@ def main() -> int:
     hwm._require_state("ENABLED", hwm.ENABLED_TIMEOUT_S)
     cuj._wait_ready()
     checks = (("scripted", check_scripted), ("recovery", check_recovery), ("stop", check_stop))
+    checks = checks[:1] if ONLY else checks
     results = [hwm._run_check(name, check) for name, check in checks]
   except Exception as error:
     print(f"FAIL setup: {p1._describe(error)}", flush=True)
@@ -171,6 +201,8 @@ def main() -> int:
   finally:
     stack.stop_container()
     stack.stop_isaac()
+  if gui:
+    _video(ROOT / "logs" / "runs" / "program_check.mp4")
   print(f"elapsed {time.monotonic() - start:.1f} s")
   return 0 if results and all(results) else 1
 

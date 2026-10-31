@@ -203,3 +203,8 @@ pre-fill k, stack heights and z, reach radii/sides, obstacle count); validity ru
 intent targets unique and `check_intent(intent, truth, truth)` not ok (the task is not already solved) with
 `fake_objects` converted to `TrueObj`; `load_placements` with fake stubs: call order, returned IDs, timeout
 raises; `catalog_root` override; preview writes a PNG of 800 × 800; stats lines parse.
+
+### A.11 Correction (worker note: mixed boxes overlapped)
+
+Mixed boxes: `red_box` at x ~ U(0.34, 0.38), y ~ U(−0.30, −0.24); `blue_box` at x ~ U(0.66, 0.70), y ~ U(−0.24,
+−0.18). The box-to-box rule of A.3 becomes ≥ 0.02 m (the ranges give ≥ 0.03 m). Everything else in A.3 stays.

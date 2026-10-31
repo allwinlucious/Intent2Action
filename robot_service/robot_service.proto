@@ -186,6 +186,7 @@ message PlanGraspResponse {
   Pose grasp = 1;      // TCP pose
   Pose pregrasp = 2;   // TCP pose
   Joints grasp_joints = 3;
+  Joints pregrasp_joints = 4;  // collision-checked in the robot's world model; Pick moves to these
 }
 
 message PickRequest {

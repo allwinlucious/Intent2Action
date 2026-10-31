@@ -27,7 +27,7 @@ image = (modal.Image.from_registry("vllm/vllm-openai:muse-glimmer")
 
 @app.function(
     image=image,
-    gpu="H100",
+    gpu="A100-80GB",  # bf16 weights (~60 GB) + KV cache; $2.50/h vs H100 $3.95/h (project budget $30 total)
     volumes={"/root/.cache/huggingface": cache},
     secrets=[modal.Secret.from_name("show-once-llm")],
     timeout=60 * 60,

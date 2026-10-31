@@ -44,7 +44,15 @@ Randomised layouts with a seed; train seeds and held-out seeds per family, plus 
 | packing | a box filled to 60–100 % of its spots, more cubes to add | free space, release poses, "box full" |
 | stacking | towers of 2–4 to build or take apart | order, on-top placement |
 | reach | objects near the workspace edge or behind others | reach, singular configurations, approach |
-| mixed (held out) | a sort-by-colour intent over a cluster plus a partly filled box | generalisation |
+| mixed (held out) | a cluster plus two boxes, one partly filled | colour sorting only |
+
+## What the program writer sees and writes
+
+The scene lines given to the program writer carry each object's position, yaw and size (mm), not only id,
+category, colour and size: a pick order cannot be learned from geometry the model never sees. Programs stay
+free of object ids and number literals (the runtime's check), so a learned strategy is written in terms of object
+attributes, e.g. "repeat: pick the cube with the most free space around it" computed from `x`, `y` of the others.
+Such a program carries over to new layouts, which is what the evaluation on held-out layouts measures.
 
 ## Training data
 
