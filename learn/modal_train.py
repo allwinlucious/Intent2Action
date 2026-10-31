@@ -1,4 +1,4 @@
-"""Glimmer QLoRA SFT on Modal with the model cookbook's Axolotl recipe (one L40S).
+"""Glimmer QLoRA SFT on Modal with the model cookbook's Axolotl recipe (one H100).
 
   tools/modal.sh run learn/modal_train.py --data logs/sft/smoke --run smoke --max-steps 4
       uploads <data>/{train,validation}.jsonl, trains, saves the adapter on the volume `show-once-train`
@@ -6,8 +6,9 @@
 
 The environment, versions and hyperparameters are the cookbook's `muse-glimmer-30b-qlora.yaml` and setup (Axolotl
 0.19.0, torch 2.12.1 cu130, cut-cross-entropy at Axolotl's commit). Differences, all deliberate:
-- one L40S (48 GB) instead of eight H100s: QLoRA peaks at ~27-29 GB (cookbook), and the project's Modal budget is
-  $30 in total (L40S $1.95/h vs H100 $3.95/h; check with tools/modal_budget.sh);
+- one H100 instead of eight (the cookbook verified QLoRA on one H100). The project's Modal budget is $30 in total
+  (tools/modal_budget.sh); an H100 costs 2x an L40S per hour but is ~3-4x faster (memory bandwidth and bf16
+  compute), so a run costs less on it. The smoke run fit an L40S too (21 GiB peak);
 - PyTorch SDPA attention instead of flash-attn 2.8.3: no CUDA extension build (an hour of builder time) and no
   GPU-architecture pin;
 - our data paths, W&B off (the loss history is in the run log), no `model_revision`: the cached main revision has
@@ -23,7 +24,7 @@ import modal
 MODEL = "meta-models/Muse-Glimmer-30B"
 COOKBOOK = "https://raw.githubusercontent.com/meta-models/meta-oss-cookbook/main/muse-glimmer/post-training/sft/axolotl"
 CCE = "git+https://github.com/axolotl-ai-cloud/ml-cross-entropy.git@4dfa52212d0552805aec5a6a2176c0abbea277d2"
-GPU = "L40S"
+GPU = "H100"
 
 app = modal.App("show-once-train")
 hf_cache = modal.Volume.from_name("show-once-glimmer", create_if_missing=True)
