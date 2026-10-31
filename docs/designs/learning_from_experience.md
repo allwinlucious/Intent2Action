@@ -106,6 +106,7 @@ On held-out seeds of every family and the held-out family: every version, same p
 | L5 | Fine-tuning on Modal and serving the adapter | L4 |
 | L6 | Evaluation and the report (`docs/designs/learning_results.md`) with videos | L5 |
 | L7 | DPO (optional) | L5 |
+| L8 | arXiv paper (end goal, owner request 2026-10-31): `paper/` in LaTeX, written from the L6 report | L6 |
 
 L0, L1 and L2 run in parallel. Compute: plan-tier and sim runs on the local machine after midnight; Glimmer sampling,
 training and serving on Modal.
@@ -115,3 +116,20 @@ training and serving on Modal.
 - The plan tier misses physics: measured by tier agreement; physics-only failures come from the sim tier.
 - LoRA serving in the Glimmer vLLM image: fall back to merged weights.
 - The expert covers only the families above: Glimmer's own graded episodes cover the rest.
+
+## Paper (L8)
+
+End goal: an arXiv preprint (cs.RO, cross-list cs.LG). Working title: "Learning what the robot can do: fine-tuning a
+language model to program a manipulator from graded simulation experience". Claims, each backed by an L6 number:
+1. A docs-level program (what any capable model writes from the API) fails on a measurable share of physically hard
+   tasks (today's expert data: 41 % of cluster, 53 % of stacking, 21 % of reach tasks).
+2. Fine-tuning on graded experience closes most of that gap on held-out layouts and on a held-out task family, with
+   the gain of each data source isolated by the versions G1-G5.
+3. Cheap planning-only episodes carry most of the signal; the plan-tier/physics agreement is measured.
+4. Recovery decisions learned from confirmed patches beat zero-shot recovery.
+Sections: introduction; related work (from `docs/research/related_work.md`); system (API, runtime, recovery,
+tiers); learning (expert search, data, versions); experiments (L6 tables, CIs, curves, ablations, tier agreement,
+failure breakdown); limitations (simulation only, cube-world families, one robot, one model); reproducibility
+(code, data, adapters). Figures from L6, the demo frames, and the architecture diagram. Practical points: a first
+arXiv submission in cs.RO needs an endorsement; the paper follows the results, so it is drafted after L6 and
+can be submitted after the demo.
