@@ -485,6 +485,7 @@ demo, or to run fail-fast code-as-policy.
 | V5 | End to end, plus the confirmation and ask-when-unclear flow (CUJ 2, 3) | V2, V4 | end-to-end scores |
 | V6 | Glimmer in the cloud: intent reading, program writing and recovery; recipe SFT, then GRPO with program success as the reward | V5 | raw vs. fine-tuned Glimmer on all metrics |
 | V7 | Demo UI: one screen with the demo clip + SAM masks, events and rule, **the generated program** with a confirm step, the live Isaac viewer, the program's current line and call log (failures and recovery handoffs highlighted), the final verified checklist, and the study and results charts; recording of the 3-minute video | V5 | a full run recorded end to end from the UI |
+| V7b | Industrial example closing the 3-minute video (owner request, 2026-10-31): a real-world task with real part CAD models (e.g. kitting parts into a kit tray, or packing parts into a shipping box), shown once by demonstration, programmed by the fine-tuned model, run in the clean studio scene | V7, L6 | the example runs end to end on video |
 
 V0 and V1 run in parallel; V2 needs V1; V3 needs the clips from V0; V7 starts with V2 and is finished last.
 
