@@ -14,6 +14,8 @@ GAP_M = 0.005  # held footprint to objects already in the box
 FINGER_HALF_SPAN_M = 0.0475  # open fingers: 0.075 / 2 + pad thickness 0.01
 FINGER_HALF_WIDTH_M = 0.012  # finger pad half width across the finger axis
 RELEASE_CLEARANCE_M = 0.005  # object bottom above the surface at release
+# In a box the hand may have to stay above the walls: release from a little higher (a short drop) if needed.
+BOX_RELEASE_CLEARANCES_M = (0.005, 0.02, 0.035)
 ABOVE_M = 0.10  # approach / retreat height above the release pose
 BELOW_BOX_M = 0.01  # occupied(): objects whose bottom is this far below the box bottom still count
 
@@ -76,12 +78,12 @@ def candidates(target_pose: api.Pose, target_dims, container: dict | None, footp
   return [(target_pose.x + c * x - s * y, target_pose.y + s * x + c * y, z) for x, y in free]
 
 
-def release_pose(tcp: api.Pose, held_pose: api.Pose, spot: Spot) -> api.Pose:
-  """`tcp` moved so the held object's bottom centre is RELEASE_CLEARANCE_M above the spot."""
+def release_pose(tcp: api.Pose, held_pose: api.Pose, spot: Spot, clearance: float = RELEASE_CLEARANCE_M) -> api.Pose:
+  """`tcp` moved so the held object's bottom centre is `clearance` above the spot."""
   pose = api.Pose()
   pose.CopyFrom(tcp)
   pose.x, pose.y = spot[0] + (tcp.x - held_pose.x), spot[1] + (tcp.y - held_pose.y)
-  pose.z = spot[2] + (tcp.z - held_pose.z) + RELEASE_CLEARANCE_M
+  pose.z = spot[2] + (tcp.z - held_pose.z) + clearance
   return pose
 
 

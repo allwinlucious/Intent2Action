@@ -62,8 +62,8 @@ OBJECTS = {
     "calib_board": (trimesh.creation.box(extents=(0.28, 0.20, 0.005)), False, 0.2, (1.0, 1.0, 1.0)),
     "obstacle": (_box(0.1, 0.1, 0.5), True, None, (0.5, 0.5, 0.5)),
     # Static: Isaac uses the exact triangle mesh, so the walls collide and the inside is free.
-    "red_box": (_open_box(0.25, 0.21, 0.08, 0.01, 0.01), True, None, (0.8, 0.15, 0.15)),
-    "blue_box": (_open_box(0.25, 0.21, 0.08, 0.01, 0.01), True, None, (0.15, 0.25, 0.8)),
+    "red_box": (_open_box(0.25, 0.21, 0.05, 0.01, 0.01), True, None, (0.8, 0.15, 0.15)),
+    "blue_box": (_open_box(0.25, 0.21, 0.05, 0.01, 0.01), True, None, (0.15, 0.25, 0.8)),
 }
 # name: (category, colour word), the attributes list_objects reports (phase_ids.md decision 3).
 ATTRIBUTES = {
@@ -85,6 +85,22 @@ ATTRIBUTES = {
 FRICTION = {"peg": (0.3, 0.25), "hole_block": (0.3, 0.25)}
 # name: (wall, floor) thickness (m) of the open boxes.
 CONTAINERS = {"red_box": (0.01, 0.01), "blue_box": (0.01, 0.01)}
+
+
+def _container_parts(x: float, y: float, z: float, wall: float, floor: float) -> list[trimesh.Trimesh]:
+  """Floor and four walls of an open box as separate convex slabs (bottom-centre origin): Intrinsic's collision
+  checker treats each geometry as convex, so a single open-box mesh would fill the cavity."""
+  def slab(sx, sy, sz, cx, cy, cz):
+    mesh = trimesh.creation.box(extents=(sx, sy, sz))
+    mesh.apply_translation((cx, cy, cz + sz / 2))
+    return mesh
+  return [
+      slab(x, y, floor, 0.0, 0.0, 0.0),
+      slab(wall, y, z, -(x - wall) / 2, 0.0, 0.0),
+      slab(wall, y, z, (x - wall) / 2, 0.0, 0.0),
+      slab(x - 2 * wall, wall, z, 0.0, -(y - wall) / 2, 0.0),
+      slab(x - 2 * wall, wall, z, 0.0, (y - wall) / 2, 0.0),
+  ]
 
 
 def main() -> int:
@@ -115,6 +131,12 @@ def main() -> int:
       wall, floor = CONTAINERS[name]
       description["container"] = {"wall": wall, "floor": floor}
     (out / "object.yaml").write_text(yaml.safe_dump(description))
+    if name in CONTAINERS:  # robot_service's planner world gets these as the collision set (scene_sync.py)
+      parts = out / "collision_parts"
+      parts.mkdir(exist_ok=True)
+      wall, floor = CONTAINERS[name]
+      for k, part in enumerate(_container_parts(*mesh.extents, wall, floor)):
+        (parts / f"part_{k}.glb").write_bytes(part.export(file_type="glb"))
     bounds = trimesh.load(glb, force="mesh").bounds
     ok = np.allclose(bounds, mesh.bounds, atol=TOLERANCE_M, rtol=0)
     failures += not ok

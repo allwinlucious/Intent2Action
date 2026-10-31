@@ -18,9 +18,14 @@ GUI = "--gui" in sys.argv
 # --physics-only: no camera, no image graphs, a tiny render target and no AA: Isaac leaves the GPU to a
 # model (the images and the vision tools are unavailable).
 PHYSICS_ONLY = "--physics-only" in sys.argv
+# --pretty: presentation lighting and materials for demo videos (sim/pretty.py); physics unchanged.
+PRETTY = "--pretty" in sys.argv
 GUI_FRAMES = r"C:\isaac-sim-work\viewer_frames"
 GUI_RENDER_PERIOD_S = 1 / 30
 GUI_FRAME_PERIOD_S = 0.2
+# --pretty renders only when a video frame is due, every PRETTY_FRAME_PERIOD_S of sim time: the heavy scene would
+# otherwise slow physics far below real time, and the video plays at real speed whatever a render costs.
+PRETTY_FRAME_PERIOD_S = 1 / 15
 sys.path += [REPO, r"C:\isaac-sim\exts\omni.pip.compute\pip_prebundle"]
 
 # The bridge needs these before SimulationApp starts (phase_0_5_inventory.md §1.5).
@@ -122,6 +127,10 @@ class Scene:
     self.camera = scene_lib.build(
         self.stage, self.scene, get_assets_root_path(), camera=not PHYSICS_ONLY
     )
+    if PRETTY:
+      from sim import pretty  # pylint: disable=g-import-not-at-top
+
+      pretty.apply(self.stage, get_assets_root_path())
     while is_stage_loading():
       simulation_app.update()
     self.sim.reset()
@@ -219,7 +228,7 @@ def wait_for_command(
   return True
 
 
-_frame_state = {"next": 0.0, "index": 0}
+_frame_state = {"next": 0.0, "index": 0, "sim_next": 0.0}
 
 
 def _setup_viewer() -> None:
@@ -228,16 +237,21 @@ def _setup_viewer() -> None:
 
   from isaacsim.core.utils.viewports import set_camera_view  # pylint: disable=g-import-not-at-top
 
-  set_camera_view(eye=[1.35, 1.05, 0.85], target=[0.45, 0.05, 0.05])
+  if PRETTY:
+    from sim import pretty  # pylint: disable=g-import-not-at-top
+
+    set_camera_view(eye=pretty.EYE, target=pretty.TARGET)
+  else:
+    set_camera_view(eye=[1.35, 1.05, 0.85], target=[0.45, 0.05, 0.05])
   os.makedirs(GUI_FRAMES, exist_ok=True)
   for path in glob.glob(os.path.join(GUI_FRAMES, "*.png")):
     os.remove(path)
 
 
-def _save_viewer_frame() -> None:
-  """Saves the viewer image every GUI_FRAME_PERIOD_S of wall time."""
+def _save_viewer_frame(force: bool = False) -> None:
+  """Saves the viewer image every GUI_FRAME_PERIOD_S of wall time (or now, with force)."""
   now = time.perf_counter()
-  if now < _frame_state["next"]:
+  if now < _frame_state["next"] and not force:
     return
   _frame_state["next"] = now + GUI_FRAME_PERIOD_S
   from omni.kit.viewport.utility import capture_viewport_to_file  # pylint: disable=g-import-not-at-top
@@ -294,6 +308,10 @@ def main() -> None:
     render_s += last_render - start
     # sim_control spawns and deletes only inside renders (Inv §5.2).
     s.refresh_tf_targets()
+    if PRETTY:
+      from sim import pretty  # pylint: disable=g-import-not-at-top
+
+      pretty.bind_objects(s.stage)
 
   while simulation_app.is_running():
     for _ in range(timing["substeps"]):
@@ -352,8 +370,13 @@ def main() -> None:
     if pending_request is not None and t >= pending_request - tolerance_s:
       pending_request = None
       render(timing["camera_request_renders"], publish_images=True)
+    elif PRETTY and t >= _frame_state["sim_next"]:
+      _frame_state["sim_next"] = t + PRETTY_FRAME_PERIOD_S
+      render(1, publish_images=False)
+      if GUI:
+        _save_viewer_frame(force=True)
     elif time.perf_counter() - last_render >= (
-        GUI_RENDER_PERIOD_S if GUI else timing["render_period_wall_s"]
+        GUI_RENDER_PERIOD_S if GUI and not PRETTY else timing["render_period_wall_s"]
     ):
       render(1, publish_images=False)
       if GUI:

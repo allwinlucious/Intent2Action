@@ -85,6 +85,7 @@ NOT_SCENE_OBJECTS = ROBOT_OBJECTS | {CAMERA_OBJECT, CALIB_BOARD}
 OBJECT_WAIT_S = 5.0  # AddObject / RemoveObject / AttachCalibrationBoard / DetachObject wait this long for `world`
 RESET_OBJECTS_WAIT_S = 10.0  # ResetScene waits this long for the objects under their new IDs (Addendum A.4)
 SYNC_TOLERANCE_M = 0.005  # a detached object counts as back in sync within this of its true pose
+SUPPORT_TOLERANCE_M = 0.01  # an object rests on another when its bottom is this close to the other's top
 STOP_WAIT_S = 5.0
 STOP_SETTLE_TIMEOUT_S = 5.0  # sim
 SETTLE_TOLERANCE_RAD = 0.01  # a motion completes when every sensed joint is this close to the trajectory end
@@ -189,6 +190,7 @@ class World:
 
   def __init__(self, address: str):
     self.stub = world_grpc.ObjectWorldServiceStub(grpc.insecure_channel(address))
+    self.untouched: dict[str, list[str]] = {}  # held object -> objects whose collision checks with it are off
 
   def _call(self, method: str, request):
     try:
@@ -197,8 +199,9 @@ class World:
       raise _dependency_error(f"world service {method}", error) from error
 
   def objects(self, world_id: str = WORLD) -> list:
+    """World objects except the root and containers' collision parts (scene_sync's part_of children)."""
     request = world_pb.ListObjectsRequest(world_id=world_id, view=updates_pb.FULL)
-    return [o for o in self._call("ListObjects", request).objects if o.name != "root"]
+    return [o for o in self._call("ListObjects", request).objects if o.name != "root" and not World.string(o, "part_of")]
 
   def get(self, name: str):
     """The object (FULL view); NOT_FOUND (unknown_object) if `world` has none of that name."""
@@ -252,6 +255,8 @@ class World:
 
   def attach(self, name: str) -> None:
     """Parents the object to the flange of `franka`, keeping its pose."""
+    before = self.pose(name)
+    supports = self._supports(name)
     self._call(
         "ReparentObject",
         updates_pb.ReparentObjectRequest(
@@ -259,9 +264,18 @@ class World:
             parent_frame=refs_pb.FrameReference(by_name=refs_pb.FrameReferenceByName(object_name="franka", frame_name="flange")),
         ),
     )
+    # ReparentObject does not keep the pose (the object lands at the flange): restore it, now relative to the flange.
+    self._set_pose(name, before)
+    # A held object touches the fingers and still touches what it rested on: the planner must not count those as
+    # collisions (MoveIt's touch links). Switched back on by detach.
+    others = ["franka", "franka_hand", *supports]
+    for other in others:
+      self._toggle(name, other, enable=False)
+    self.untouched[name] = others
 
   def detach(self, name: str) -> None:
-    """Parents the object back to the root, keeping its pose."""
+    """Parents the object back to the root, keeping its pose; collision checks it had switched off come back on."""
+    before = self.pose(name)
     self._call(
         "ReparentObject",
         updates_pb.ReparentObjectRequest(
@@ -272,6 +286,41 @@ class World:
             ),
         ),
     )
+    self._set_pose(name, before)
+    for other in self.untouched.pop(name, []):
+      self._toggle(name, other, enable=True)
+
+  def _set_pose(self, name: str, pose: api.Pose) -> None:
+    node = refs_pb.TransformNodeReference(by_name=refs_pb.TransformNodeReferenceByName(
+        object=refs_pb.ObjectReferenceByName(object_name=name)))
+    self._call(
+        "UpdateTransform",
+        updates_pb.UpdateTransformRequest(world_id=WORLD, node_a=refs_pb.TransformNodeReference(id="root"),
+                                          node_b=node, node_to_update=node, a_t_b=to_pose_proto(pose)),
+    )
+
+  def _toggle(self, a: str, b: str, enable: bool) -> None:
+    ref = lambda n: refs_pb.ObjectReferenceWithEntityFilter(  # noqa: E731
+        reference=_by_name(n), entity_filter=refs_pb.ObjectEntityFilter(include_all_entities=True))
+    self._call("ToggleCollisions", updates_pb.ToggleCollisionsRequest(
+        world_id=WORLD, object_a=ref(a), object_b=ref(b),
+        toggle_mode=updates_pb.TOGGLE_MODE_ENABLE if enable else updates_pb.TOGGLE_MODE_DISABLE))
+
+  def _supports(self, name: str) -> list[str]:
+    """World objects the object rests on (its bottom within 1 cm of their top, its centre over them); for an open
+    container, its floor part."""
+    me = self.pose(name)
+    out = []
+    for o in self._call("ListObjects", world_pb.ListObjectsRequest(world_id=WORLD, view=updates_pb.FULL)).objects:
+      catalog = grasp.object_catalog(o)
+      if o.name in (name, "root") or o.name in ROBOT_OBJECTS or catalog is None:
+        continue
+      pose, dims = self.pose(o.name), grasp.catalog_dims(catalog)
+      container = grasp.catalog_entry(catalog).get("container")
+      top = pose.z + (container["floor"] if container else dims[2])
+      if abs(me.z - top) <= SUPPORT_TOLERANCE_M and abs(me.x - pose.x) <= dims[0] / 2 and abs(me.y - pose.y) <= dims[1] / 2:
+        out.append(f"{o.name}_part_0" if container else o.name)
+    return out
 
   def attached(self) -> list[str]:
     """Objects (other than the robot's own) whose parent is not the root."""
@@ -1003,8 +1052,9 @@ class RobotService(api_grpc.RobotServiceServicer):
         taken = place.occupied(target_pose, target_dims, others)
         footprint = place.held_footprint(held_dims, place.yaw(held_pose), place.yaw(tcp), place.yaw(target_pose))
         spots = place.candidates(target_pose, target_dims, container, footprint, taken)[:PLACE_CANDIDATES]
-        for spot in spots:
-          release = place.release_pose(tcp, held_pose, spot)
+        clearances = place.BOX_RELEASE_CLEARANCES_M if container else (place.RELEASE_CLEARANCE_M,)
+        poses = ((place.release_pose(tcp, held_pose, spot, c), spot) for spot in spots for c in clearances)
+        for release, _ in poses:
           approach = place.above(release)
           if self._feasible(release) and self._feasible(approach):
             break

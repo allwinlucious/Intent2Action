@@ -11,6 +11,6 @@ container:
 dims:
 - 0.25
 - 0.21
-- 0.08
+- 0.05
 mass: null
 static: true

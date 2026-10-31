@@ -30,8 +30,8 @@ SCENES = {
   "yellow_on_red": ["red_cube", "small_yellow_cube", "blue_cube"],
 }
 BOXES = {
-  "cubes_in_box": [("red_box", 0.45, -0.22, 0.0)],
-  "sort_by_color": [("red_box", 0.45, -0.22, 0.0), ("blue_box", 0.62, -0.05, 0.0)],
+  "cubes_in_box": [("red_box", 0.38, -0.24, 0.0)],
+  "sort_by_color": [("red_box", 0.38, -0.24, 0.0), ("blue_box", 0.66, -0.20, 0.0)],
   "yellow_on_red": [],
 }
 

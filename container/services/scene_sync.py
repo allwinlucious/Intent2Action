@@ -240,7 +240,7 @@ class Sync:
     self.known: set[str] = set()  # objects created by this process
     self.last_seen: dict[str, float] = {}
     self.spawned = 0  # last n of spawn_<n>
-    self.geometry_refs = {}  # catalog -> GeometryStorageRefs
+    self.geometry_refs = {}  # glb path -> GeometryStorageRefs
     self.attributes: dict[str, tuple[str, str]] = {}  # catalog -> (category, color word) from object.yaml
     self.unknown_logged: set[str] = set()
     self.error_logged: dict[str, float] = {}
@@ -420,7 +420,10 @@ class Sync:
     catalog = self.catalogs[prim]
     name = self.name(prim)
     category, color = self._attributes(catalog)
-    refs = self._geometry(catalog)
+    refs = self._geometry(CATALOG_DIR / catalog / "mesh.glb")
+    # An open container collides as child objects, one convex slab each (floor + walls): the planner checks an
+    # object's collision geometry as one convex hull, which would fill the cavity.
+    parts = sorted((CATALOG_DIR / catalog / "collision_parts").glob("part_*.glb"))
     for w in self.worlds:
       if name in existing[w]:
         self._delete(w, name)
@@ -436,28 +439,48 @@ class Sync:
           view=updates_pb.BASIC,
       )
       geometries = request.create_single_entity_object.geometry_component.named_geometries
-      for set_name in (VISUAL_SET, COLLISION_SET):
-        geometries[set_name].named_geometries[catalog].geometry.geo_ref.CopyFrom(refs)
+      geometries[VISUAL_SET].named_geometries[catalog].geometry.geo_ref.CopyFrom(refs)
+      if not parts:
+        geometries[COLLISION_SET].named_geometries[catalog].geometry.geo_ref.CopyFrom(refs)
       # catalog: PlanGrasp and ListObjects read its dims; category and color: ListObjects.
       for key, value in (("source", GROUND_TRUTH), ("catalog", catalog), ("prim", prim), ("category", category),
                          ("color", color)):
         request.user_data[key].Pack(wrappers_pb2.StringValue(value=value))
       self.world.CreateObject(request, timeout=RPC_TIMEOUT_S)
+      for part in parts:
+        self._create_part(w, name, part)
       log.info(
           "object created id=%s prim=%s catalog=%s world=%s replaced=%s pose=%s",
           name, prim, catalog, w, name in existing[w], [round(v, 4) for v in pose],
       )
     self.known.add(prim)
 
-  def _geometry(self, catalog: str):
-    if catalog not in self.geometry_refs:
-      glb = (CATALOG_DIR / catalog / "mesh.glb").read_bytes()
+  def _create_part(self, world_id: str, parent: str, glb: Path) -> None:
+    """One collision slab of container `parent`, as its child object (user data part_of = parent)."""
+    request = updates_pb.CreateObjectRequest(
+        world_id=world_id,
+        name=f"{parent}_{glb.stem}",
+        parent_object=refs_pb.ObjectReferenceWithEntityFilter(
+            reference=_by_name(parent),
+            entity_filter=refs_pb.ObjectEntityFilter(include_final_entity=True),
+        ),
+        parent_object_t_created_object=self._pose_proto((0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)),
+        view=updates_pb.BASIC,
+    )
+    geometries = request.create_single_entity_object.geometry_component.named_geometries
+    geometries[COLLISION_SET].named_geometries[glb.stem].geometry.geo_ref.CopyFrom(self._geometry(glb))
+    request.user_data["part_of"].Pack(wrappers_pb2.StringValue(value=parent))
+    self.world.CreateObject(request, timeout=RPC_TIMEOUT_S)
+
+  def _geometry(self, path: Path):
+    if path not in self.geometry_refs:
       response = self.geometry.CreateGeometry(
-          geometry_service_pb2.CreateGeometryRequest(data=geometry_service_types_pb2.GeometryData(gltf_bytes=glb)),
+          geometry_service_pb2.CreateGeometryRequest(
+              data=geometry_service_types_pb2.GeometryData(gltf_bytes=path.read_bytes())),
           timeout=RPC_TIMEOUT_S,
       )
-      self.geometry_refs[catalog] = response.geometry_storage_refs
-    return self.geometry_refs[catalog]
+      self.geometry_refs[path] = response.geometry_storage_refs
+    return self.geometry_refs[path]
 
   def _full_objects(self, world_id: str) -> list:
     return self.world.ListObjects(
@@ -470,7 +493,9 @@ class Sync:
 
   def _delete(self, world_id: str, name: str, reparent: bool = False) -> None:
     self.world.DeleteObject(
-        updates_pb.DeleteObjectRequest(world_id=world_id, object=_by_name(name), reparent_child_objects=reparent),
+        # force (unless reparenting): a container's collision parts are its children and go with it.
+        updates_pb.DeleteObjectRequest(world_id=world_id, object=_by_name(name), reparent_child_objects=reparent,
+                                       force=not reparent),
         timeout=RPC_TIMEOUT_S,
     )
 

@@ -70,7 +70,7 @@ class Isaac:
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline and self.process.poll() is None:
       for line in self.lines:
-        if match := re.match(r"READY pid=(\d+)", line):
+        if match := re.search(r"READY pid=(\d+)", line):  # may follow other output on the same line
           return int(match.group(1))
       time.sleep(0.5)
     return None
