@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / "gen")]
 
 from learn import families  # noqa: E402
-from learn.episodes import connect, read_jsonl, record, run_episode, stack  # noqa: E402
+from learn.episodes import connect, in_shard, read_jsonl, record, run_episode, stack  # noqa: E402
 from program_runtime.agent import ChatClient, ProgramWriter  # noqa: E402
 from program_runtime.api import Obj  # noqa: E402
 
@@ -77,15 +77,17 @@ def generate(records: list[dict], k: int, out_path, client) -> None:
         f"file: {len(written)} programs, first try {sum(value['attempts'] == 1 for value in written)}")
 
 
-def run(samples: list[dict], out_path, sim_stub, robot_stub) -> None:
+def run(samples: list[dict], out_path, sim_stub, robot_stub, shard: str | None = None, agent=None) -> None:
+  """`agent`: the recovery agent for handoffs (evaluation of a model version with recovery), or None."""
   done = {(value["family"], value["seed"], value["sample"]) for value in read_jsonl(out_path)}
   todo = [value for value in samples
-          if "program" in value and (value["family"], value["seed"], value["sample"]) not in done]
+          if "program" in value and (value["family"], value["seed"], value["sample"]) not in done
+          and in_shard(value["family"], value["seed"], shard)]
   print(f"resume: {len(done)} samples already in {out_path}; {len(todo)} to run", flush=True)
   with open(out_path, "a") as out:
     for value in todo:
       task = families.generate(value["family"], value["seed"])
-      episode = run_episode(task, value["program"], sim_stub, robot_stub)
+      episode = run_episode(task, value["program"], sim_stub, robot_stub, agent=agent)
       out.write(json.dumps(record(episode) | {"sample": value["sample"], "intent": task.intent}) + "\n")
       out.flush()
   print(f"wrote {out_path}")
@@ -106,7 +108,11 @@ def main() -> None:
   sub.add_argument("--k", type=int, default=4)
   sub.add_argument("--solve", help="default: logs/expert/<split>.jsonl")
   sub.add_argument("--out", required=True)
+  sub.add_argument("--model", help="model name at the endpoint (a version: G0 is the base name, G1... adapters)")
+  sub.add_argument("--temperature", type=float, default=TEMPERATURE, help="0 for evaluation")
   sub = subparsers.add_parser("run")
+  sub.add_argument("--shard", help="k/N: only this worker's samples (learn/fleet.py)")
+  sub.add_argument("--recover", metavar="MODEL", help="the model version as live recovery agent on failures")
   sub.add_argument("--in", dest="input", required=True)
   sub.add_argument("--out", required=True)
   sub.add_argument("--start-stack", choices=("none", "plan"), default="none")
@@ -119,11 +125,17 @@ def main() -> None:
     if unknown:
       parser.error(f"families not valid for {args.split}: {', '.join(unknown)}")
     solve = args.solve or str(ROOT / "logs" / "expert" / f"{args.split}.jsonl")
-    generate(solve_records(solve, args.split, names, args.n), args.k, args.out, ChatClient(temperature=TEMPERATURE))
+    generate(solve_records(solve, args.split, names, args.n), args.k, args.out,
+             ChatClient(model=args.model, temperature=args.temperature))
   else:
     with stack(args.start_stack):
       sim_stub, robot_stub = connect()
-      run(read_jsonl(args.input), args.out, sim_stub, robot_stub)
+      agent = None
+      if args.recover:
+        from mcp_server.server import DESCRIPTOR_SET, Tools
+        from program_runtime.agent import RecoveryAgent
+        agent = RecoveryAgent(ChatClient(model=args.recover), robot_stub, Tools(DESCRIPTOR_SET))
+      run(read_jsonl(args.input), args.out, sim_stub, robot_stub, args.shard, agent)
 
 
 if __name__ == "__main__":
