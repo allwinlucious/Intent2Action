@@ -1102,14 +1102,18 @@ class RobotService(api_grpc.RobotServiceServicer):
           # The approach joints near the current ones, and the release near those: a pose target lets the planner
           # pick any IK branch (e.g. the arm turned backwards), from which no straight lowering path exists.
           approach_joints = self._feasible(approach)
-          if approach_joints is None or self._feasible(release, approach_joints) is None:
+          release_joints = None if approach_joints is None else self._feasible(release, approach_joints)
+          if release_joints is None:
             continue
           # Feasible end poses can still have no straight lowering path (e.g. a wrist flip): then the next free
           # spot is planned. Nothing has touched the object or the target yet, so this is planning, not a retry.
           try:
             self.r.execute(op, [segment(api.Waypoint(joints=api.Joints(positions=approach_joints)), api.TCP)],
                            detail="moving above the place spot")
-            self.r.move(op, release, api.LINEAR, "lowering")
+            # To the checked release joints: a Cartesian line can end in another IK solution, one that touches a
+            # box wall, from which no retreat can be planned.
+            self.r.execute(op, [segment(api.Waypoint(joints=api.Joints(positions=release_joints)), api.TCP)],
+                           detail="lowering")
           except ApiError as error:
             if not (error.code in POSE_REJECTED_CODES and error.message.startswith("planning failed")):
               raise
@@ -1127,7 +1131,8 @@ class RobotService(api_grpc.RobotServiceServicer):
           raise ApiError(grpc.StatusCode.ABORTED, f"no collision-free place pose on top of {target_id}")
         self._gripper(op, RELEASE)
         self.r.detach(object_id)
-        self.r.move(op, approach, api.LINEAR, "retreating")
+        self.r.execute(op, [segment(api.Waypoint(joints=api.Joints(positions=approach_joints)), api.TCP)],
+                       detail="retreating")
         object_pose = world.pose(object_id)
       except ApiError as error:
         log.warning("place object=%s target=%s status=%s duration_s=%.3f message=%s",
