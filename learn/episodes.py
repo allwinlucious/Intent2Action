@@ -1,7 +1,10 @@
 """One episode: load a task into the running stack, run a program on it, grade the result with the rule checker."""
 
+import contextlib
 import dataclasses
+import json
 from pathlib import Path
+import socket
 import sys
 import time
 
@@ -38,12 +41,49 @@ class Episode:
   calls: int  # pick + place calls made
   duration_s: float
   events: list[dict]
+  objects: list[dict] = dataclasses.field(default_factory=list)  # the scene right after loading, as Obj dicts
 
 
 def connect():
   """(sim_stub, robot_stub) on one channel: robot_service serves both."""
   channel = grpc.insecure_channel(ADDRESS)
   return api_grpc.SimServiceStub(channel), api_grpc.RobotServiceStub(channel)
+
+
+def _require_port() -> None:
+  host, port = ADDRESS.split(":")
+  try:
+    socket.create_connection((host, int(port)), timeout=2).close()
+  except OSError:
+    sys.exit(f"robot_service is not reachable on {ADDRESS}: start the stack (plan tier: "
+             f"ROBOT_BACKEND=plan container/run.sh) or pass --start-stack plan")
+
+
+@contextlib.contextmanager
+def stack(start: str):
+  """Starts the plan-tier container when `start` is "plan" (stopped on exit), then requires robot_service."""
+  run = None
+  try:
+    if start == "plan":
+      sys.path.insert(0, str(ROOT / "tests" / "e2e"))
+      import phase3_hwm_check as hwm  # noqa: E402  (imports ICON's Python; only needed to start the stack)
+      import plan_tier_check  # noqa: E402
+
+      hwm.CONTAINER_LOG = plan_tier_check.CONTAINER_LOG
+      run = hwm._Run()
+      run.start_container(backend="plan")
+      plan_tier_check._wait_ready()
+    _require_port()
+    yield
+  finally:
+    if run is not None:
+      run.stop_container()
+
+
+def read_jsonl(path) -> list[dict]:
+  """The records of a JSON-lines file; none when it does not exist."""
+  path = Path(path)
+  return [json.loads(line) for line in path.read_text().splitlines() if line.strip()] if path.exists() else []
 
 
 def record(episode: Episode) -> dict:
@@ -58,6 +98,7 @@ def run_episode(task, program, sim_stub, robot_stub, agent=None, strategy=None) 
     raise RuntimeError(f"stack not reachable: {error.code().name}: {error.details()}") from error
   started = time.monotonic()
   families.load(task, sim_stub, robot_stub)
+  objects = [dataclasses.asdict(obj) for obj in GrpcBackend(stub=robot_stub).list_objects()]
   before = truth_snapshot(sim_stub)
   events = []
   result = run(program, RobotAPI(GrpcBackend(stub=robot_stub)), agent=agent, log=events.append)
@@ -68,7 +109,7 @@ def run_episode(task, program, sim_stub, robot_stub, agent=None, strategy=None) 
     per_object=rules.per_object, error=result.error, failure=result.failures[0] if result.failures else None,
     handoffs=result.handoffs,
     calls=sum(event["kind"] == "result" and event["fn"] in {"pick", "place"} for event in events),
-    duration_s=round(time.monotonic() - started, 2), events=events,
+    duration_s=round(time.monotonic() - started, 2), events=events, objects=objects,
   )
   print(f"{'OK' if episode.ok else 'FAIL'} {task.family} {task.seed} {strategy or 'model'} {episode.duration_s:.1f} "
         f"{episode.calls} {episode.error or ('' if episode.ok else episode.rules_summary)}", flush=True)

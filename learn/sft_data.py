@@ -2,26 +2,48 @@
 
   .venv/bin/python learn/sft_data.py smoke --out logs/sft/smoke
       program-writing rows from the example programs on random fake scenes: exercises the training path only
+  .venv/bin/python learn/sft_data.py build --version {G1,G2,G3} --out DIR [--solve PATH] [--samples PATH]
+      [--recovery PATH]
+      G1: program rows of every solved train task; G2: G1 + rows of Glimmer's successful samples (at most 2 per
+      task); G3: G2 + confirmed recovery rows (G1 + recovery rows when the samples file does not exist), recovery
+      rows at most 30 % of the dataset. Writes DIR/{train,validation}.jsonl and DIR/manifest.json; then
+      learn/render_rows.py renders them with Glimmer's chat template.
 
-Prompts come from program_runtime.agent.program_messages, the writer's own prompt, so training and use match.
+Prompts come from program_runtime.agent.program_messages and recovery_messages, the product's own prompts, so
+training and use match. Recovery rows also carry the `tools` the recovery agent sends.
 """
 
 import argparse
+import collections
 import json
+import math
 from pathlib import Path
+import random
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path[:0] = [str(ROOT), str(ROOT / "learn")]
+sys.path[:0] = [str(ROOT), str(ROOT / "gen"), str(ROOT / "learn")]
 
 from glimmer_program_test import scene  # noqa: E402
-from program_runtime.agent import program_messages  # noqa: E402
+from learn.episodes import read_jsonl  # noqa: E402
+from mcp_server.server import DESCRIPTOR_SET, Tools  # noqa: E402
+from program_runtime.agent import program_messages, recovery_messages, tool_specs  # noqa: E402
+from program_runtime.api import Obj  # noqa: E402
 
 EXAMPLES = ROOT / "program_runtime" / "examples"
+KINDS = ("program", "self", "recovery")
+SELF_PER_TASK = 2
 
 
 def program_row(intent: dict, objects, program: str) -> dict:
-  return {"messages": [*program_messages(intent, objects), {"role": "assistant", "content": program}]}
+  """The fenced form is what the writer's parser accepts and what the zero-shot model writes."""
+  return {"messages": [*program_messages(intent, objects), {"role": "assistant",
+                                                            "content": "```python\n" + program + "```"}]}
+
+
+def recovery_row(example: dict, specs: list[dict]) -> dict:
+  return {"messages": [*recovery_messages(example["context"]),
+                       {"role": "assistant", "content": json.dumps(example["decision"])}], "tools": specs}
 
 
 def smoke(out: Path, train: int = 24, validation: int = 4) -> None:
@@ -37,9 +59,105 @@ def smoke(out: Path, train: int = 24, validation: int = 4) -> None:
   print(f"{out}: {train} train, {validation} validation rows")
 
 
+def _objects(value: dict) -> list[Obj]:
+  return [Obj(**obj) for obj in value["objects"]]
+
+
+def program_rows(solve: list[dict]) -> list[tuple[str, str, dict]]:
+  return [("program", value["family"], program_row(value["intent"], _objects(value), value["expert_program"]))
+          for value in solve if value["expert_program"]]
+
+
+def self_rows(solve: list[dict], samples: list[dict]) -> list[tuple[str, str, dict]]:
+  """Per task the two lowest sample indexes among the successful, distinct programs, on the scene they were
+  written for (the solve record's)."""
+  scenes = {(value["family"], value["seed"]): value for value in solve}
+  chosen = collections.defaultdict(list)
+  for value in sorted((value for value in samples if value["ok"]), key=lambda value: value["sample"]):
+    key = (value["family"], value["seed"])
+    if key in scenes and value["program"] not in chosen[key] and len(chosen[key]) < SELF_PER_TASK:
+      chosen[key].append(value["program"])
+  return [("self", key[0], program_row(scenes[key]["intent"], _objects(scenes[key]), program))
+          for key, programs in chosen.items() for program in programs]
+
+
+def recovery_rows(examples: list[dict], specs: list[dict], others: int) -> list[tuple[str, str, dict]]:
+  """Confirmed examples, capped at 30 % of the dataset: r <= 0.3 (others + r) is r <= 3 * others / 7."""
+  rows = [("recovery", value["family"], recovery_row(value, specs)) for value in examples if value.get("confirmed")]
+  limit = 3 * others // 7
+  return random.Random(0).sample(rows, limit) if len(rows) > limit else rows
+
+
+def validation_size(n: int) -> int:
+  if n < 2:
+    return 0
+  share = math.ceil(n / 20)
+  return share if share >= 16 else max(1, min(16, n // 5))
+
+
+def split(rows: list) -> tuple[list, list]:
+  """(train, validation) after a seed-0 shuffle."""
+  rows = list(rows)
+  random.Random(0).shuffle(rows)
+  n_val = validation_size(len(rows))
+  return rows[n_val:], rows[:n_val]
+
+
+def _train(path) -> list[dict]:
+  if not Path(path).exists():
+    sys.exit(f"{path} does not exist")
+  return [value for value in read_jsonl(path) if value["split"] == "train"]
+
+
+def build(version: str, solve_path, samples_path, recovery_path, out: Path) -> dict:
+  solve = [value for value in _train(solve_path) if "objects" in value]
+  rows = program_rows(solve)
+  sources = [str(solve_path)]
+  fallback = None
+  if version in ("G2", "G3"):
+    if Path(samples_path).exists():
+      rows += self_rows(solve, _train(samples_path))
+      sources.append(str(samples_path))
+    elif version == "G2":
+      sys.exit(f"G2 needs the samples file {samples_path}, which does not exist")
+    else:
+      fallback = "the samples file does not exist: G1 + recovery rows"
+  if version == "G3":
+    rows += recovery_rows(_train(recovery_path), tool_specs(Tools(DESCRIPTOR_SET)), len(rows))
+    sources.append(str(recovery_path))
+  train, validation = split(rows)
+  out.mkdir(parents=True, exist_ok=True)
+  for name, part in (("train", train), ("validation", validation)):
+    (out / f"{name}.jsonl").write_text("".join(json.dumps(row) + "\n" for _, _, row in part))
+  kinds = collections.Counter(kind for kind, _, _ in rows)
+  per_family = collections.defaultdict(collections.Counter)
+  for kind, family, _ in rows:
+    per_family[family][kind] += 1
+  manifest = {
+    "version": version, "rows": {kind: kinds[kind] for kind in KINDS},
+    "families": {family: {kind: counts[kind] for kind in KINDS} for family, counts in sorted(per_family.items())},
+    "train": len(train), "validation": len(validation), "fallback": fallback, "sources": sources,
+  }
+  (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+  print(f"{version} -> {out}: train={len(train)} validation={len(validation)} "
+        + " ".join(f"{kind}={kinds[kind]}" for kind in KINDS) + (f" ({fallback})" if fallback else ""))
+  for family, counts in manifest["families"].items():
+    print(f"  {family}: " + " ".join(f"{kind}={counts[kind]}" for kind in KINDS))
+  return manifest
+
+
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
-  parser.add_argument("kind", choices=["smoke"])
-  parser.add_argument("--out", default=str(ROOT / "logs/sft/smoke"))
+  subparsers = parser.add_subparsers(dest="kind", required=True)
+  subparsers.add_parser("smoke").add_argument("--out", default=str(ROOT / "logs/sft/smoke"))
+  sub = subparsers.add_parser("build")
+  sub.add_argument("--version", choices=("G1", "G2", "G3"), required=True)
+  sub.add_argument("--solve", default=str(ROOT / "logs/expert/train.jsonl"))
+  sub.add_argument("--samples", default=str(ROOT / "logs/samples/train_episodes.jsonl"))
+  sub.add_argument("--recovery", default=str(ROOT / "logs/expert/recovery_train.jsonl"))
+  sub.add_argument("--out", required=True)
   args = parser.parse_args()
-  smoke(Path(args.out))
+  if args.kind == "smoke":
+    smoke(Path(args.out))
+  else:
+    build(args.version, args.solve, args.samples, args.recovery, Path(args.out))

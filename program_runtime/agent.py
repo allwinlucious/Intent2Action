@@ -18,9 +18,11 @@ RUNGS = {"reobserve", "retry_step", "fix_world", "skip", "patch", "ask_user", "s
 
 
 class ChatClient:
-  """Minimal client for an OpenAI-compatible chat completions endpoint."""
+  """Minimal client for an OpenAI-compatible chat completions endpoint. A temperature in LLM_EXTRA_BODY overrides
+  the `temperature` argument."""
 
-  def __init__(self, base_url: str | None = None, api_key: str | None = None, model: str | None = None):
+  def __init__(self, base_url: str | None = None, api_key: str | None = None, model: str | None = None,
+               temperature: float = 0.0):
     values = {
       "LLM_BASE_URL": base_url if base_url is not None else os.environ.get("LLM_BASE_URL"),
       "LLM_API_KEY": api_key if api_key is not None else os.environ.get("LLM_API_KEY"),
@@ -32,6 +34,7 @@ class ChatClient:
     self.base_url = values["LLM_BASE_URL"].rstrip("/")
     self.api_key = values["LLM_API_KEY"]
     self.model = values["LLM_MODEL"]
+    self.temperature = temperature
     # Endpoint-specific request fields, e.g. {"chat_template_kwargs": {"reasoning_strength": "low"}} for Glimmer.
     self.extra = json.loads(os.environ.get("LLM_EXTRA_BODY") or "{}")
 
@@ -40,7 +43,7 @@ class ChatClient:
     body = {
       "model": self.model,
       "messages": messages,
-      "temperature": 0,
+      "temperature": self.temperature,
       "max_tokens": 8192,  # reasoning models spend part of it before the answer
       **self.extra,
     }
@@ -163,6 +166,35 @@ def _parse_decision(content) -> dict:
   return decision
 
 
+def tool_specs(tools) -> list[dict]:
+  """The chat tool specs of the recovery agent's visible robot tools (also the training rows' tools)."""
+  output = []
+  for name, (_, _, tool) in tools.by_name.items():
+    if name not in EXCLUDED_TOOLS:
+      output.append({
+        "type": "function",
+        "function": {"name": name, "description": tool.description, "parameters": tool.input_schema},
+      })
+  return output
+
+
+def recovery_messages(context: dict) -> list[dict]:
+  """The recovery agent's prompt for one handoff context (also the training prompt: one source for both)."""
+  system = (
+    "Choose the lowest recovery rung that can work and always give a reason. Rungs: reobserve retries "
+    "the failed call with fresh objects; retry_step retries it; fix_world uses robot tools then retries; "
+    "skip continues; patch restarts a checked replacement program; ask_user asks one question; stop fails. "
+    "Patches may use only the program API and builtins, must resolve objects with find, contain no object "
+    "ids or float literals, and end with verify(lambda: ...). Respect the remaining budget. You may call "
+    "visible robot tools before deciding. Finish with one decision JSON object."
+  )
+  public_context = {key: value for key, value in context.items() if key != "_backend"}
+  return [
+    {"role": "system", "content": system},
+    {"role": "user", "content": json.dumps(public_context)},
+  ]
+
+
 class RecoveryAgent:
   """Climbs the budgeted recovery ladder, optionally using robot tools first."""
 
@@ -172,14 +204,7 @@ class RecoveryAgent:
     self.tools = tools
 
   def _specs(self) -> list[dict]:
-    output = []
-    for name, (_, _, tool) in self.tools.by_name.items():
-      if name not in EXCLUDED_TOOLS:
-        output.append({
-          "type": "function",
-          "function": {"name": name, "description": tool.description, "parameters": tool.input_schema},
-        })
-    return output
+    return tool_specs(self.tools)
 
   def _tool_text(self, call: dict, names: set[str]) -> str:
     from mcp_server import server
@@ -198,19 +223,7 @@ class RecoveryAgent:
 
   def recover(self, context: dict) -> dict:
     """Returns one validated recovery decision after at most twelve tool calls."""
-    system = (
-      "Choose the lowest recovery rung that can work and always give a reason. Rungs: reobserve retries "
-      "the failed call with fresh objects; retry_step retries it; fix_world uses robot tools then retries; "
-      "skip continues; patch restarts a checked replacement program; ask_user asks one question; stop fails. "
-      "Patches may use only the program API and builtins, must resolve objects with find, contain no object "
-      "ids or float literals, and end with verify(lambda: ...). Respect the remaining budget. You may call "
-      "visible robot tools before deciding. Finish with one decision JSON object."
-    )
-    public_context = {key: value for key, value in context.items() if key != "_backend"}
-    messages = [
-      {"role": "system", "content": system},
-      {"role": "user", "content": json.dumps(public_context)},
-    ]
+    messages = recovery_messages(context)
     specs = self._specs()
     names = {spec["function"]["name"] for spec in specs}
     used = 0

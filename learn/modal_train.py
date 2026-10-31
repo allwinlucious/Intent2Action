@@ -1,7 +1,7 @@
 """Glimmer QLoRA SFT on Modal with the model cookbook's Axolotl recipe (one H100).
 
   tools/modal.sh run learn/modal_train.py --data logs/sft/smoke --run smoke --max-steps 4
-      uploads <data>/{train,validation}.jsonl, trains, saves the adapter on the volume `show-once-train`
+      uploads <data>/rendered/{train,validation}.jsonl (learn/render_rows.py), trains, saves the adapter on the volume `show-once-train`
       under runs/<run>/, and generates one reply with it from the first validation prompt.
 
 The environment, versions and hyperparameters are the cookbook's `muse-glimmer-30b-qlora.yaml` and setup (Axolotl
@@ -46,8 +46,16 @@ def _config(data: str, run: str) -> str:
   import yaml
   config = yaml.safe_load(Path("/opt/cookbook-qlora.yaml").read_text())
   config.pop("model_revision", None)
+  # Rows are rendered with Glimmer's chat template in Python (learn/render_rows.py): the exact product prompt,
+  # tool definitions included, as Axolotl's template-free segments (prompt masked, reply trained). Text only, so
+  # the cookbook's multimodal processor and collator settings do not apply.
   for key in ("datasets", "test_datasets"):
-    config[key][0]["path"] = f"/train/data/{data}/{'train' if key == 'datasets' else 'validation'}.jsonl"
+    config[key] = [{"path": f"/train/data/{data}/{'train' if key == 'datasets' else 'validation'}.jsonl",
+                    "type": "input_output", **({"split": "train"} if key == "test_datasets" else {})}]
+  for key in ("processor_type", "skip_prepare_dataset", "remove_unused_columns"):
+    config.pop(key, None)
+  # The same model class as the cookbook's multimodal path, so the LoRA target names (model.language_model...) match.
+  config["model_type"] = "AutoModelForImageTextToText"
   config["attn_implementation"] = "sdpa"
   config.update(dataset_prepared_path=f"/train/cache/{run}", output_dir=f"/train/runs/{run}",
                 wandb_project="", wandb_mode="disabled")
@@ -85,14 +93,13 @@ def sample(data: str, run: str) -> str:
   adapter = sorted(Path(f"/train/runs/{run}").glob("checkpoint-*"))[-1] if not (
       Path(f"/train/runs/{run}") / "adapter_config.json").exists() else Path(f"/train/runs/{run}")
   row = json.loads(Path(f"/train/data/{data}/validation.jsonl").read_text().splitlines()[0])
+  prompt_text = row["segments"][0]["text"]
   processor = transformers.AutoProcessor.from_pretrained(MODEL)
   model = transformers.AutoModelForImageTextToText.from_pretrained(
       MODEL, device_map="cuda", quantization_config=transformers.BitsAndBytesConfig(
           load_in_4bit=True, bnb_4bit_compute_dtype=torch.bfloat16, bnb_4bit_quant_type="nf4"))
   model = peft.PeftModel.from_pretrained(model, str(adapter))
-  prompt = [m for m in row["messages"] if m["role"] != "assistant"]
-  inputs = processor.apply_chat_template(prompt, add_generation_prompt=True, tokenize=True, return_dict=True,
-                                         return_tensors="pt", reasoning_strength="low").to("cuda")
+  inputs = processor.tokenizer(prompt_text, return_tensors="pt", add_special_tokens=False).to("cuda")
   output = model.generate(**inputs, max_new_tokens=600, do_sample=False)
   return processor.decode(output[0][inputs["input_ids"].shape[1]:], skip_special_tokens=False)
 
@@ -103,7 +110,7 @@ def main(data: str, run: str, max_steps: int = 0, budget_usd: float = 3.0):
   name = Path(data).name
   with train_volume.batch_upload(force=True) as batch:
     for split in ("train", "validation"):
-      batch.put_file(f"{data}/{split}.jsonl", f"/data/{name}/{split}.jsonl")
+      batch.put_file(f"{data}/rendered/{split}.jsonl", f"/data/{name}/{split}.jsonl")
   result = train.remote(name, run, max_steps)
   print(result["log_tail"][-1500:])
   print("---- sample from the adapter ----")

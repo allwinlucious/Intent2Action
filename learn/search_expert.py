@@ -5,6 +5,8 @@
 
 `solve` writes one JSON line per task; `recovery` re-runs the failed `listed` episodes of solved tasks with an agent
 that answers the first handoff with the expert program as a patch, and writes the confirmed examples.
+Both append to their output and skip tasks already in it, so a stopped run continues where it stopped; solve
+records without `objects` (written before phase L4) count as absent.
 """
 
 import argparse
@@ -12,7 +14,6 @@ import collections
 import dataclasses
 import json
 from pathlib import Path
-import socket
 import statistics
 import sys
 
@@ -20,9 +21,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / "gen")]
 
 from learn import families, strategies  # noqa: E402
-from learn.episodes import connect, record, run_episode  # noqa: E402
+from learn.episodes import connect, read_jsonl, record, run_episode, stack  # noqa: E402
 
-PORT = 18100
 STACK_TOLERANCE_M = 0.01
 
 
@@ -53,6 +53,7 @@ def task_record(task, episodes: list) -> dict:
     "placements": [dataclasses.asdict(placement) for placement in task.placements],
     "expert_strategy": expert.strategy if expert else None,
     "expert_program": expert.program if expert else None,
+    "objects": episodes[0].objects,
     "episodes": [record(episode) for episode in episodes],
   }
 
@@ -119,31 +120,38 @@ def _solve_summary(family: str, records: list[dict]) -> str:
           f"mean_calls={_mean([e['calls'] for e in episodes]):.1f}")
 
 
+def _solve_records(path) -> list[dict]:
+  return [value for value in read_jsonl(path) if "objects" in value]
+
+
 def _run_solve(args, names: list[str], sim_stub, robot_stub) -> None:
-  by_family = {}
-  with open(args.out, "w") as out:
+  done = {(value["family"], value["seed"]) for value in _solve_records(args.out)}
+  print(f"resume: {len(done)} tasks already in {args.out}", flush=True)
+  with open(args.out, "a") as out:
     for family in names:
-      by_family[family] = []
       for task in families.tasks(family, args.split, args.n):
+        if (task.family, task.seed) in done:
+          continue
         value = task_record(task, solve(task, sim_stub, robot_stub))
-        by_family[family].append(value)
         out.write(json.dumps(value) + "\n")
         out.flush()
   print(f"wrote {args.out}")
-  for family, records in by_family.items():
-    print(_solve_summary(family, records))
+  records = _solve_records(args.out)
+  for family in names:
+    print(_solve_summary(family, [value for value in records if value["family"] == family]))
 
 
 def _run_recovery(args, names: list[str], sim_stub, robot_stub) -> None:
   start = 100000 if args.split == "heldout" else 0
-  values = [json.loads(line) for line in Path(args.input).read_text().splitlines() if line.strip()]
-  values = [value for value in values if value["split"] == args.split and value["family"] in names
-            and value["seed"] < start + args.n]
+  values = [value for value in _solve_records(args.input) if value["split"] == args.split
+            and value["family"] in names and value["seed"] < start + args.n]
+  done = {(value["family"], value["seed"]) for value in read_jsonl(args.out)}
+  print(f"resume: {len(done)} tasks already in {args.out}", flush=True)
   counts = {family: collections.Counter() for family in names}
   timing = {family: [] for family in names}
-  with open(args.out, "w") as out:
+  with open(args.out, "a") as out:
     for value in values:
-      if not _eligible(value):
+      if not _eligible(value) or (value["family"], value["seed"]) in done:
         continue
       outcome, example, episode = recover(value, sim_stub, robot_stub)
       counts[value["family"]][outcome] += 1
@@ -153,21 +161,15 @@ def _run_recovery(args, names: list[str], sim_stub, robot_stub) -> None:
         out.flush()
   print(f"wrote {args.out}")
   outcomes = ("confirmed", "not_confirmed", "no_handoff")
+  in_file = collections.Counter(value["family"] for value in read_jsonl(args.out))
   for family in names:
     episodes = timing[family]
     print(f"{family}: tasks={len(episodes)} " + " ".join(f"{name}={counts[family][name]}" for name in outcomes)
-          + f" mean_s={_mean([e.duration_s for e in episodes]):.1f} mean_calls={_mean([e.calls for e in episodes]):.1f}")
+          + f" mean_s={_mean([e.duration_s for e in episodes]):.1f} mean_calls={_mean([e.calls for e in episodes]):.1f}"
+          + f"; file: confirmed={in_file[family]}")
   total = sum(counts.values(), collections.Counter())
   print("total: " + " ".join(f"{name}={total[name]}" for name in outcomes)
-        + f"; {total['confirmed']} recovery examples confirmed")
-
-
-def _require_port() -> None:
-  try:
-    socket.create_connection(("127.0.0.1", PORT), timeout=2).close()
-  except OSError:
-    sys.exit(f"robot_service is not reachable on 127.0.0.1:{PORT}: start the stack (plan tier: "
-             f"ROBOT_BACKEND=plan container/run.sh) or pass --start-stack plan")
+        + f"; {total['confirmed']} recovery examples confirmed; file: {sum(in_file.values())} examples")
 
 
 def main() -> None:
@@ -195,26 +197,12 @@ def main() -> None:
     args.input = args.input or str(logs / f"{args.split}.jsonl")
     args.out = args.out or str(logs / f"recovery_{args.split}.jsonl")
   Path(args.out).parent.mkdir(parents=True, exist_ok=True)
-  stack = None
-  try:
-    if args.start_stack == "plan":
-      sys.path.insert(0, str(ROOT / "tests" / "e2e"))
-      import phase3_hwm_check as hwm  # noqa: E402  (imports ICON's Python; only needed to start the stack)
-      import plan_tier_check  # noqa: E402
-
-      hwm.CONTAINER_LOG = plan_tier_check.CONTAINER_LOG
-      stack = hwm._Run()
-      stack.start_container(backend="plan")
-      plan_tier_check._wait_ready()
-    _require_port()
+  with stack(args.start_stack):
     sim_stub, robot_stub = connect()
     if args.command == "solve":
       _run_solve(args, names, sim_stub, robot_stub)
     else:
       _run_recovery(args, names, sim_stub, robot_stub)
-  finally:
-    if stack is not None:
-      stack.stop_container()
 
 
 if __name__ == "__main__":
