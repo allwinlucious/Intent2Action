@@ -1,0 +1,1 @@
+{"description": "red and blue cubes go into boxes of the same color", "rules": [{"select": {"category": "cube", "color": "red"}, "relation": "in", "target": {"category": "box", "color": "red"}}, {"select": {"category": "cube", "color": "blue"}, "relation": "in", "target": {"category": "box", "color": "blue"}}], "others": "stay"}

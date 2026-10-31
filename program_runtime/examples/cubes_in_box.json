@@ -1,0 +1,1 @@
+{"description": "every cube goes into the red box", "rules": [{"select": {"category": "cube"}, "relation": "in", "target": {"category": "box", "color": "red"}}], "others": "stay"}

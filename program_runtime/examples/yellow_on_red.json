@@ -1,0 +1,1 @@
+{"description": "the yellow cube goes on the red cube", "rules": [{"select": {"category": "cube", "color": "yellow"}, "relation": "on", "target": {"category": "cube", "color": "red"}}], "others": "stay"}
