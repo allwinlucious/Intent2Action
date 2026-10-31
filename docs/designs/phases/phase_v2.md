@@ -356,3 +356,268 @@ default movable objects, add objects with `AddObject`, PASS/FAIL lines, exit cod
 ### 13. Notes (`docs/designs/phases/phase_v2_notes.md`)
 
 What was done, the test output, the files changed, and anything the plan did not cover.
+
+## Addendum A (after the review, 2026-10-31)
+
+Reviews: `docs/designs/reviews/phase_v2/`. This addendum **supersedes** the sections it names.
+
+### A.1 `verify` takes a lambda (supersedes §3 `verify` and §6.5)
+
+*   `verify(check, message="verify failed")`: `check` must be a zero-argument `lambda`, enforced by
+    `check()` (A.5). The runtime evaluates `check()` itself, so it can re-evaluate it after recovery.
+*   On a `verify` failure, the rungs `reobserve`, `retry_step` and `fix_world` mean "re-evaluate the lambda"
+    (after the agent's tool calls, for `fix_world`). `skip` means "continue". `patch`, `ask_user` and `stop`
+    behave as in §6.
+
+### A.2 Which failures reach the agent (supersedes §6.4)
+
+*   **The wrapper covers every robot-facing call:** `find`, `find_all`, `pick`, `place`, the postcondition
+    checks, and `verify`. `held`, `inside` and `on_top` never raise.
+*   **A dry-run failure means the program is invalid.** It is returned as `RunResult(ok=False, error="dry
+    run: …")` and never goes to the recovery agent. `ProgramWriter` gets one retry with that error. Only
+    failures during real execution go to the agent.
+*   **Postcondition failures** (`kind == "postcondition"`): `reobserve`, `retry_step` and `fix_world` mean
+    "re-check the postcondition with fresh objects". The action is **not** called again.
+*   **API-call failures:**
+    *   `reobserve`, `retry_step` and `fix_world` mean "call the same function again", with `Obj` arguments
+        re-resolved by id from a fresh `list_objects`;
+    *   if the id is gone, the retry fails with `perception` "object {id} no longer exists" and goes through
+        the wrapper again.
+*   A new classification row before `grasp`: `precondition` when the message contains `not holding` or
+    `already holding`.
+
+### A.3 `run` signature and results (supersedes §6 header)
+
+```python
+def run(source: str, api: RobotAPI, agent=None, log=lambda event: None, budget: Budget | None = None,
+        ask: Callable[[str], str] | None = None) -> RunResult
+```
+
+*   **Budget:** `budget` defaults to `Budget()`; the runtime works on `dataclasses.replace(budget)`. A patch
+    run shares the same counters object.
+*   **`RunResult`:**
+
+    ```python
+    @dataclass
+    class RunResult:
+      ok: bool
+      report: list[str]            # report() texts in order
+      failures: list[dict]         # {"kind","message","call","line"}
+      handoffs: list[dict]         # {"failure": {...}, "decision": {...}, "outcome": "resolved"|"failed"|"rejected"}
+      patches: int                 # patches executed
+      error: str | None            # None when ok
+    ```
+
+    A patch's result is merged in: lists concatenated, `patches` summed.
+*   **Log events:** every event has `"t"` (wall-clock seconds) and `"kind"`. The extra fields by kind:
+
+    | kind | fields |
+    |---|---|
+    | `check` | `problems` (list) |
+    | `dry_run` | `ok`, `error` |
+    | `line` | `line` |
+    | `call` | `fn`, `args` (strings, `Obj` as id) |
+    | `result` | `fn`, `ok`, `message` |
+    | `failure` | `kind`, `message`, `call`, `line` |
+    | `handoff` | `n` (1-based) |
+    | `decision` | `rung`, `reason`, `patch`, `question` |
+    | `patch` | `accepted`, `problems` |
+    | `report` | `text` |
+    | `done` | `ok`, `error`, `handoffs`, `patches` |
+
+### A.4 Recovery agent protocol (supersedes §7 `RecoveryAgent`, `ScriptedAgent`)
+
+*   **Construction:** `RecoveryAgent(client: ChatClient, stub: RobotServiceStub, tools:
+    mcp_server.server.Tools)`. The CLI creates the stub from `--address` and the `Tools` from
+    `mcp_server.server.DESCRIPTOR_SET`.
+*   **Tool schemas** in OpenAI format: `{"type": "function", "function": {"name", "description",
+    "parameters": t.input_schema}}` for every tool except `get_image`, `detect_objects` and
+    `calibrate_camera`.
+*   **The loop**, with `messages = [system, user(json.dumps(context))]` and at most 12 tool calls in all:
+    1.  `msg = client.chat(messages, tools=specs)`.
+    2.  If `msg` has `tool_calls`:
+        *   append `msg` as returned;
+        *   for each call, in order:
+            *   parse `function.arguments` as JSON; invalid JSON gives the result `"invalid arguments:
+                <error>"`;
+            *   a name not in the visible tools gives `"unknown tool: <name>"`;
+            *   otherwise run `result, status = mcp_server.server.invoke(tools, stub, name, args)`, and the
+                text is the joined `TextContent` texts, prefixed with `"ERROR <status>: "` when
+                `status != "OK"`;
+            *   append `{"role": "tool", "tool_call_id": call["id"], "content": text[:4000]}`;
+        *   repeat from step 1.
+    3.  Otherwise, parse the decision from `msg["content"]`.
+    4.  After the 12th tool call: append `{"role": "user", "content": "Tool budget used. Answer now with
+        the decision JSON only."}` and make one last `client.chat(messages)` without tools.
+*   **The decision:**
+    *   the first `{…}` parsed with `json.loads`;
+    *   `rung` must be one of `reobserve`, `retry_step`, `fix_world`, `skip`, `patch`, `ask_user`, `stop`;
+    *   `reason` must be a non-empty str;
+    *   anything else gives `{"rung": "stop", "reason": "invalid decision: <why>"}`.
+*   **`ScriptedAgent(decisions, tool_calls=None)`:** `tool_calls` maps the 1-based handoff number to a
+    list of `(fn, kwargs)`. Before returning the n-th decision it calls `getattr(api_backend, fn)(**kwargs)`,
+    where the backend is passed in `context["_backend"]` by the runtime (scripted runs only). When the
+    decisions run out it returns `{"rung": "stop", "reason": "scripted decisions exhausted"}`.
+
+### A.5 Program invariants for every program (supersedes §5's patch-only rules)
+
+`check(source)` also rejects, for **all** programs:
+
+*   a string constant, or a constant part of an f-string, that contains `obj_` ("hard-coded object id");
+*   a float constant ("hard-coded number; resolve objects with find"); integer constants are allowed;
+*   a `verify` call whose first argument is not a `Lambda`;
+*   a program whose last statement that is not a `report(...)` call is not a top-level `verify(...)` call
+    ("the program must end with verify").
+
+`patch=True` adds nothing beyond these checks; patches pass the same checks.
+
+### A.6 Intent schema exactly (supersedes §1's validation)
+
+*   **Root keys:**
+    *   `rules`: required, a list of 1–6 rules;
+    *   `description`: optional, a str;
+    *   `others`: optional, must equal `"stay"`;
+    *   anything else is a problem.
+*   **Rule keys:**
+    *   exactly `select`, `relation`, `target`;
+    *   `relation` ∈ {`in`, `on`};
+    *   `select` and `target` are dicts with keys ⊆ {`category`, `color`, `size`} and non-empty string
+        values;
+    *   `target` has at least one key;
+    *   `size` ∈ {`small`, `medium`, `large`}.
+*   **Duplicate rules** (equal dicts) are a problem.
+*   **"A target that is not a single filter"** is removed from the schema. Whether a target matches exactly
+    one object is a property of the scene, checked by `check_intent` (`invalid_for_scene`).
+
+### A.7 Rule checker edge cases (supersedes §9's edge cases)
+
+*   **`invalid_for_scene = True`** when:
+    *   a target matches zero or several objects in `before`;
+    *   an object is selected by two rules with different targets;
+    *   a selected object or a target is missing from `after`.
+*   **`per_object`** holds one status per object, the first failing reason in this order: `"missing"`,
+    `"not in target"`, `"moved"`, then `"ok"`.
+*   `ok` is True when it is not `invalid_for_scene` and every status is `"ok"`.
+
+### A.8 FakeBackend semantics (supersedes §4 `FakeBackend`)
+
+*   **`pick(id)`:** `precondition` "already holding {other}" if another object is attached; otherwise
+    attach it.
+*   **`place(id, target)`:** `precondition` "not holding {id}" unless `id` is attached. Into a box, the
+    object goes to the next free slot of a grid with 0.06 m pitch inside the box's inner area (walls 0.01):
+    `nx = floor((sx - 0.02) / 0.06)`, `ny` likewise, which gives 3 × 3 = 9 slots for the V1 boxes. A full
+    grid raises `place` "box is full". Onto an object: its top centre. Then detach.
+*   **`state()`** returns `{}`; `list_objects()` returns copies.
+*   **`inject`** works as in §4. **`GrpcBackend` also gets `inject`** with the same semantics: the
+    failure is raised instead of calling the robot. The e2e check uses this for identity-preserving
+    transient failures.
+
+### A.9 Examples, exactly (supersedes §8)
+
+*   **`cubes_in_box.json`:**
+
+    ```json
+    {"description": "every cube goes into the red box", "rules": [{"select": {"category": "cube"},
+      "relation": "in", "target": {"category": "box", "color": "red"}}], "others": "stay"}
+    ```
+
+    ```python
+    box = find(category="box", color="red")
+    for cube in find_all(category="cube"):
+      pick(cube)
+      place(cube, box)
+    report(f"{len(find_all(category='cube'))} cubes placed in the red box")
+    verify(lambda: all(inside(c, box) for c in find_all(category="cube")), "a cube is not in the red box")
+    ```
+
+*   **`sort_by_color.json`:** two rules, red cube → in the red box, blue cube → in the blue box.
+
+    ```python
+    for color in ["red", "blue"]:
+      box = find(category="box", color=color)
+      for cube in find_all(category="cube", color=color):
+        pick(cube)
+        place(cube, box)
+    verify(lambda: all(inside(c, find(category="box", color=c.color)) for c in find_all(category="cube")
+                       if c.color in ["red", "blue"]), "a cube is in the wrong box")
+    ```
+
+*   **`yellow_on_red.json`** (replaces `small_on_large`; the catalog has no large cube until V1b): the
+    yellow cube goes **on** the red cube.
+
+    ```python
+    red = find(category="cube", color="red")
+    yellow = find(category="cube", color="yellow")
+    pick(yellow)
+    place(yellow, red)
+    verify(lambda: on_top(find(category="cube", color="yellow"), find(category="cube", color="red")),
+           "the yellow cube is not on the red cube")
+    ```
+
+### A.10 E2E check, exactly (supersedes §12)
+
+**Prerequisite (lead, in the sim window):** build the boxes' `model.usd` in Isaac, then
+`tools/sync_isaac.sh --pull-catalog`, and pass `tests/e2e/pickplace_check.py` first.
+
+*   **Scenes:** `ResetScene`, then remove all default movable objects. The boxes are fixed: `red_box` at
+    (0.45, −0.22) yaw 0, `blue_box` at (0.62, −0.05) yaw 0. Cube positions for layout `i` ∈ {0, 1, 2}
+    come from `random.Random(i)`: x ∈ [0.35, 0.60], y ∈ [0.00, 0.20], yaw ∈ [−0.3, 0.3], resampled until
+    every pair of cubes is ≥ 0.08 m apart.
+
+    | Example | Objects |
+    |---|---|
+    | `cubes_in_box` | `red_cube`, `blue_cube`, `small_yellow_cube` + `red_box` |
+    | `sort_by_color` | `red_cube`, `blue_cube`, `green_cube` + `red_box` + `blue_box` (the green cube must stay) |
+    | `yellow_on_red` | `red_cube`, `small_yellow_cube`, `blue_cube` |
+
+*   **`scripted`:** 3 examples × 3 layouts with `GrpcBackend` and no agent. A run counts when `RunResult.ok`
+    **and** `check_intent(...).ok`. Pass at ≥ 8/9.
+*   **`recovery`:** `cubes_in_box` on layout 0.
+    *   `GrpcBackend.inject = {"pick": [None, RobotFailure("grasp", "grasp blocked (injected)")]}`: the
+        first pick runs normally, the second raises (`None` entries mean "no injection for this call").
+    *   `ScriptedAgent([{"rung": "retry_step", "reason": "transient"}])`.
+    *   Pass only if `RunResult.ok`, exactly one handoff with outcome `"resolved"`, and `check_intent(...).ok`.
+*   **`stop`:** the same, with `ScriptedAgent([{"rung": "stop", "reason": "test"}])`. Pass if `RunResult.ok`
+    is False with one handoff and the failure logged; no uncaught exception.
+
+### A.11 More tests (adds to §11)
+
+*   **`validate_intent`:** each rule of A.6 has one valid and one invalid case.
+*   **`Obj`:** built from a `WorldObject`-like dict; yaw from a 90° quaternion; `size_class` boundaries
+    0.0399 → small, 0.04 → medium, 0.06 → large; `inside` with a box at yaw 90°.
+*   **`GrpcBackend`** with a fake stub:
+    *   an operation returned not done → `WaitOperation` is called;
+    *   an operation error → `RobotFailure` with the classified kind;
+    *   `inject` works.
+*   **`ChatClient`** with `urllib.request.urlopen` monkeypatched: the request body and headers are right,
+    and a missing `LLM_BASE_URL` raises `ValueError("LLM_BASE_URL is not set")`.
+*   **`ProgramWriter`** with a fake client:
+    *   extraction from a fenced block;
+    *   one retry after a failed `check`;
+    *   `last_attempts == 2`.
+*   **`RecoveryAgent`** with a fake client and a fake stub:
+    *   one tool call, then a decision;
+    *   an unknown tool;
+    *   invalid argument JSON;
+    *   the 12-call limit;
+    *   an invalid decision → `stop`.
+*   **CLI:** `run --program examples/cubes_in_box.py --intent examples/cubes_in_box.json --fake-scene
+    S.json`. `--fake-scene` (a JSON list of `Obj` dicts) uses `FakeBackend` and exists for tests. Exit code
+    0, and a JSONL log is written.
+
+### A.12 Implementation order (each step ends with `pytest tests/ -q` green)
+
+1.  `check.py` and its tests.
+2.  `api.py`: `Obj`, `size_class`, `classify`, `RobotFailure`, `FakeBackend`, `RobotAPI`.
+3.  `runtime.py`.
+4.  `rules.py`.
+5.  `examples/`.
+6.  `agent.py`.
+7.  `cli.py`.
+8.  `tests/e2e/program_check.py` (compile only).
+
+### A.13 Small points
+
+*   `size_of` in the parent design is replaced by the `Obj.size` field; the design doc is updated.
+*   `Obj` is built from each `WorldObject` of a `ListObjectsResponse`.
+*   `ChatClient` raises `ValueError("<VAR> is not set")` for each missing variable.

@@ -265,7 +265,7 @@ on failure, logged as today):
     comprehensions, `sorted`/`len`/`min`/`max`, and these API functions:
     *   `find`, `find_all` (by attributes; return object handles);
     *   `pick`, `place`;
-    *   `inside`, `on_top`, `size_of`;
+    *   `inside`, `on_top`, `held` (an object's size class is its `size` field);
     *   `verify`, `report`.
 
     They map onto `list_objects`, `pick`, `place` and the rule checker's geometry.
