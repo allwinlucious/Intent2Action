@@ -23,16 +23,15 @@ episodes, never from a bigger model.
 The plan tier makes most of the data; the sim tier gives the final numbers, the videos and physics-only failures.
 **Tier agreement** is measured: the same episodes in both tiers; the report states how often "plan OK, sim failed".
 
-## The expert (a search script, not a model)
+## The expert (a search, not a model)
 
-Python with privileged access, in the plan tier only: ground truth and unlimited planner queries.
-- Program: greedy-with-backtracking over pick order. Among the remaining objects it asks `PlanGrasp` + the place
-  feasibility for each, takes a feasible one (most free sides first, then the shortest motion), applies it, repeats;
-  when none is feasible it backtracks. Output: the program in the runtime's format with the order it found.
-- Recovery: from a failure state (a naive program run until its first failure), it searches the decision that makes
-  the failed step feasible again (which neighbour or opposite pair to clear, a different order, skip) and writes the
-  decision JSON of the recovery protocol.
-It is a teacher only: it needs ground truth and many planner queries, and it cannot read a demonstration.
+Python with privileged access, in the plan tier only. Program: it runs a small set of hand-written **strategy
+programs** (the docs-level listed order, most-free-first, outer-first, nearest-target-first, top-first) on the
+task, the rule checker grades each run, and the first that succeeds is the expert program. Strategies are
+ordinary programs (object attributes, no ids or literals), so what Glimmer learns from them carries over to new
+layouts. Recovery: the docs-level program is run until its first failure, the recovery context is captured, and
+the decision "patch with the winning strategy program" is kept when the plan tier confirms it works. It is a
+teacher only: it needs a grader and many runs, and it cannot read a demonstration.
 
 ## Task families
 
@@ -102,7 +101,7 @@ On held-out seeds of every family and the held-out family: every version, same p
 | L0 | Recovery agent: always ends with a valid decision (final turn forced to JSON); invalid decisions log the reply; fill_box FinePathIK investigated | — |
 | L1 | Plan tier: `ROBOT_BACKEND=plan` (PlanIcon, PlanClock, a world-backed SimService/SimLink stand-in, drop-to-support on release); `pickplace_check` passes in it | — |
 | L2 | Task families: generator, intents, seeds and splits; layouts load into both tiers | — |
-| L3 | Expert: program and recovery search; ≥ 95 % of generated tasks solved in the plan tier | L1, L2 |
+| L3 | Expert: search over strategy programs and confirmed recovery patches; ≥ 90 % of tasks solved per family | L1, L2 |
 | L4 | Data generation: Glimmer samples + expert episodes, graded, formatted, pre-tokenized | L3 |
 | L5 | Fine-tuning on Modal and serving the adapter | L4 |
 | L6 | Evaluation and the report (`docs/designs/learning_results.md`) with videos | L5 |

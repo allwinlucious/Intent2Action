@@ -13,7 +13,6 @@ Results: logs/hard_task/ (program.py, the run log, rules, and with --gui video.m
 """
 
 import json
-import math
 import sys
 from pathlib import Path
 
@@ -57,7 +56,7 @@ def sim(gui: bool, recover: bool) -> int:
   import phase1_check as p1
   import phase3_cuj_check as cuj
   import phase3_hwm_check as hwm
-  from robot_service import robot_service_pb2 as api
+  from learn import families
   from program_runtime.api import GrpcBackend, RobotAPI
   from program_runtime.rules import check_intent, truth_snapshot
   from program_runtime.runtime import run
@@ -77,19 +76,10 @@ def sim(gui: bool, recover: bool) -> int:
     p1._wait_for_ports()
     hwm._require_state("ENABLED", hwm.ENABLED_TIMEOUT_S)
     cuj._wait_ready()
-    cuj._call(cuj._sim, "ResetScene")
+    placements = [families.Placement(catalog, x, y, 0.0, yaw)
+                  for catalog, x, y, yaw in [*cluster_poses(), BOX]]
+    families.load_placements(placements, cuj._sim, cuj._robot)
     cuj._wait_ready()
-    ids = cuj.ids(cuj._sim)
-    for catalog in ["red_cube", "blue_cube", "green_cube", "small_yellow_cube", "plate", "peg"]:
-      cuj._call(cuj._sim, "RemoveObject", api.ObjectRequest(id=ids[catalog]))
-    added = []
-    for catalog, x, y, yaw in [*cluster_poses(), BOX]:
-      pose = api.Pose(x=x, y=y, z=0.0, qz=math.sin(yaw / 2), qw=math.cos(yaw / 2))
-      added.append(cuj._call(cuj._sim, "AddObject", api.AddObjectRequest(catalog=catalog, pose=pose)).id)
-    import time
-    deadline = time.monotonic() + 30
-    while {o.id for o in cuj._call(cuj._robot, "ListObjects").objects} < set(added) and time.monotonic() < deadline:
-      time.sleep(0.5)
     before = truth_snapshot(cuj._sim)
     events = open(OUT / f"run{'_recover' if recover else ''}.jsonl", "w")
     log = lambda e: (events.write(json.dumps(e) + "\n"), events.flush())  # noqa: E731

@@ -22,7 +22,7 @@ import threading
 import time
 
 # robot_service.py next to this file would shadow the generated (namespace) package `robot_service`.
-sys.path.pop(0)
+_HERE = sys.path.pop(0)
 
 from container.services.scene_ids import ID_PATTERN
 from container.services.scene_ids import IdAllocator
@@ -49,6 +49,7 @@ from rclpy.qos import ReliabilityPolicy
 from robot_service import robot_service_pb2
 from robot_service import simlink_pb2
 from robot_service import simlink_pb2_grpc
+sys.path.insert(0, _HERE)
 from rosgraph_msgs.msg import Clock
 from simulation_interfaces.msg import Result
 from simulation_interfaces.srv import DeleteEntity
@@ -58,6 +59,8 @@ from std_msgs.msg import UInt32
 from std_srvs.srv import Trigger
 from tf2_msgs.msg import TFMessage
 import yaml
+
+from robot import plan_tier
 
 APP = Path("/opt/app")
 SCENE_PATH = APP / "config/default.yaml"
@@ -542,7 +545,7 @@ def _logged(method):
 
 class SimLink(simlink_pb2_grpc.SimLinkServicer):
 
-  def __init__(self, ros: Ros, sync: Sync):
+  def __init__(self, ros, sync: Sync):
     self.ros = ros
     self.sync = sync
 
@@ -672,6 +675,7 @@ class SimLink(simlink_pb2_grpc.SimLinkServicer):
 
 def main() -> int:
   parser = argparse.ArgumentParser()
+  parser.add_argument("--backend", choices=("isaac", "plan"), default="isaac")
   parser.add_argument("--world", default="localhost:18000")
   parser.add_argument("--geometry", default="localhost:18001")
   parser.add_argument("--port", type=int, default=18101)
@@ -679,7 +683,8 @@ def main() -> int:
   logging.basicConfig(
       stream=sys.stdout, level=logging.INFO, format="%(asctime)s %(levelname)s scene_sync %(message)s"
   )
-  catalogs = {name: spec["catalog"] for name, spec in yaml.safe_load(SCENE_PATH.read_text())["objects"].items()}
+  scene_yaml = yaml.safe_load(SCENE_PATH.read_text())
+  catalogs = {name: spec["catalog"] for name, spec in scene_yaml["objects"].items()}
   catalogs[CALIB_BOARD] = CALIB_BOARD
   belief_source = yaml.safe_load(SETTINGS_PATH.read_text())["belief_source"]
   if belief_source not in ("GROUND_TRUTH", "PERCEPTION"):
@@ -690,15 +695,21 @@ def main() -> int:
   geometry_channel = grpc.insecure_channel(args.geometry)
   for channel in (world_channel, geometry_channel):
     grpc.channel_ready_future(channel).result(timeout=CHANNEL_WAIT_S)
-  rclpy.init()
-  ros = Ros()
+  world_stub = world_grpc.ObjectWorldServiceStub(world_channel)
+  if args.backend == "plan":
+    ros = plan_tier.PlanIsaac(world_stub, scene_yaml)
+  else:
+    rclpy.init()
+    ros = Ros()
   sync = Sync(
       ros,
-      world_grpc.ObjectWorldServiceStub(world_channel),
+      world_stub,
       geometry_service_pb2_grpc.GeometryServiceStub(geometry_channel),
       catalogs,
       mirror_world=belief_source == "GROUND_TRUTH",
   )
+  if args.backend == "plan":
+    ros.bind(sync)
   sync.ensure_sim_world()
   sync.assign_ids()
 

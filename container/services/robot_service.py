@@ -56,6 +56,7 @@ from robot import grasp  # noqa: E402
 from robot import gripper  # noqa: E402
 from robot import place  # noqa: E402
 from robot import png  # noqa: E402
+from robot import plan_tier  # noqa: E402
 from robot import unknown_object  # noqa: E402
 from robot.grasp import matrix_pose  # noqa: E402
 from robot.icon import ARM, FT_SENSOR, GRIPPER, Icon  # noqa: E402
@@ -341,14 +342,21 @@ class Robot:
   """State shared by the three services: ICON, planner, world, operations, payload, speed."""
 
   def __init__(self, args, mirror_world: bool):
-    self.icon = Icon(args.icon)
-    self.planner = Planner(args.planner)
+    self.backend = args.backend
+    if args.backend == "plan":
+      self.planner = Planner(args.planner)
+      self.world = World(args.world)
+      self.clock = plan_tier.PlanClock()
+      self.icon = plan_tier.PlanIcon(self.planner, self.world, self.clock)
+    else:
+      self.icon = Icon(args.icon)
+      self.planner = Planner(args.planner)
+      self.world = World(args.world)
+      self.clock = SimClock()
     self.chain = ArmChain()
-    self.world = World(args.world)
     self.camera = camera_grpc.CameraServiceStub(grpc.insecure_channel(args.camera))
     self.calibration = calib_grpc.CalibrationServiceStub(grpc.insecure_channel(args.calibration))
     self.simlink = simlink_pb2_grpc.SimLinkStub(grpc.insecure_channel(args.simlink))
-    self.clock = SimClock()
     self.grasps = grasp.GraspPlanner()
     self.ops = OperationTable()
     self.mirror_world = mirror_world
@@ -432,7 +440,8 @@ class Robot:
     self.ops.finish(op, api.MotionResult(final_joints=api.Joints(positions=self.icon.arm_joints()), duration_s=took),
                     f"done in {took:.2f} s of sim time (planned {planned:.2f} s)")
 
-  def execute(self, op: Operation, segments, curve=None, detail: str | None = None) -> tuple[float, float]:
+  def execute(self, op: Operation, segments, curve=None, detail: str | None = None,
+              corrected: bool = False) -> tuple[float, float]:
     """Plans and runs `segments` as part of `op`; returns (sim seconds taken, planned seconds).
 
     The operation becomes EXECUTING with `detail` (default: the planned duration).
@@ -458,7 +467,18 @@ class Robot:
     self.icon.run_action([ARM], action, stop_when, op.cancel,
                          on_started=lambda: times.setdefault("start", self.clock.now()))
     took = self.clock.now() - times["start"]
-    self._wait_arm_at(trajectory.state[-1].position)
+    end = list(trajectory.state[-1].position)
+    try:
+      self._wait_arm_at(end)
+    except ApiError as error:
+      # Isaac's joints can lag a fast trajectory (most in joint 1); ICON then holds the lagging joints when the
+      # trajectory ends. One planned move from where the arm is to the planned end closes the gap; a real
+      # obstruction fails it again.
+      if error.code != grpc.StatusCode.DEADLINE_EXCEEDED or corrected or op.cancel.is_set():
+        raise
+      log.warning("arm short of the trajectory end (%s); one corrective move", error.message)
+      return self.execute(op, [segment(api.Waypoint(joints=api.Joints(positions=end)), api.TCP)],
+                          detail="correcting the arm to the trajectory end", corrected=True)
     return took, planned
 
   def _wait_arm_at(self, target) -> None:
@@ -473,8 +493,11 @@ class Robot:
       if error <= SETTLE_TOLERANCE_RAD:
         return
       if self.clock.now() - start > SETTLE_TIMEOUT_S:
+        reached = self.icon.arm_joints()
+        log.warning("arm stalled: target=%s reached=%s", [round(v, 4) for v in target], [round(v, 4) for v in reached])
         raise ApiError(grpc.StatusCode.DEADLINE_EXCEEDED,
-                       f"arm {error:.3f} rad from the trajectory end {SETTLE_TIMEOUT_S:.0f} s of sim time after it")
+                       f"arm {error:.3f} rad from the trajectory end {SETTLE_TIMEOUT_S:.0f} s of sim time after it "
+                       "(blocked: the arm may be touching something)")
       time.sleep(0.02)
 
   def stop(self) -> None:
@@ -774,6 +797,11 @@ class RobotService(api_grpc.RobotServiceServicer):
   def __init__(self, robot: Robot):
     self.r = robot
 
+  def _plan_unavailable(self, rpc: str) -> None:
+    if self.r.backend == "plan":
+      raise ApiError(grpc.StatusCode.UNIMPLEMENTED,
+                     f"{rpc} is not available in the plan tier (no camera, force sensor or calibration)")
+
   def GetState(self, request, context):
     state, reason = self.r.icon.operational()
     response = api.GetStateResponse(enabled=state == "ENABLED", faulted=state == "FAULTED", fault_reason=reason,
@@ -789,7 +817,10 @@ class RobotService(api_grpc.RobotServiceServicer):
     width = status.part_status[GRIPPER].linear_gripper_state.sensed_width
     response.joints.positions.extend(q)
     response.tool_pose.CopyFrom(self.r.planner.fk(q, api.TCP))
-    response.wrench.CopyFrom(api.Wrench(fx=w.x, fy=w.y, fz=w.z, tx=w.rx, ty=w.ry, tz=w.rz))
+    if self.r.backend == "plan":
+      response.wrench.CopyFrom(api.Wrench())
+    else:
+      response.wrench.CopyFrom(api.Wrench(fx=w.x, fy=w.y, fz=w.z, tx=w.rx, ty=w.ry, tz=w.rz))
     response.gripper_width = width
     response.gripping = gripper.gripping(self.r.last_grasp, width)
     return response
@@ -848,10 +879,12 @@ class RobotService(api_grpc.RobotServiceServicer):
     return api.CheckCollisionsResponse(in_collision=in_collision, colliding_pairs=[debug] if in_collision and debug else [])
 
   def GetWrench(self, request, context):
+    self._plan_unavailable("GetWrench")
     w = self.r.icon.status().part_status[FT_SENSOR].wrench_at_ft
     return api.Wrench(fx=w.x, fy=w.y, fz=w.z, tx=w.rx, ty=w.ry, tz=w.rz)
 
   def TareWrench(self, request, context):
+    self._plan_unavailable("TareWrench")
     self.r.icon.require_enabled()
     start = self.r.clock.now()
 
@@ -865,6 +898,7 @@ class RobotService(api_grpc.RobotServiceServicer):
 
   def MoveToContact(self, request, context):
     """Tares, then MakeContact (approach, stabilize) and stop in one ICON sequence (phase_5b.md decision 4)."""
+    self._plan_unavailable("MoveToContact")
     direction = force.validate_contact((request.dx, request.dy, request.dz), request.max_force, request.speed)
     inertia = force.contact_inertia(request.max_force, request.speed)
     switch = max(CONTACT_SWITCH_RATIO * request.max_force, CONTACT_MIN_SWITCH_N)
@@ -901,6 +935,7 @@ class RobotService(api_grpc.RobotServiceServicer):
 
   def MoveCompliant(self, request, context):
     """Admittance toward the TCP pose with the current tare (no tare here: in contact it would zero the force)."""
+    self._plan_unavailable("MoveCompliant")
     force.validate_compliant(request.stiffness, request.max_force)
     to_pose_proto(request.pose)  # INVALID_ARGUMENT for a non-finite pose or a zero quaternion
     target = request.pose
@@ -946,7 +981,8 @@ class RobotService(api_grpc.RobotServiceServicer):
 
   def PlanGrasp(self, request, context):
     require_scene_object(request.object_id)
-    return self.r.grasps.plan_grasp(self.r.world, request.object_id, self.r.planner.check_collisions)
+    return self.r.grasps.plan_grasp(self.r.world, request.object_id, self.r.planner.check_collisions,
+        lambda pose, seed: self.r.planner.ik(pose, api.TCP, seed))
 
   def _catalog(self, object_id: str) -> str:
     """The object's catalog name (NOT_FOUND for an unknown id or a non-catalog object)."""
@@ -967,19 +1003,21 @@ class RobotService(api_grpc.RobotServiceServicer):
         self.r.gripper_op = op
     return self.r.gripper_action(command, op.cancel)
 
-  def _feasible(self, pose: api.Pose) -> bool:
-    """A collision-free IK solution of the TCP pose; planner errors other than a rejected pose propagate."""
+  def _feasible(self, pose: api.Pose, seed: list[float] | None = None) -> list[float] | None:
+    """A collision-free IK solution of the TCP pose near `seed` (default: the current joints), or None; planner
+    errors other than a rejected pose propagate."""
     try:
-      q = self.r.planner.ik(pose, api.TCP, self.r.icon.arm_joints())
+      q = self.r.planner.ik(pose, api.TCP, seed if seed is not None else self.r.icon.arm_joints())
       in_collision, debug = self.r.planner.check_collisions(q)
     except ApiError as error:
       if error.code not in POSE_REJECTED_CODES:
         raise
       log.info("place: pose rejected: %s %s", error.code.name, error.message)
-      return False
+      return None
     if in_collision:
       log.info("place: pose rejected: IK solution in collision: %s", debug)
-    return not in_collision
+      return None
+    return q
 
   def Pick(self, request, context):
     object_id = request.object_id
@@ -996,8 +1034,11 @@ class RobotService(api_grpc.RobotServiceServicer):
         if self.r.gripper_width() < grasp.GRIPPER_OPENING_M - OPEN_TOLERANCE_M:
           self.r.ops.update(op, EXECUTING, "opening the gripper")
           self._gripper(op, RELEASE)
-        plan = self.r.grasps.plan_grasp(self.r.world, object_id, self.r.planner.check_collisions)
-        self.r.move(op, plan.pregrasp, api.ANY, "moving to the pre-grasp pose")
+        plan = self.r.grasps.plan_grasp(self.r.world, object_id, self.r.planner.check_collisions,
+        lambda pose, seed: self.r.planner.ik(pose, api.TCP, seed))
+        # The pre-grasp joints plan_grasp checked: a pose target is re-solved by IK, and that solution can collide.
+        self.r.execute(op, [segment(api.Waypoint(joints=plan.pregrasp_joints), api.TCP)],
+                       detail="moving to the pre-grasp pose")
         self.r.move(op, plan.grasp, api.LINEAR, "approaching the grasp pose")
         width, holding, _ = self._gripper(op, GRASP)
         if not holding:
@@ -1058,12 +1099,16 @@ class RobotService(api_grpc.RobotServiceServicer):
         planned, path_failures = False, 0
         for release, _ in poses:
           approach = place.above(release)
-          if not (self._feasible(release) and self._feasible(approach)):
+          # The approach joints near the current ones, and the release near those: a pose target lets the planner
+          # pick any IK branch (e.g. the arm turned backwards), from which no straight lowering path exists.
+          approach_joints = self._feasible(approach)
+          if approach_joints is None or self._feasible(release, approach_joints) is None:
             continue
           # Feasible end poses can still have no straight lowering path (e.g. a wrist flip): then the next free
           # spot is planned. Nothing has touched the object or the target yet, so this is planning, not a retry.
           try:
-            self.r.move(op, approach, api.ANY, "moving above the place spot")
+            self.r.execute(op, [segment(api.Waypoint(joints=api.Joints(positions=approach_joints)), api.TCP)],
+                           detail="moving above the place spot")
             self.r.move(op, release, api.LINEAR, "lowering")
           except ApiError as error:
             if not (error.code in POSE_REJECTED_CODES and error.message.startswith("planning failed")):
@@ -1099,6 +1144,7 @@ class RobotService(api_grpc.RobotServiceServicer):
     return self.r.reply(self.r.start_arm("Place", work), request.wait)
 
   def CalibrateCamera(self, request, context):
+    self._plan_unavailable("CalibrateCamera")
     def work(op: Operation) -> None:
       result = calibration.run(CalibrationArm(self.r, op), self.r.calibration)
       self.r.ops.finish(op, result, f"calibrated from {result.poses_used} captures: rms {result.rms_translation_m * 1e3:.2f} mm"
@@ -1106,7 +1152,9 @@ class RobotService(api_grpc.RobotServiceServicer):
 
     return self.r.reply(self.r.start_arm("CalibrateCamera", work), request.wait)
 
-  DetectObjects = _unimplemented("DetectObjects", "5")
+  def DetectObjects(self, request, context):
+    self._plan_unavailable("DetectObjects")
+    return _unimplemented("DetectObjects", "5")(self, request, context)
 
   def GetOperation(self, request, context):
     return get_operation(self.r, request)
@@ -1133,6 +1181,7 @@ class RobotService(api_grpc.RobotServiceServicer):
     return empty_pb2.Empty()
 
   def Jog(self, request, context):
+    self._plan_unavailable("Jog")
     if not 1 <= request.joint <= 7:
       raise ApiError(grpc.StatusCode.INVALID_ARGUMENT, f"joint must be 1..7, got {request.joint}")
     if not (math.isfinite(request.duration_s) and request.duration_s > 0):
@@ -1212,6 +1261,7 @@ class RobotService(api_grpc.RobotServiceServicer):
     return response
 
   def GetImage(self, request, context):
+    self._plan_unavailable("GetImage")
     depth = request.kind == api.DEPTH
     image = self.r.capture(4 if depth else 1)
     buffer = image.buffer
@@ -1228,6 +1278,7 @@ class RobotService(api_grpc.RobotServiceServicer):
                                 sim_time=stamp.seconds + stamp.nanos * 1e-9)
 
   def GetPointCloud(self, request, context):
+    self._plan_unavailable("GetPointCloud")
     if request.stride < 0:
       raise ApiError(grpc.StatusCode.INVALID_ARGUMENT, f"stride must be >= 0 (0 = 4), got {request.stride}")
     stride = request.stride or POINT_CLOUD_STRIDE
@@ -1308,6 +1359,8 @@ class SimService(api_grpc.SimServiceServicer):
       release = r.start_gripper("Release", simple_gripper_pb2.SimpleGripperFixedParams.RELEASE, resetting_ok=True)
       r.ops.wait(release, WAIT_S)
     epoch = r.sim("Reset", empty_pb2.Empty()).epoch
+    if r.backend == "plan":
+      r.icon.reset_arm()  # Isaac's reset moves the arm home; the plan tier's arm only moves when told
     state, reason = r.icon.wait_state("FAULTED", RESET_FAULT_WAIT_S)
     log.info("reset: epoch %d, ICON %s (%s)", epoch, state, reason)
     r.icon.clear_faults(RESET_ENABLED_WAIT_S)
@@ -1390,6 +1443,7 @@ class Operations(operations_pb2_grpc.OperationsServicer):
 
 def main() -> int:
   parser = argparse.ArgumentParser()
+  parser.add_argument("--backend", choices=("isaac", "plan"), default="isaac")
   parser.add_argument("--port", type=int, default=18100)
   parser.add_argument("--icon", default="localhost:18003")
   parser.add_argument("--planner", default="localhost:18002")
@@ -1411,8 +1465,9 @@ def main() -> int:
   operations_pb2_grpc.add_OperationsServicer_to_server(Operations(robot), server)
   server.add_insecure_port(f"127.0.0.1:{args.port}")
   server.start()
-  log.info("started port=127.0.0.1:%d belief_source=%s icon=%s planner=%s world=%s camera=%s simlink=%s calibration=%s",
-           args.port, belief_source, args.icon, args.planner, args.world, args.camera, args.simlink, args.calibration)
+  log.info("started port=127.0.0.1:%d backend=%s belief_source=%s icon=%s planner=%s world=%s camera=%s "
+           "simlink=%s calibration=%s", args.port, args.backend, belief_source, args.icon, args.planner, args.world,
+           args.camera, args.simlink, args.calibration)
   server.wait_for_termination()
   return 0
 

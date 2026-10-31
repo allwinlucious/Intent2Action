@@ -286,11 +286,11 @@ class _Run:
       self.isaac.stop(self.pid)
       self.isaac = self.pid = None
 
-  def start_container(self) -> None:
+  def start_container(self, backend: str = "isaac") -> None:
     self._container_log = open(CONTAINER_LOG, "w")
     self.container = subprocess.Popen(
         ["bash", str(harness.ROOT / "container/run.sh")],
-        env={**os.environ, "ROBOT_BACKEND": "isaac"},
+        env={**os.environ, "ROBOT_BACKEND": backend},
         stdin=subprocess.DEVNULL,
         stdout=self._container_log,
         stderr=subprocess.STDOUT,
