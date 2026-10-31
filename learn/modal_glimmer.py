@@ -44,7 +44,10 @@ def serve() -> None:
   # Every trained adapter (runs/<version>/adapter_config.json) is served under its version name next to the base
   # model (G0 = SERVED_NAME): one endpoint, so every version runs the identical evaluation.
   lora = [f"{d.name}={d}" for d in sorted(Path("/train/runs").glob("*")) if (d / "adapter_config.json").exists()]
-  lora_args = ["--enable-lora", "--max-lora-rank", "32", "--max-loras", "4", "--lora-modules", *lora] if lora else []
+  # Eager mode with adapters: vLLM's LoRA kernel asserted during CUDA-graph capture with Glimmer
+  # (token_lora_mapping size mismatch in lora_shrink, engine start-up).
+  lora_args = ["--enable-lora", "--max-lora-rank", "32", "--max-loras", "4", "--enforce-eager",
+               "--lora-modules", *lora] if lora else []
 
   subprocess.Popen([
       "vllm", "serve", MODEL,

@@ -1,6 +1,7 @@
 """Glimmer QLoRA SFT on Modal with the model cookbook's Axolotl recipe (one H100).
 
-  tools/modal.sh run learn/modal_train.py --data logs/sft/smoke --run smoke --max-steps 4
+  tools/modal.sh run --detach learn/modal_train.py --data logs/sft/smoke --run smoke --max-steps 4
+  tools/modal_wait.sh smoke      # waits for runs/smoke.done.json and prints it
       uploads <data>/rendered/{train,validation}.jsonl (learn/render_rows.py), trains, saves the adapter on the volume `show-once-train`
       under runs/<run>/, and generates one reply with it from the first validation prompt.
 
@@ -104,14 +105,68 @@ def sample(data: str, run: str) -> str:
   return processor.decode(output[0][inputs["input_ids"].shape[1]:], skip_special_tokens=False)
 
 
+@app.function(image=image, gpu=GPU, volumes={"/root/.cache/huggingface": hf_cache, "/train": train_volume},
+              timeout=4 * 60 * 60)
+def generate(requests: str, out: str, version: str, batch: int = 8, max_new_tokens: int = 1200) -> None:
+  """Offline generation (vLLM cannot serve Glimmer with adapters): base + runs/<version> adapter (none for G0) in
+  bf16, greedy, batched. `requests`: JSON lines {"key", "messages", "tools"?} on the volume; writes {"key", "text"}
+  lines to `out` (resumes), the reply as the chat endpoint would return its content (after the role marker)."""
+  import peft
+  import torch
+  import transformers
+  processor = transformers.AutoProcessor.from_pretrained(MODEL)
+  tokenizer = processor.tokenizer
+  tokenizer.padding_side = "left"
+  model = transformers.AutoModelForImageTextToText.from_pretrained(MODEL, device_map="cuda", dtype=torch.bfloat16)
+  if version != "G0":
+    model = peft.PeftModel.from_pretrained(model, f"/train/runs/{version}")
+  model.eval()
+  rows = [json.loads(line) for line in Path(f"/train/{requests}").read_text().splitlines()]
+  out_path = Path(f"/train/{out}")
+  done = {json.loads(line)["key"] for line in out_path.read_text().splitlines()} if out_path.exists() else set()
+  rows = [row for row in rows if row["key"] not in done]
+  with out_path.open("a") as handle:
+    for start in range(0, len(rows), batch):
+      chunk = rows[start:start + batch]
+      prompts = [processor.apply_chat_template(row["messages"], tools=row.get("tools"), add_generation_prompt=True,
+                                               tokenize=False, reasoning_strength="low") for row in chunk]
+      inputs = tokenizer(prompts, return_tensors="pt", padding=True, add_special_tokens=False).to("cuda")
+      with torch.no_grad():
+        output = model.generate(**inputs, max_new_tokens=max_new_tokens, do_sample=False)
+      for row, tokens in zip(chunk, output[:, inputs["input_ids"].shape[1]:]):
+        text = tokenizer.decode(tokens, skip_special_tokens=False)
+        # The reply's content: after any reasoning turn (to=self), the user-facing message.
+        marker = "to=user<|message|>" if "to=user<|message|>" in text else "<|message|>"
+        text = text.rsplit(marker, 1)[-1].split("<|eot|>", 1)[0].split("<|eom|>", 1)[0]
+        handle.write(json.dumps({"key": row["key"], "text": text}) + "\n")
+      handle.flush()
+      train_volume.commit()
+      print(f"{version}: {start + len(chunk)}/{len(rows)}", flush=True)
+
+
+@app.function(image=image, volumes={"/train": train_volume}, timeout=8 * 60 * 60)
+def pipeline(data: str, run: str, max_steps: int = 0) -> None:
+  """Server side, so no client connection has to stay open: train, sample once from the adapter, then write
+  runs/<run>.done.json (status, log tail, sample) for tools to poll."""
+  status = {"run": run}
+  try:
+    status["log_tail"] = train.remote(data, run, max_steps)["log_tail"][-3000:]
+    status["sample"] = sample.remote(data, run)
+    status["ok"] = True
+  except Exception as error:  # pylint: disable=broad-except
+    status.update(ok=False, error=f"{type(error).__name__}: {error}"[-3000:])
+  Path(f"/train/runs/{run}.done.json").write_text(json.dumps(status, indent=1))
+  train_volume.commit()
+
+
 @app.local_entrypoint()
 def main(data: str, run: str, max_steps: int = 0, budget_usd: float = 3.0):
-  subprocess.run(["tools/modal_budget.sh", str(budget_usd)], check=True)  # refuses when the $30 cap is near
+  """Uploads the rendered rows and spawns the pipeline; with `modal run --detach` it keeps running after this
+  returns (long blocking calls from WSL hit client deadlines). Poll: modal volume ls show-once-train runs/."""
+  subprocess.run(["tools/modal_budget.sh", str(budget_usd)], check=True)  # refuses when the monthly credit is near
   name = Path(data).name
   with train_volume.batch_upload(force=True) as batch:
     for split in ("train", "validation"):
       batch.put_file(f"{data}/rendered/{split}.jsonl", f"/data/{name}/{split}.jsonl")
-  result = train.remote(name, run, max_steps)
-  print(result["log_tail"][-1500:])
-  print("---- sample from the adapter ----")
-  print(sample.remote(name, run))
+  call = pipeline.spawn(name, run, max_steps)
+  print(f"spawned {run}: {call.object_id}; result in runs/{run}.done.json on the volume show-once-train")
