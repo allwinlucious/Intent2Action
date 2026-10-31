@@ -83,9 +83,9 @@ def test_recovery_writes_only_confirmed_examples(monkeypatch, tmp_path, capsys):
   out = tmp_path / "recovery_train.jsonl"
   args = argparse.Namespace(split="train", n=20, input=str(source), out=str(out))
   search_expert._run_recovery(args, ["cluster"], None, None)
-  assert "cluster: tasks=4 confirmed=1 not_confirmed=1 no_handoff=1 held=1" in capsys.readouterr().out
+  assert "cluster: tasks=4 confirmed=2 not_confirmed=1 no_handoff=1" in capsys.readouterr().out
   examples = [json.loads(line) for line in out.read_text().splitlines()]
-  assert [example["seed"] for example in examples] == [0]
+  assert [example["seed"] for example in examples] == [0, 3]  # 3: a failed place, the patch places the held cube
   example = examples[0]
   assert "_backend" not in example["context"] and example["context"]["call"] == "pick(obj_12)"
   assert example["confirmed"] is True and "events" not in example["episode"]

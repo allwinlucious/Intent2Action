@@ -98,7 +98,10 @@ def program(intent: dict, strategy: str) -> str:
   else:
     body += [f"todo = {_pairs(stack or loose, names)}", "if not todo:", "  break",
              *(_choice("listed") if stack else _choice(strategy))]
-  body += ["pick(p[0])", "place(p[0], p[1])"]
+  # An object already in the gripper (a pick that failed after grasping, then a patch) is placed first.
+  work = "stack + todo" if stack and loose else "todo"
+  body += [f"held_now = [q for q in {work} if q[0].attached]", "if held_now:", "  p = held_now[0]",
+           "if not p[0].attached:", "  pick(p[0])", "place(p[0], p[1])"]
   lines += [f"  {line}" for line in body]
   checks = []
   for rule in rules:

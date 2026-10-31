@@ -1,4 +1,5 @@
 import ast
+import dataclasses
 
 import pytest
 
@@ -73,3 +74,14 @@ def test_largest_tasks_run_within_default_budget(family):
     for strategy in strategies.STRATEGIES:
       result, rules = _run(task, strategies.program(task.intent, strategy))
       assert result.ok and rules.ok, (task.seed, strategy, result.error, rules.summary)
+
+
+def test_programs_place_a_held_object_first():
+  task = families.generate("cluster", 3)
+  objects = families.fake_objects(task)
+  held = next(o for o in reversed(objects) if o.category == "cube")
+  objects = [dataclasses.replace(o, attached=True) if o == held else o for o in objects]
+  for strategy in ("listed", "most_free_first"):
+    # The fake backend refuses a pick while holding: the program must place the held cube first.
+    result = run(strategies.program(task.intent, strategy), RobotAPI(FakeBackend(objects)))
+    assert result.ok, (strategy, result.error)

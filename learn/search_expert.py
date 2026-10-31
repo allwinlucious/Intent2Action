@@ -89,8 +89,6 @@ def recover(value: dict, sim_stub, robot_stub) -> tuple[str, dict | None, object
   episode = run_episode(_task(value), listed["program"], sim_stub, robot_stub, agent=agent, strategy="listed")
   if agent.context is None:
     return "no_handoff", None, episode
-  if agent.context.get("held") or str(agent.context.get("call") or "").startswith("place"):
-    return "held", None, episode
   if not episode.ok:
     return "not_confirmed", None, episode
   example = {
@@ -154,7 +152,7 @@ def _run_recovery(args, names: list[str], sim_stub, robot_stub) -> None:
         out.write(json.dumps(example) + "\n")
         out.flush()
   print(f"wrote {args.out}")
-  outcomes = ("confirmed", "not_confirmed", "no_handoff", "held")
+  outcomes = ("confirmed", "not_confirmed", "no_handoff")
   for family in names:
     episodes = timing[family]
     print(f"{family}: tasks={len(episodes)} " + " ".join(f"{name}={counts[family][name]}" for name in outcomes)
