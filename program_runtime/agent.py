@@ -31,6 +31,8 @@ class ChatClient:
     self.base_url = values["LLM_BASE_URL"].rstrip("/")
     self.api_key = values["LLM_API_KEY"]
     self.model = values["LLM_MODEL"]
+    # Endpoint-specific request fields, e.g. {"chat_template_kwargs": {"reasoning_strength": "low"}} for Glimmer.
+    self.extra = json.loads(os.environ.get("LLM_EXTRA_BODY") or "{}")
 
   def chat(self, messages: list[dict], tools=None, tool_choice=None) -> dict:
     """Returns the first assistant message from one chat completion."""
@@ -38,7 +40,8 @@ class ChatClient:
       "model": self.model,
       "messages": messages,
       "temperature": 0,
-      "max_tokens": 2048,
+      "max_tokens": 8192,  # reasoning models spend part of it before the answer
+      **self.extra,
     }
     if tools is not None:
       body["tools"] = tools
@@ -99,7 +102,7 @@ class ProgramWriter:
     last = ""
     for attempt in range(1, 3):
       self.last_attempts = attempt
-      last = _program_text(self.client.chat(messages)["content"])
+      last = _program_text(self.client.chat(messages).get("content") or "")
       problems = check(last)
       if not problems:
         error = dry_run(last, RobotAPI(FakeBackend(objects)))

@@ -36,9 +36,16 @@ def _field(value, name, default=None):
   return getattr(value, name, default)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class Obj:
-  """A stable snapshot of one perceived object."""
+  """A stable snapshot of one perceived object. Snapshots of the same object compare equal (by id), whatever its
+  pose was when they were taken: programs compare handles from before and after a move."""
+
+  def __eq__(self, other) -> bool:
+    return isinstance(other, Obj) and other.id == self.id
+
+  def __hash__(self) -> int:
+    return hash(self.id)
 
   id: str
   category: str

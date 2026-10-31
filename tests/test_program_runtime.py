@@ -279,7 +279,7 @@ def test_chat_client_request(monkeypatch):
   message = ChatClient("http://model", "secret", "test").chat([{"role": "user", "content": "hi"}])
   body = json.loads(captured["request"].data)
   assert message == {"content": "ok"}
-  assert body["model"] == "test" and body["temperature"] == 0 and body["max_tokens"] == 2048
+  assert body["model"] == "test" and body["temperature"] == 0 and body["max_tokens"] == 8192
   assert captured["request"].get_header("Authorization") == "Bearer secret"
 
 
@@ -391,3 +391,11 @@ def test_cli_fake_scene(tmp_path):
   assert result.returncode == 0, result.stdout + result.stderr
   assert result.stdout.rstrip().endswith("OK")
   assert [json.loads(line) for line in log.read_text().splitlines()][-1]["kind"] == "done"
+
+
+def test_obj_equality_is_by_id():
+  from dataclasses import replace
+  a = Obj(id="obj_1", category="cube", color="blue", size="medium", x=0.4, y=0.0, z=0.0, yaw=0.0,
+          sx=0.05, sy=0.05, sz=0.05, attached=False)
+  moved = replace(a, x=0.6, z=0.01)
+  assert a == moved and hash(a) == hash(moved) and a != replace(a, id="obj_2")
