@@ -42,6 +42,15 @@ def _docker(command: str) -> None:
   subprocess.run(["sg", "docker", "-c", command], capture_output=True)
 
 
+def _planner_answers(stub) -> bool:
+  """Any answer from the motion planner (even an error about the request) means it is up; UNAVAILABLE means not."""
+  try:
+    stub.ComputeFk(api.ComputeFkRequest(joints=api.Joints(positions=[0.0] * 7), tool=api.TCP), timeout=10)
+  except grpc.RpcError as error:
+    return "UNAVAILABLE" not in error.details() and error.code() != grpc.StatusCode.UNAVAILABLE
+  return True
+
+
 @contextlib.contextmanager
 def containers(n: int, base_port: int):
   """Starts plan_0..plan_{n-1}; yields their addresses once each robot_service lists the default scene."""
@@ -59,8 +68,7 @@ def containers(n: int, base_port: int):
       while True:
         try:
           # The scene and the motion planner (it starts last and slowest when many containers boot together).
-          if stub.ListObjects(empty_pb2.Empty(), timeout=5).objects:
-            stub.ComputeFk(api.ComputeFkRequest(joints=api.Joints(positions=[0.0] * 7), tool=api.TCP), timeout=10)
+          if stub.ListObjects(empty_pb2.Empty(), timeout=5).objects and _planner_answers(stub):
             print(f"{name} ready on {address}", flush=True)
             break
         except grpc.RpcError:
