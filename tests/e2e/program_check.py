@@ -1,6 +1,6 @@
 """Phase V2 program runtime check; requires the simulator and robot stack.
 
-  .venv/bin/python tests/e2e/program_check.py [--gui] [--only cubes_in_box:2 ...]
+  .venv/bin/python tests/e2e/program_check.py [--gui] [--speed=0.5] [cubes_in_box:2 ...]
       --gui: viewer + video (logs/runs/program_check.mp4); --only: just these scripted layouts (no 8/9 gate)
 """
 
@@ -57,6 +57,8 @@ def _layouts(seed: int, catalogs: list[str]) -> list[tuple[str, float, float, fl
 def _scene(name: str, layout: int) -> None:
   cuj._call(cuj._sim, "ResetScene")
   cuj._wait_ready()
+  if SPEED != 1.0:
+    cuj._call(cuj._robot, "SetSpeed", service_pb2.SetSpeedRequest(factor=SPEED))
   ids = cuj.ids(cuj._sim)
   for catalog in MOVABLE:
     cuj._call(cuj._sim, "RemoveObject", service_pb2.ObjectRequest(id=ids[catalog]))
@@ -93,6 +95,7 @@ def _source(name: str) -> tuple[dict, str]:
 
 
 ONLY: set[tuple[str, int]] = set()
+SPEED = 1.0  # --speed F: ICON speed override for every scene (ResetScene sets 1.0)
 
 
 def check_scripted() -> str:
@@ -178,6 +181,8 @@ def _video(path: Path) -> None:
 def main() -> int:
   start = time.monotonic()
   gui = "--gui" in sys.argv
+  global SPEED
+  SPEED = next((float(a.split("=")[1]) for a in sys.argv if a.startswith("--speed=")), 1.0)
   ONLY.update((a.split(":")[0], int(a.split(":")[1])) for a in sys.argv[1:] if ":" in a)
   if gui:
     harness.ISAAC_COMMAND[-1] += " --gui --pretty"

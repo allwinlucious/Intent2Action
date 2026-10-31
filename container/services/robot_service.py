@@ -89,6 +89,9 @@ SYNC_TOLERANCE_M = 0.005  # a detached object counts as back in sync within this
 SUPPORT_TOLERANCE_M = 0.01  # an object rests on another when its bottom is this close to the other's top
 STOP_WAIT_S = 5.0
 STOP_SETTLE_TIMEOUT_S = 5.0  # sim
+# Isaac's joint drives fall up to 1.6 rad behind full-speed trajectories (joint 1 most) and ICON then holds the
+# lagging joints; at half speed they track (program_check: 3/3 failing layouts pass, no stalls).
+DEFAULT_SPEED = 0.5
 SETTLE_TOLERANCE_RAD = 0.01  # a motion completes when every sensed joint is this close to the trajectory end
 SETTLE_TIMEOUT_S = 2.0  # sim
 TARE_TIMEOUT_S = 5.0  # sim
@@ -367,7 +370,7 @@ class Robot:
     self.gripper_op: Operation | None = None
     self.last_grasp = False
     self.payload = (0.0, (0.0, 0.0, 0.0))
-    self.speed = 1.0
+    self.speed = DEFAULT_SPEED
     self.resetting = threading.Event()
     threading.Thread(target=self._watch_faults, daemon=True).start()
 
@@ -441,12 +444,12 @@ class Robot:
                     f"done in {took:.2f} s of sim time (planned {planned:.2f} s)")
 
   def execute(self, op: Operation, segments, curve=None, detail: str | None = None,
-              corrected: bool = False) -> tuple[float, float]:
+              corrected: bool = False, start: list[float] | None = None) -> tuple[float, float]:
     """Plans and runs `segments` as part of `op`; returns (sim seconds taken, planned seconds).
 
     The operation becomes EXECUTING with `detail` (default: the planned duration).
     """
-    start = self.icon.arm_joints()
+    start = start if start is not None else self.icon.arm_joints()
     trajectory = self.planner.plan(start, segments, curve).discretized
     planned = duration_s(trajectory) / self.speed  # the speed override stretches execution
     if op.cancel.is_set() or not self.ops.update(op, EXECUTING, detail or f"executing a {planned:.2f} s trajectory",
@@ -653,6 +656,15 @@ class Robot:
       if self.speed != 1.0:
         self.icon.set_speed(self.speed)
       log.info("faults cleared; re-applied payload=%.3f kg speed=%.2f", mass, self.speed)
+
+  def apply_default_speed(self) -> None:
+    """ICON starts at full speed; sets DEFAULT_SPEED once ICON is enabled (ResetScene sets it again)."""
+    state, reason = self.icon.wait_state("ENABLED", 600.0)
+    if state != "ENABLED":
+      log.warning("default speed not applied: ICON is %s (%s)", state, reason)
+      return
+    self.icon.set_speed(self.speed)
+    log.info("default speed %.2f applied", self.speed)
 
   def _watch_faults(self) -> None:
     faulted_since, waiting_for_isaac = None, False
@@ -1131,8 +1143,10 @@ class RobotService(api_grpc.RobotServiceServicer):
           raise ApiError(grpc.StatusCode.ABORTED, f"no collision-free place pose on top of {target_id}")
         self._gripper(op, RELEASE)
         self.r.detach(object_id)
+        # From the checked release joints (ICON's last setpoint), not the sensed ones: next to a box wall the
+        # settled arm can be a hair inside the wall's collision model, and the planner rejects that start.
         self.r.execute(op, [segment(api.Waypoint(joints=api.Joints(positions=approach_joints)), api.TCP)],
-                       detail="retreating")
+                       detail="retreating", start=release_joints)
         object_pose = world.pose(object_id)
       except ApiError as error:
         log.warning("place object=%s target=%s status=%s duration_s=%.3f message=%s",
@@ -1370,8 +1384,8 @@ class SimService(api_grpc.SimServiceServicer):
     log.info("reset: epoch %d, ICON %s (%s)", epoch, state, reason)
     r.icon.clear_faults(RESET_ENABLED_WAIT_S)
     r.icon.set_payload(0.0, (0.0, 0.0, 0.0))
-    r.icon.set_speed(1.0)
-    r.payload, r.speed, r.last_grasp = (0.0, (0.0, 0.0, 0.0)), 1.0, False
+    r.icon.set_speed(DEFAULT_SPEED)
+    r.payload, r.speed, r.last_grasp = (0.0, (0.0, 0.0, 0.0)), DEFAULT_SPEED, False
     self._wait_objects_back()
 
   def _wait_objects_back(self) -> None:
@@ -1464,6 +1478,7 @@ def main() -> int:
     belief_source = yaml.safe_load(f)["belief_source"]
   rclpy.init()
   robot = Robot(args, mirror_world=belief_source == "GROUND_TRUTH")
+  threading.Thread(target=robot.apply_default_speed, daemon=True).start()
   server = grpc.server(futures.ThreadPoolExecutor(max_workers=16), interceptors=[LoggingInterceptor()])
   api_grpc.add_RobotServiceServicer_to_server(RobotService(robot), server)
   api_grpc.add_SimServiceServicer_to_server(SimService(robot), server)
