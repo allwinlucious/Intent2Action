@@ -27,6 +27,9 @@ The agent is fine-tuned to write better robot programs and to recover better, an
 choice of fine-tuning method comes from a selection study (raw model vs. fine-tuning vs. an action head; see
 "Evidence"), which is part of the result.
 
+Closest prior work and what this project adds: see "Related work" and
+[../research/related_work.md](../research/related_work.md).
+
 The final model is **Muse Glimmer** (owner decision D13). It has a vision encoder, so one model can both watch
 the video and call the tools. Approaches are chosen first with small open models on the local RTX 3080 and
 on Kaggle, then the chosen approach is trained on Glimmer in the cloud, as in [model_learning.md](model_learning.md).
@@ -266,20 +269,50 @@ on failure, logged as today):
     *   `verify`, `report`.
 
     They map onto `list_objects`, `pick`, `place` and the rule checker's geometry.
+*   **Postconditions:** every state-changing call has an expected effect that the runtime checks right
+    after the call, so the program cannot silently drift (from RAPID):
+    *   `pick(o)` → `held(o)`;
+    *   `place(o, t)` → `inside(o, t)` for a box, or `on_top(o, t)`.
+
+    A violated postcondition is a typed failure like an API error.
+*   **Objects are never given by coordinates:** programs resolve them with `find`/`find_all` at run time,
+    so nothing from the demo's layout is baked in.
 *   **Not allowed:** imports, attribute access other than an object's fields, file and network access, and
     the low-level motion calls (those stay for the agent's recovery tool calls).
 
 **Runtime (`program_runtime`, plain Python next to the MCP server):**
 
-1.  Parse and check the program. A rejected program goes back to the agent with the reason; this counts
-    against "valid on the first try".
-2.  Dry run against the current `list_objects` with stubbed motions: every `find` must match, and the loop
-    counts must be finite.
-3.  Execute step by step and log each call (as `agent.py` does).
-4.  **On a failed call:** recovery handoff. The agent gets the program text, the failing line, the error
-    message, `get_state` and `list_objects`, and the robot tools. It returns `{"action": "retry" | "skip" |
-    "resume_at": <line> | "stop", "note": "…"}`. At most 3 handoffs per run, then stop and report.
-5.  `verify` failing at the end is also a handoff; its only actions are fix + re-verify, or stop.
+1.  **Parse and check** the program (AST allow-list). A rejected program goes back to the agent with the
+    reason; this counts against "valid on the first try".
+2.  **Dry run** against the current `list_objects` with stubbed motions: every `find` must match, and the
+    loop counts must be finite.
+3.  **Execute step by step, fail-fast** (as MoCaP does): stop at the first failed call or violated
+    postcondition, and log each call.
+4.  **Classify the failure** into a type: `perception` (no match, ambiguous match), `reachability` (IK,
+    out of reach), `collision`, `grasp` (no grasp, closed on nothing), `place` (no free spot, box full),
+    `postcondition`, `timeout`, `fault`. The class comes from the API's status code and message, not from
+    the model.
+5.  **Recovery handoff with a tiered, budgeted ladder.** The agent gets the program text, the failing
+    line, the failure class and message, `get_state`, `list_objects` and the robot tools. It must pick the
+    lowest rung that can work and give a reason:
+    1.  `reobserve`: refresh the world and re-check;
+    2.  `retry_step`;
+    3.  `fix_world`: tool calls, e.g. move the blocking object aside, then retry;
+    4.  `patch`: a replacement for the rest of the program;
+    5.  `ask_user`;
+    6.  `stop`.
+
+    Budget: at most 3 handoffs per run and 1 patch. The rung, reason and outcome are logged and shown in
+    the UI.
+6.  **Delivery check for a patch** (from HexaShell) before it runs:
+    *   the same AST allow-list and dry run;
+    *   no new object ids or coordinates written into the program text.
+
+    A patch that fails the check counts as a failed recovery.
+7.  **Final `verify`** is the program's last step; failing it is also a handoff (`fix_world` + re-verify,
+    or `stop`).
+8.  **The success scorer is hidden.** Programs and the agent see only the API. The rule checker reads
+    Isaac's ground truth, which no program or agent can read (from CodeActionBench).
 
 **Training (the "B" approach from the selection study, the recipe's SFT):**
 
@@ -287,9 +320,13 @@ on failure, logged as today):
     covers every task family, with variations in style (loop order, helper variables) so the model learns
     the pattern rather than one template; plus programs from Muse Spark Open kept only when they run
     correctly.
-*   **Recovery:** pairs of (program + failing line + error + state → tool calls + decision), from injected
-    failures in the sim (blocked grasps, full boxes, moved objects, timeouts). Recovery is scored by whether
-    the task then succeeds.
+*   **Recovery:** pairs of (program + failing line + failure class + state → rung + tool calls + reason),
+    from injected failures in the sim (blocked grasps, full boxes, moved objects, timeouts). Recovery is
+    scored by whether the task then succeeds.
+*   **Same-scene pairs** (from Robot Critics): a failed and a successful attempt in the same scene. They
+    are recovery data, and DPO pairs for the cloud phase.
+*   **Scene perturbation** (from RAPID: 53 % → 76 % with perturbed variants): random layouts plus
+    **distractor objects**, and object-size changes in the training scenes.
 *   **Kept from the study:** stage-1 single-call data with 30 % replay (call validity), and a short reasoning
     line before each decision.
 
@@ -304,6 +341,21 @@ on failure, logged as today):
     SAM tells it *what moved where*; the VLM explains *why* (the rule).
 *   **Muse Spark Open** (hosted, through its API) is the comparison model for reading demos, and the
     teacher that writes programs and recoveries (kept only when they run correctly in the sim).
+
+### Semantic checks: the System One head (second demo; a stretch goal)
+
+For intents that need judgement ("clear the trash"), programs call `judge(obj, concept)`. It returns
+`{value, probability, object_id, evidence_mask}`, never a bare boolean.
+
+*   **Level 1:** attributes only (blocks). No model at run time.
+*   **Level 2:** a small typed head on **frozen** Glimmer. It reads a mix of several hidden layers, as
+    Plug-in Decision Heads does, and returns a typed decision with a calibrated probability in one forward
+    pass. It is trained after the program-writer LoRA is fixed and kept separate from it: training both
+    jointly hurt generation by up to 4.9 points in that paper. Concept examples come from the demo (what was
+    binned vs. kept).
+*   **Level 3:** a full Glimmer `judge` call, when the head is not confident.
+*   **Cascade:** head → full judge → `ask_user`. It is calibrated as a whole, after the order is fixed (from
+    BCEA).
 
 ### Synthetic demo videos (Isaac; fallback)
 
@@ -374,6 +426,30 @@ What it showed, and how this design uses it:
 *   **The action head cannot copy exact ids and numbers from context**, and loops: dropped.
 *   **Driving every call live costs a model call per step:** hence programs, written once.
 
+### Related work and novelty
+
+Recent work, filtered for credibility, is summarised in [../research/related_work.md](../research/related_work.md).
+The closest systems:
+
+*   **RAPID** (2609.30249): one demo → task predicates → a relational program, verified in a reconstructed
+    simulation, on a real Franka.
+*   **MoCaP** (2610.20998): code-as-policies with fail-fast execution and diagnostics handed back to the
+    agent.
+*   **Dex-One2Many** (2610.12470): a relational task rule from one demo.
+*   **SafeHarness** (2609.20822): constraints as executable checks.
+*   **Plug-in Decision Heads** (2610.20107): typed heads on a frozen VLM, with a confidence cascade.
+
+**What this project claims:** the *combination*:
+
+*   one phone video → an explicit rule → a readable, sandboxed program over a production robot stack;
+*   execution with **no model in the loop**;
+*   recovery at the failing line through a typed, budgeted ladder;
+*   calibrated semantic checks that ask the user when unsure;
+*   an **open model fine-tuned on the stack's own verified traces**, with each part measured.
+
+**What it does not claim:** to be the first to turn a video into a robot program, to extract a rule from a
+demo, or to run fail-fast code-as-policy.
+
 ### Evaluation
 
 | Metric | On |
@@ -382,6 +458,10 @@ What it showed, and how this design uses it:
 | Intent accuracy (the rule selects the same objects as the true rule in the new scene) | same |
 | Asks when the demo is ambiguous / refuses when impossible | marked clips |
 | Program valid on the first try (passes the runtime's checks) | held-out intents × scenes |
+| Success on **held-out rules** (task families or combinations not seen in training), not only new layouts | sim |
+| Joint task-and-safety success (the task done with no collision fault) | sim |
+| Recovery by failure class and by rung: success after the handoff, handoffs and model calls used, unnecessary handoffs | sim, injected failures |
+| Semantic checks (second demo): ECE/Brier score, risk–coverage, questions-to-user rate | object crops, sim and real |
 | Program correct (task success in the new scene, rule checker, per object and whole task) | sim, held-out layouts |
 | Recovery success (task succeeds after injected failures; handoffs used) | sim, injected failures |
 | Model calls and wall time per task (program + recoveries) vs. driving every call live | sim |
@@ -403,6 +483,24 @@ What it showed, and how this design uses it:
 | V7 | Demo UI: one screen with the demo clip + SAM masks, events and rule, **the generated program** with a confirm step, the live Isaac viewer, the program's current line and call log (failures and recovery handoffs highlighted), the final verified checklist, and the study and results charts; recording of the 3-minute video | V5 | a full run recorded end to end from the UI |
 
 V0 and V1 run in parallel; V2 needs V1; V3 needs the clips from V0; V7 starts with V2 and is finished last.
+
+**First-release scope:**
+
+*   **In:**
+    *   V0;
+    *   V1;
+    *   V1b, limited to block shapes, sizes and colours;
+    *   V2 (program format with postconditions, fail-fast runtime, recovery ladder, delivery check);
+    *   V3 (SAM 3.1 + Glimmer, zero- or few-shot);
+    *   V5 on the block tasks;
+    *   V6 limited to SFT of Glimmer on program writing and recovery, raw vs. fine-tuned on the metrics
+        above;
+    *   V7.
+*   **Next steps (out of the first release):**
+    *   the System One head and the second demo ("clear the desk");
+    *   synthetic hand videos;
+    *   DPO and GRPO with process rewards;
+    *   V4 training of the video model.
 
 ## Risks and Mitigations
 
