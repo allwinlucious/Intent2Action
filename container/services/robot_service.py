@@ -1104,10 +1104,16 @@ class RobotService(api_grpc.RobotServiceServicer):
           if catalog is not None and o.parent.name == "root" and o.name not in (target_id, object_id):
             others.append((world.pose(o.name), grasp.catalog_dims(catalog)))
         taken = place.occupied(target_pose, target_dims, others)
-        footprint = place.held_footprint(held_dims, place.yaw(held_pose), place.yaw(tcp), place.yaw(target_pose))
-        spots = place.candidates(target_pose, target_dims, container, footprint, taken)[:PLACE_CANDIDATES]
         clearances = place.BOX_RELEASE_CLEARANCES_M if container else (place.RELEASE_CLEARANCE_M,)
-        poses = ((place.release_pose(tcp, held_pose, spot, c), spot) for spot in spots for c in clearances)
+        spots, poses = [], []
+        for turn in place.finger_turns(held_dims, place.yaw(held_pose), place.yaw(tcp), place.yaw(target_pose)):
+          turned_tcp, turned_held = place.turned(tcp, held_pose, turn)
+          footprint = place.held_footprint(held_dims, place.yaw(turned_held), place.yaw(turned_tcp),
+                                           place.yaw(target_pose))
+          turn_spots = place.candidates(target_pose, target_dims, container, footprint, taken)[:PLACE_CANDIDATES]
+          spots += turn_spots
+          poses += [(place.release_pose(turned_tcp, turned_held, spot, c), spot) for spot in turn_spots
+                    for c in clearances]
         planned, path_failures = False, 0
         for release, _ in poses:
           approach = place.above(release)

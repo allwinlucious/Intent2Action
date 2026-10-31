@@ -1,6 +1,7 @@
 """Program writing and recovery clients for OpenAI-compatible chat endpoints."""
 
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -79,15 +80,24 @@ def _program_text(content: str) -> str:
   return (match.group(1) if match else content).strip() + "\n"
 
 
+def _scene_line(obj: Obj) -> str:
+  size = "x".join(str(round(value * 1000)) for value in (obj.sx, obj.sy, obj.sz))
+  line = (f"{obj.id} {obj.category} {obj.color} {obj.size} x={round(obj.x * 1000)} y={round(obj.y * 1000)} "
+          f"z={round(obj.z * 1000)} yaw={round(math.degrees(obj.yaw))} size={size}")
+  return line + " held" if obj.attached else line
+
+
 def program_messages(intent: dict, objects: list[Obj]) -> list[dict]:
   """The program writer's prompt (also the training prompt: one source for both)."""
   system = (
     "Write a short Python program using only this API and the listed builtins. Do not import or define "
-    "functions. Resolve objects by attributes, never by ids or coordinates. End with verify(lambda: ...).\n\n"
+    "functions. Resolve objects by attributes, never by ids or coordinates. End with verify(lambda: ...). "
+    "Coordinates are in millimetres in the robot's base frame; programs read them from object attributes (x, y, "
+    "sx, ...) in metres.\n\n"
     f"Builtins: {', '.join(sorted(BUILTINS))}\n\nProgram API:\n{_api_reference()}\n\n"
     f"Examples:\n{_examples()}"
   )
-  scene = "\n".join(f"{obj.id} {obj.category} {obj.color} {obj.size}" for obj in objects)
+  scene = "\n".join(_scene_line(obj) for obj in objects)
   return [
     {"role": "system", "content": system},
     {"role": "user", "content": f"Intent:\n{json.dumps(intent)}\nScene:\n{scene}"},

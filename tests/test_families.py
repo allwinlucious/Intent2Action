@@ -80,7 +80,7 @@ def _shape(cubes, specs, *, mixed=False):
       found.append(name)
   assert found
   gap = pitch - float(specs["red_cube"]["dims"][0])
-  assert 0.010 <= gap <= 0.030
+  assert families.GAP_RANGE_M[0] <= gap <= families.GAP_RANGE_M[1]
   assert -math.pi / 4 <= yaw <= math.pi / 4
   assert 0.45 <= mean_x <= 0.55
   assert 0.00 <= mean_y <= 0.15
@@ -323,7 +323,7 @@ def test_catalog_root_override(tmp_path):
   cubes = [placement for placement in task.placements if placement.catalog.endswith("cube")]
   pitch = min(math.hypot(first.x - second.x, first.y - second.y)
               for index, first in enumerate(cubes) for second in cubes[index + 1:])
-  assert 0.010 <= pitch - 0.06 <= 0.030
+  assert families.GAP_RANGE_M[0] <= pitch - 0.06 <= families.GAP_RANGE_M[1]
   manual = families.Task("cluster", 3, "train", task.intent,
                          (families.Placement("red_cube", 0.5, 0.0, 0.0, 0.0),), 0)
   assert families.fake_objects(manual, catalog_root)[0].sx == 0.06

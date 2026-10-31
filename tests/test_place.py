@@ -104,3 +104,33 @@ def test_occupied():
 def test_held_footprint():
   assert place.held_footprint(CUBE, 0.0, 0.0, 0.0)[1] >= place.FINGER_HALF_SPAN_M
   assert place.held_footprint(CUBE, 0.0, math.pi / 2, 0.0)[0] >= place.FINGER_HALF_SPAN_M
+
+
+def test_finger_turns_align_square_objects_with_the_box_axes_in_a_fixed_order():
+  cube = (0.05, 0.05, 0.05)
+  turns = place.finger_turns(cube, 0.0, 0.3, 0.0)
+  assert turns == pytest.approx([-0.3, math.pi / 2 - 0.3])
+  # Same order whatever the current wrist angle: placements share a finger direction.
+  assert place.finger_turns(cube, 0.0, 1.4, 0.0)[0] == pytest.approx(-1.4)
+  assert place.finger_turns((0.08, 0.04, 0.05), 0.0, 0.3, 0.0) == [0.0]
+
+
+def test_turned_rotates_tcp_and_object_about_the_object_centre():
+  tcp = api.Pose(x=0.5, y=0.1, z=0.2, qw=1.0)
+  held = api.Pose(x=0.5, y=0.0, z=0.1, qw=1.0)
+  new_tcp, new_held = place.turned(tcp, held, math.pi / 2)
+  assert (new_tcp.x, new_tcp.y, new_tcp.z) == pytest.approx((0.4, 0.0, 0.2))
+  assert (new_held.x, new_held.y) == pytest.approx((0.5, 0.0))
+  assert place.yaw(new_tcp) == pytest.approx(math.pi / 2) and place.yaw(new_held) == pytest.approx(math.pi / 2)
+
+
+def test_aligned_fingers_fit_six_cubes():
+  box, dims = api.Pose(qw=1.0), (0.25, 0.21, 0.05)
+  container = {"wall": 0.01, "floor": 0.01}
+  placed = []
+  for _ in range(6):
+    taken = place.occupied(box, dims, [(p, (0.05, 0.05, 0.05)) for p in placed])
+    footprint = place.held_footprint((0.05, 0.05, 0.05), 0.0, 0.0, 0.0)
+    spot = place.candidates(box, dims, container, footprint, taken)[0]
+    placed.append(api.Pose(x=spot[0], y=spot[1], z=spot[2], qw=1.0))
+  assert len(placed) == 6

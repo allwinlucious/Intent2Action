@@ -1,5 +1,6 @@
 from dataclasses import replace
 import json
+import math
 from pathlib import Path
 import subprocess
 import sys
@@ -8,7 +9,7 @@ from google.longrunning import operations_pb2
 from google.rpc import status_pb2
 import pytest
 
-from program_runtime.agent import ChatClient, ProgramWriter, RecoveryAgent, ScriptedAgent
+from program_runtime.agent import ChatClient, ProgramWriter, RecoveryAgent, ScriptedAgent, program_messages
 from program_runtime.api import (
   FakeBackend, GrpcBackend, Obj, RobotAPI, RobotFailure, classify, size_class,
 )
@@ -312,6 +313,19 @@ def test_program_writer_retries_after_dry_run_error():
   writer = ProgramWriter(WriterClient([ambiguous, good]))
   assert writer.write({"rules": []}, [obj("a"), obj("b", x=0.5)]) == good + "\n"
   assert writer.last_attempts == 2
+
+
+def test_program_messages_scene_has_geometry():
+  held = replace(Obj("obj_12", "cube", "red", "medium", 0.5124, 0.0826, 0.0, math.radians(12.3), 0.05, 0.05, 0.05,
+                     False), attached=True)
+  messages = program_messages({"rules": []}, [obj("obj_12", x=0.5124, y=0.0826), held, box("obj_13")])
+  scene = messages[1]["content"].split("Scene:\n")[1].splitlines()
+  assert scene == [
+    "obj_12 cube red medium x=512 y=83 z=0 yaw=0 size=50x50x50",
+    "obj_12 cube red medium x=512 y=83 z=0 yaw=12 size=50x50x50 held",
+    "obj_13 box red large x=450 y=-220 z=0 yaw=0 size=250x210x80",
+  ]
+  assert "Coordinates are in millimetres in the robot's base frame" in messages[0]["content"]
 
 
 class Tool:

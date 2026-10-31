@@ -37,7 +37,10 @@ SHAPES = {
   "L": ((0, 0), (1, 0), (2, 0), (0, 1), (0, 2), (3, 0), (0, 3)),
   "T": ((0, 0), (1, 0), (-1, 0), (0, 1), (0, 2), (2, 0), (-2, 0)),
 }
-SHAPE_COUNTS = {"plus": (4, 5), "L": (4, 7), "T": (4, 7), "line": (3, 5), "block": (4, 6)}
+# At most 5 cubes: a box takes 6 at best (place planner), and 1.0 cm gaps left some layouts with no grasp at all
+# (expert run of 2026-10-31: 25 % of clusters solved).
+SHAPE_COUNTS = {"plus": (4, 5), "L": (4, 5), "T": (4, 5), "line": (3, 5), "block": (4, 5)}
+GAP_RANGE_M = (0.015, 0.035)
 COLOURS = {
   "red": (204, 26, 26),
   "blue": (26, 51, 204),
@@ -119,7 +122,7 @@ def _cluster_placements(rng: random.Random, specs: dict[str, dict], *, mixed: bo
   if mixed:
     low, high = max(low, 4), min(high, 6)
   n = rng.randint(low, high)
-  gap = rng.uniform(0.010, 0.030)
+  gap = rng.uniform(*GAP_RANGE_M)
   pitch = float(specs["red_cube"]["dims"][0]) + gap
   theta = rng.uniform(-math.pi / 4, math.pi / 4)
   centre_x, centre_y = rng.uniform(0.45, 0.55), rng.uniform(0.00, 0.15)

@@ -17,6 +17,7 @@ RELEASE_CLEARANCE_M = 0.005  # object bottom above the surface at release
 # In a box the hand may have to stay above the walls: release from a little higher (a short drop) if needed.
 BOX_RELEASE_CLEARANCES_M = (0.005, 0.02, 0.035)
 ABOVE_M = 0.10  # approach / retreat height above the release pose
+SQUARE_TOLERANCE_M = 0.001  # footprint sides this close count as square (finger_turns)
 BELOW_BOX_M = 0.01  # occupied(): objects whose bottom is this far below the box bottom still count
 
 Spot = tuple[float, float, float]  # x, y, surface z in the world frame
@@ -85,6 +86,43 @@ def release_pose(tcp: api.Pose, held_pose: api.Pose, spot: Spot, clearance: floa
   pose.x, pose.y = spot[0] + (tcp.x - held_pose.x), spot[1] + (tcp.y - held_pose.y)
   pose.z = spot[2] + (tcp.z - held_pose.z) + clearance
   return pose
+
+
+def finger_turns(held_dims, held_yaw: float, finger_yaw: float, box_yaw: float) -> list[float]:
+  """Wrist turns (rad, about the vertical) to try at release. An object with a square footprint looks the same
+  turned by 90 deg, so the fingers are aligned with the box's x axis, else its y axis, always in that order:
+  placements then share one finger direction and pack the box (mixed directions fragment it: 3-4 cubes instead
+  of 6). Other objects keep their orientation."""
+  if abs(float(held_dims[0]) - float(held_dims[1])) > SQUARE_TOLERANCE_M:
+    return [0.0]
+  turns = []
+  for axis in (box_yaw, box_yaw + math.pi / 2):
+    turn = math.remainder(axis - finger_yaw, math.pi)  # the gripper is symmetric under a half turn
+    turns.append(turn)
+  return turns
+
+
+def turned(tcp: api.Pose, held_pose: api.Pose, turn: float) -> tuple[api.Pose, api.Pose]:
+  """`tcp` and the held object turned together by `turn` about the vertical through the object's centre."""
+  c, s = math.cos(turn), math.sin(turn)
+  dx, dy = tcp.x - held_pose.x, tcp.y - held_pose.y
+  rz = (0.0, 0.0, math.sin(turn / 2), math.cos(turn / 2))  # (x, y, z, w)
+
+  def rotate(q: api.Pose, out: api.Pose) -> None:
+    x, y, z, w = q.qx, q.qy, q.qz, q.qw
+    ax, ay, az, aw = rz
+    out.qw = aw * w - ax * x - ay * y - az * z
+    out.qx = aw * x + ax * w + ay * z - az * y
+    out.qy = aw * y - ax * z + ay * w + az * x
+    out.qz = aw * z + ax * y - ay * x + az * w
+
+  new_tcp, new_held = api.Pose(), api.Pose()
+  new_tcp.CopyFrom(tcp)
+  new_held.CopyFrom(held_pose)
+  new_tcp.x, new_tcp.y = held_pose.x + c * dx - s * dy, held_pose.y + s * dx + c * dy
+  rotate(tcp, new_tcp)
+  rotate(held_pose, new_held)
+  return new_tcp, new_held
 
 
 def above(pose: api.Pose) -> api.Pose:
