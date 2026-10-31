@@ -12,3 +12,4 @@ __pycache__/
 runs/
 sim/run.log
 *.reviewer.log
+.env
