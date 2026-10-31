@@ -342,20 +342,23 @@ on failure, logged as today):
 *   **Muse Spark Open** (hosted, through its API) is the comparison model for reading demos, and the
     teacher that writes programs and recoveries (kept only when they run correctly in the sim).
 
-### Semantic checks: the System One head (second demo; a stretch goal)
+### Semantic checks (second demo; a stretch goal)
 
 For intents that need judgement ("clear the trash"), programs call `judge(obj, concept)`. It returns
-`{value, probability, object_id, evidence_mask}`, never a bare boolean.
+`{value, probability, object_id}`, never a bare boolean.
 
-*   **Level 1:** attributes only (blocks). No model at run time.
-*   **Level 2:** a small typed head on **frozen** Glimmer. It reads a mix of several hidden layers, as
-    Plug-in Decision Heads does, and returns a typed decision with a calibrated probability in one forward
-    pass. It is trained after the program-writer LoRA is fixed and kept separate from it: training both
-    jointly hurt generation by up to 4.9 points in that paper. Concept examples come from the demo (what was
-    binned vs. kept).
-*   **Level 3:** a full Glimmer `judge` call, when the head is not confident.
-*   **Cascade:** head → full judge → `ask_user`. It is calibrated as a whole, after the order is fixed (from
-    BCEA).
+*   **Attributes first:** colour, shape and size need no model at run time. That covers the block tasks.
+*   **Otherwise, one constrained Glimmer call:**
+    *   the input is the object's crop from the robot camera (SAM 3.1 mask) and the concept, with the demo's
+        examples (what was binned vs. kept);
+    *   the answer is restricted to one token, `yes` / `no` / `unsure`;
+    *   the probability comes from that token's log-probability, calibrated with one temperature fitted on a
+        small labelled set (reported as ECE).
+*   **Cascade:** confident → act; otherwise `ask_user`. The program never acts on a guess.
+
+A trained decision head on frozen Glimmer (a "System One" head) was considered and dropped. It only pays
+off at many decisions per second; one constrained token gives the same typed and calibrated interface with
+no training.
 
 ### Synthetic demo videos (Isaac; fallback)
 
@@ -437,14 +440,15 @@ The closest systems:
     agent.
 *   **Dex-One2Many** (2610.12470): a relational task rule from one demo.
 *   **SafeHarness** (2609.20822): constraints as executable checks.
-*   **Plug-in Decision Heads** (2610.20107): typed heads on a frozen VLM, with a confidence cascade.
+*   **Plug-in Decision Heads** (2610.20107): typed heads on a frozen VLM with a confidence cascade. We use
+    the cascade idea, not the head.
 
 **What this project claims:** the *combination*:
 
 *   one phone video → an explicit rule → a readable, sandboxed program over a production robot stack;
 *   execution with **no model in the loop**;
 *   recovery at the failing line through a typed, budgeted ladder;
-*   calibrated semantic checks that ask the user when unsure;
+*   calibrated semantic checks (one constrained token) that ask the user when unsure;
 *   an **open model fine-tuned on the stack's own verified traces**, with each part measured.
 
 **What it does not claim:** to be the first to turn a video into a robot program, to extract a rule from a
@@ -497,7 +501,7 @@ V0 and V1 run in parallel; V2 needs V1; V3 needs the clips from V0; V7 starts wi
         above;
     *   V7.
 *   **Next steps (out of the first release):**
-    *   the System One head and the second demo ("clear the desk");
+    *   the second demo ("clear the desk", `judge`);
     *   synthetic hand videos;
     *   DPO and GRPO with process rewards;
     *   V4 training of the video model.
