@@ -1470,6 +1470,7 @@ def main() -> int:
   parser = argparse.ArgumentParser()
   parser.add_argument("--backend", choices=("isaac", "plan"), default="isaac")
   parser.add_argument("--port", type=int, default=18100)
+  parser.add_argument("--bind", default="127.0.0.1", help="0.0.0.0 when the container has its own network")
   parser.add_argument("--icon", default="localhost:18003")
   parser.add_argument("--planner", default="localhost:18002")
   parser.add_argument("--world", default="localhost:18000")
@@ -1489,7 +1490,7 @@ def main() -> int:
   api_grpc.add_RobotServiceServicer_to_server(RobotService(robot), server)
   api_grpc.add_SimServiceServicer_to_server(SimService(robot), server)
   operations_pb2_grpc.add_OperationsServicer_to_server(Operations(robot), server)
-  server.add_insecure_port(f"127.0.0.1:{args.port}")
+  server.add_insecure_port(f"{args.bind}:{args.port}")
   server.start()
   log.info("started port=127.0.0.1:%d backend=%s belief_source=%s icon=%s planner=%s world=%s camera=%s "
            "simlink=%s calibration=%s", args.port, args.backend, belief_source, args.icon, args.planner, args.world,

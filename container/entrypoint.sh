@@ -73,7 +73,7 @@ if [ "$BACKEND" = isaac ] || [ "$BACKEND" = plan ]; then
   # CycloneDDS for /clock (and the grasp planner later); the vendored ICON client is in /opt/app/vendor.
   run robot_service bash -c "set +u; source /opt/ros/humble/setup.bash; source /opt/ros_ext/setup.bash; set -u;
     RMW_IMPLEMENTATION=rmw_cyclonedds_cpp CYCLONEDDS_URI=file:///opt/app/container/dds/cyclonedds.xml \
-    PYTHONPATH=/opt/app:/opt/app/gen:/opt/app/vendor:\$PYTHONPATH exec python3 /opt/app/container/services/robot_service.py --backend $BACKEND"
+    PYTHONPATH=/opt/app:/opt/app/gen:/opt/app/vendor:\$PYTHONPATH exec python3 /opt/app/container/services/robot_service.py --bind ${ROBOT_BIND:-127.0.0.1} --backend $BACKEND"
 fi
 
 wait -n

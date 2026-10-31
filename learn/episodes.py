@@ -3,10 +3,12 @@
 import contextlib
 import dataclasses
 import json
+import os
 from pathlib import Path
 import socket
 import sys
 import time
+import zlib
 
 import grpc
 from google.protobuf import empty_pb2
@@ -20,7 +22,7 @@ from program_runtime.rules import check_intent, truth_snapshot  # noqa: E402
 from program_runtime.runtime import run  # noqa: E402
 from robot_service import robot_service_pb2_grpc as api_grpc  # noqa: E402
 
-ADDRESS = "127.0.0.1:18100"
+ADDRESS = os.environ.get("ROBOT_ADDRESS", "127.0.0.1:18100")  # learn/fleet.py sets one per container
 
 
 @dataclasses.dataclass
@@ -78,6 +80,14 @@ def stack(start: str):
   finally:
     if run is not None:
       run.stop_container()
+
+
+def in_shard(family: str, seed: int, shard: str | None) -> bool:
+  """`shard` "k/N": whether task (family, seed) belongs to worker k of N (stable across runs: resume works)."""
+  if not shard:
+    return True
+  k, n = (int(v) for v in shard.split("/"))
+  return zlib.crc32(f"{family}:{seed}".encode()) % n == k
 
 
 def read_jsonl(path) -> list[dict]:

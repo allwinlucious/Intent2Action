@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / "gen")]
 
 from learn import families, strategies  # noqa: E402
-from learn.episodes import connect, read_jsonl, record, run_episode, stack  # noqa: E402
+from learn.episodes import connect, in_shard, read_jsonl, record, run_episode, stack  # noqa: E402
 
 STACK_TOLERANCE_M = 0.01
 
@@ -130,7 +130,7 @@ def _run_solve(args, names: list[str], sim_stub, robot_stub) -> None:
   with open(args.out, "a") as out:
     for family in names:
       for task in families.tasks(family, args.split, args.n):
-        if (task.family, task.seed) in done:
+        if (task.family, task.seed) in done or not in_shard(task.family, task.seed, getattr(args, "shard", None)):
           continue
         value = task_record(task, solve(task, sim_stub, robot_stub))
         out.write(json.dumps(value) + "\n")
@@ -151,7 +151,8 @@ def _run_recovery(args, names: list[str], sim_stub, robot_stub) -> None:
   timing = {family: [] for family in names}
   with open(args.out, "a") as out:
     for value in values:
-      if not _eligible(value) or (value["family"], value["seed"]) in done:
+      if (not _eligible(value) or (value["family"], value["seed"]) in done
+          or not in_shard(value["family"], value["seed"], getattr(args, "shard", None))):
         continue
       outcome, example, episode = recover(value, sim_stub, robot_stub)
       counts[value["family"]][outcome] += 1
@@ -182,6 +183,7 @@ def main() -> None:
     sub.add_argument("--families", help="comma-separated; default: all families valid for the split")
     sub.add_argument("--out")
     sub.add_argument("--start-stack", choices=("none", "plan"), default="none")
+    sub.add_argument("--shard", help="k/N: only this worker's tasks (learn/fleet.py)")
     if name == "recovery":
       sub.add_argument("--in", dest="input")
   args = parser.parse_args()
