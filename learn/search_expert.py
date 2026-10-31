@@ -33,15 +33,16 @@ def stacked(task) -> bool:
              and upper.z > lower.z for upper in cubes for lower in cubes if upper is not lower)
 
 
-def solve(task, sim_stub, robot_stub) -> list:
-  """Episodes of the strategies in order up to the first success; `listed` always runs first."""
+def solve(task, sim_stub, robot_stub, all_strategies: bool = False) -> list:
+  """Episodes of the strategies in order up to the first success (`listed` always runs first), or of every
+  applicable strategy with `all_strategies` (the training label is then chosen by sft_data.best_strategy)."""
   episodes = []
   for strategy in strategies.STRATEGIES:
     if strategy == "top_first" and not stacked(task):
       continue
     episode = run_episode(task, strategies.program(task.intent, strategy), sim_stub, robot_stub, strategy=strategy)
     episodes.append(episode)
-    if episode.ok:
+    if episode.ok and not all_strategies:
       break
   return episodes
 
@@ -132,7 +133,7 @@ def _run_solve(args, names: list[str], sim_stub, robot_stub) -> None:
       for task in families.tasks(family, args.split, args.n):
         if (task.family, task.seed) in done or not in_shard(task.family, task.seed, getattr(args, "shard", None)):
           continue
-        value = task_record(task, solve(task, sim_stub, robot_stub))
+        value = task_record(task, solve(task, sim_stub, robot_stub, getattr(args, "all_strategies", False)))
         out.write(json.dumps(value) + "\n")
         out.flush()
   print(f"wrote {args.out}")
@@ -184,6 +185,8 @@ def main() -> None:
     sub.add_argument("--out")
     sub.add_argument("--start-stack", choices=("none", "plan"), default="none")
     sub.add_argument("--shard", help="k/N: only this worker's tasks (learn/fleet.py)")
+    if name == "solve":
+      sub.add_argument("--all-strategies", action="store_true", help="run every strategy, not up to the first success")
     if name == "recovery":
       sub.add_argument("--in", dest="input")
   args = parser.parse_args()

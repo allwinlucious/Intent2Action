@@ -167,3 +167,19 @@ def test_render_file_drops_rows_over_the_token_limit(render_rows, tmp_path):
   target = tmp_path / "rendered.jsonl"
   assert render_rows.render_file(source, target, FakeTokenizer()) == {"rows": 2, "dropped_too_long": 1}
   assert len(rows(target)) == 2 and rows(target)[0]["segments"][1] == {"label": True, "text": "a\n"}
+
+
+def test_label_is_the_most_reliable_successful_strategy():
+  from learn import sft_data
+
+  def record(seed, outcomes):
+    return {"family": "stacking", "seed": seed, "episodes": [
+        {"strategy": name, "ok": ok, "program": f"{name} program"} for name, ok in outcomes]}
+
+  solve = [record(1, [("listed", True), ("top_first", True)]),
+           record(2, [("listed", False), ("top_first", True)]),
+           record(3, [("listed", False), ("top_first", True)])]
+  rates = sft_data.strategy_rates(solve)
+  assert rates[("stacking", "listed")] == 1 / 3 and rates[("stacking", "top_first")] == 1.0
+  assert sft_data.best_program(solve[0], rates) == "top_first program"
+  assert sft_data.best_program(record(4, [("listed", False)]), rates) is None  # no expert_program either

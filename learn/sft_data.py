@@ -63,9 +63,38 @@ def _objects(value: dict) -> list[Obj]:
   return [Obj(**obj) for obj in value["objects"]]
 
 
+def strategy_rates(solve: list[dict]) -> dict[tuple[str, str], float]:
+  """(family, strategy) -> success rate over the tasks that ran it."""
+  runs = collections.Counter()
+  wins = collections.Counter()
+  for value in solve:
+    for episode in value["episodes"]:
+      key = (value["family"], episode["strategy"])
+      runs[key] += 1
+      wins[key] += bool(episode["ok"])
+  return {key: wins[key] / runs[key] for key in runs}
+
+
+def best_program(value: dict, rates: dict) -> str | None:
+  """The label: among the strategies that succeeded on this task, the one most reliable on its family (a strategy
+  that worked by luck here, e.g. the listed order on a tower, loses to one that always works). Records that ran
+  only up to the first success have one success: that program."""
+  ok = [episode for episode in value["episodes"] if episode["ok"]]
+  if not ok:
+    return value.get("expert_program")
+  order = {episode["strategy"]: i for i, episode in enumerate(value["episodes"])}
+  best = max(ok, key=lambda e: (rates.get((value["family"], e["strategy"]), 0.0), -order[e["strategy"]]))
+  return best["program"]
+
+
 def program_rows(solve: list[dict]) -> list[tuple[str, str, dict]]:
-  return [("program", value["family"], program_row(value["intent"], _objects(value), value["expert_program"]))
-          for value in solve if value["expert_program"]]
+  rates = strategy_rates(solve)
+  rows = []
+  for value in solve:
+    program = best_program(value, rates)
+    if program:
+      rows.append(("program", value["family"], program_row(value["intent"], _objects(value), program)))
+  return rows
 
 
 def self_rows(solve: list[dict], samples: list[dict]) -> list[tuple[str, str, dict]]:
