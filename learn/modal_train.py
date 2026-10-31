@@ -108,19 +108,26 @@ def sample(data: str, run: str) -> str:
 @app.function(image=image, gpu=GPU, volumes={"/root/.cache/huggingface": hf_cache, "/train": train_volume},
               timeout=4 * 60 * 60)
 def generate(requests: str, out: str, version: str, batch: int = 8, max_new_tokens: int = 1200) -> None:
-  """Offline generation (vLLM cannot serve Glimmer with adapters): base + runs/<version> adapter (none for G0) in
-  bf16, greedy, batched. `requests`: JSON lines {"key", "messages", "tools"?} on the volume; writes {"key", "text"}
-  lines to `out` (resumes), the reply as the chat endpoint would return its content (after the role marker)."""
+  """Generation the way the model cookbook evaluates adapters (post-training/sft/axolotl/scripts/evaluate.py):
+  transformers + PEFT on a precision-matched NF4 base (the QLoRA training precision; G0 = the same base without an
+  adapter), greedy, with <|eot|> as a stop token. vLLM's Glimmer image has no supported adapter serving.
+  `requests`: JSON lines {"key", "messages", "tools"?} on the volume; writes {"key", "text", "raw"} lines to `out`
+  (resumes): `text` is the first user-directed response, as the chat endpoint would return its content."""
   import peft
   import torch
   import transformers
   processor = transformers.AutoProcessor.from_pretrained(MODEL)
   tokenizer = processor.tokenizer
   tokenizer.padding_side = "left"
-  model = transformers.AutoModelForImageTextToText.from_pretrained(MODEL, device_map="cuda", dtype=torch.bfloat16)
+  quantization = transformers.BitsAndBytesConfig(  # the cookbook's --load-in-4bit configuration
+      load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_use_double_quant=True,
+      bnb_4bit_compute_dtype=torch.bfloat16, bnb_4bit_quant_storage=torch.bfloat16)
+  model = transformers.AutoModelForImageTextToText.from_pretrained(MODEL, device_map="cuda", dtype=torch.bfloat16,
+                                                                   quantization_config=quantization)
   if version != "G0":
-    model = peft.PeftModel.from_pretrained(model, f"/train/runs/{version}")
+    model = peft.PeftModel.from_pretrained(model, f"/train/runs/{version}", is_trainable=False)
   model.eval()
+  stop = [tokenizer.eos_token_id, tokenizer.convert_tokens_to_ids("<|eot|>")]
   rows = [json.loads(line) for line in Path(f"/train/{requests}").read_text().splitlines()]
   out_path = Path(f"/train/{out}")
   done = {json.loads(line)["key"] for line in out_path.read_text().splitlines()} if out_path.exists() else set()
@@ -132,13 +139,15 @@ def generate(requests: str, out: str, version: str, batch: int = 8, max_new_toke
                                                tokenize=False, reasoning_strength="low") for row in chunk]
       inputs = tokenizer(prompts, return_tensors="pt", padding=True, add_special_tokens=False).to("cuda")
       with torch.no_grad():
-        output = model.generate(**inputs, max_new_tokens=max_new_tokens, do_sample=False)
+        output = model.generate(**inputs, max_new_tokens=max_new_tokens, do_sample=False, eos_token_id=stop,
+                                pad_token_id=tokenizer.pad_token_id)
       for row, tokens in zip(chunk, output[:, inputs["input_ids"].shape[1]:]):
-        text = tokenizer.decode(tokens, skip_special_tokens=False)
-        # The reply's content: after any reasoning turn (to=self), the user-facing message.
-        marker = "to=user<|message|>" if "to=user<|message|>" in text else "<|message|>"
-        text = text.rsplit(marker, 1)[-1].split("<|eot|>", 1)[0].split("<|eom|>", 1)[0]
-        handle.write(json.dumps({"key": row["key"], "text": text}) + "\n")
+        raw = tokenizer.decode(tokens, skip_special_tokens=False)
+        # The first user-directed response (after any private reasoning turn), as the cookbook's evaluator records.
+        marker = "to=user<|message|>"
+        text = raw.split(marker, 1)[1] if marker in raw else raw.split("<|message|>", 1)[-1]
+        text = text.split("<|eot|>", 1)[0].split("<|eom|>", 1)[0]
+        handle.write(json.dumps({"key": row["key"], "text": text, "raw": raw}) + "\n")
       handle.flush()
       train_volume.commit()
       print(f"{version}: {start + len(chunk)}/{len(rows)}", flush=True)
