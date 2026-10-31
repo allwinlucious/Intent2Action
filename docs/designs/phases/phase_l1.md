@@ -119,3 +119,94 @@ Model it on `tests/e2e/pickplace_check.py` but start the container with `ROBOT_B
 *   `truth`: after a place into a box, `ListTrueObjects` shows the cube inside the box footprint, z on the floor;
 *   `speed`: a 5-cube "all cubes in the red box" program through `program_runtime` (GrpcBackend) finishes, and
     the median wall time per cube over the run is printed; target ≤ 2 s per cube (print, not fail).
+
+## Addendum A (review resolutions; supersedes the decisions above where they differ)
+
+### A.1 Scope
+
+Create: `container/services/robot/plan_tier.py`, `tests/test_plan_tier.py`, `tests/e2e/plan_tier_check.py`.
+Modify: `container/entrypoint.sh`, `container/run.sh`, `container/services/robot_service.py`,
+`container/services/scene_sync.py`, `tests/e2e/phase3_hwm_check.py`. No `scene_plan.py` (A.4 replaces it).
+
+### A.2 Entrypoint reaches the container
+
+`entrypoint.sh` is baked into the image (`Dockerfile:35`). `run.sh` additionally mounts
+`$ROOT/container/entrypoint.sh:/opt/app/container/entrypoint.sh:ro`, so no image rebuild is needed. The `plan`
+branch starts scene_sync with `--backend plan` (same FASTDDS command as isaac) and robot_service with
+`--backend plan` (same CycloneDDS command as isaac).
+
+### A.3 robot_service wiring (`--backend plan`)
+
+*   `Robot.__init__(self, args, mirror_world)` reads `args.backend`. For `plan`, in this order:
+    `self.planner = Planner(args.planner)`, `self.world = World(args.world)`, `self.clock = plan_tier.PlanClock()`,
+    `self.icon = plan_tier.PlanIcon(self.planner, self.world, self.clock)`. The camera, calibration and simlink stubs
+    are created as today. For `isaac` nothing changes.
+*   `PlanClock` (needs `rclpy.init()` done, as robot_service's main already does for SimClock): own node
+    `robot_service_plan` with an executor thread; `now()` = monotonic seconds since start + virtual seconds;
+    `advance(seconds)`; `advancing(within_s)` → True; publishes `rosgraph_msgs/Clock` on `/clock` with `now()` at
+    50 Hz (MoveIt's `use_sim_time` needs it; nothing else publishes `/clock` without Isaac);
+    `publish_joints(arm: list[float], width: float)` stores the state, which a 20 Hz timer publishes as
+    `sensor_msgs/JointState` (`panda_joint1..7`, `panda_finger_joint1/2` = width / 2).
+*   `PlanIcon` copies the **exact** parameter lists of the `Icon` methods it replaces (including
+    `clear_faults(self, enabled_timeout_s=10.0)` and `run_action`'s parameter order and defaults). `on_started`,
+    when given, is called once before `stop_when` for **every** action kind (the gripper completion code depends
+    on it); then `stop_when(True)` once.
+*   Virtual time per trajectory: `duration_s(trajectory) / speed` (the stored SetSpeed factor), as `Robot.execute`
+    computes the planned duration. Gripper actions: 0.5 s.
+*   `joint_max_velocities()` returns `[math.radians(30.0)] * 7`: Icon clamps to 30 deg/s and every Franka joint
+    limit is above that, so the result equals the isaac backend's. No URDF or Lula reading.
+*   Joints in the worlds: after every jump, `UpdateObjectJoints` on `franka` in `world` and `sim_world`, then
+    `clock.publish_joints(...)`. Gripper width changes also call `publish_joints`.
+*   Unsupported RPCs fail at once with `UNIMPLEMENTED` and the message `"<Rpc> is not available in the plan tier
+    (no camera, force sensor or calibration)"`, checked at the top of each RPC when `args.backend == "plan"`:
+    GetImage, GetPointCloud, CalibrateCamera, DetectObjects, MoveToContact, MoveCompliant, TareWrench, GetWrench,
+    Jog. GetState reports a zero wrench.
+
+### A.4 Scene: scene_sync with a stand-in for Isaac (replaces decision 3)
+
+`Sync` and `SimLink` stay unchanged and are reused: scene_sync gets `--backend {isaac,plan}`; with `plan`,
+`main()` creates `plan_tier.PlanIsaac(world_stub, scene_yaml)` instead of `Ros()` and skips `rclpy.init()`.
+`PlanIsaac` provides exactly the members `Sync` and `SimLink` use (`lock`, `poses`, `pending`, `tf_arrived`,
+`clock`, `epoch`, `take_pending()`, `call(context, service, request, request_renders)`), with these semantics:
+*   Truth table prim → pose tuple `(x, y, z, qx, qy, qz, qw)`, initialised from `sim/scenes/default.yaml`
+    (mounted at `/opt/app/config/default.yaml`, `SCENE_PATH`) objects; `epoch` starts at 1; `clock` = monotonic
+    seconds since start, updated each tick.
+*   `call(...)` emulates Isaac's services and returns objects shaped like their responses (`.result.result`,
+    `.result.error_message` for spawn/delete; `.success`, `.message` for Trigger):
+    `/spawn_entity` adds prim `name.rsplit("/", 1)[1]` at `initial_pose` (RESULT_OK; an existing prim →
+    the `simulation_interfaces` "name not unique" result code that `SPAWN_CODES` maps); `/delete_entity` removes
+    it (unknown → the "not found" code); `/sim/reset` restores the default table and increments `epoch`
+    (success); `/sim/attach_board`, `/sim/detach_board` → success False, message "no calibration board in the
+    plan tier".
+*   A 20 Hz tick thread: for each prim, the pose to publish is the truth pose, except for prims in
+    `sync.attached` (PlanIsaac gets the `Sync` via `bind(sync)` after construction), whose pose is read from
+    `world` (`GetTransform` root → object) and written into the truth table. A prim that was attached on the
+    previous tick and is not any more is **dropped** (decision 5) from its pose read from `world` at that moment
+    (synchronously, not from the previous tick). All poses go to `poses` and `pending`; `tf_arrived` is set.
+*   Reset lifecycle: `Sync.reset()` clears `poses`/`pending`; the next tick republishes the restored table, so
+    the objects are re-created as with Isaac's /tf.
+
+### A.5 Drop (decision 5, made exact)
+
+Pure function in `plan_tier.py`: `drop(pose, dims, supports) -> (z, support_name)`, `supports` = list of
+`(name, pose, dims, container_floor_m | None)` of every other catalog object. Support candidates: objects whose
+footprint (yaw-rotated rectangle) contains the dropped object's footprint centre; the top is `z + height`, or for a
+container `z + floor thickness`. The highest top wins; none → table, z = 0. Roll and pitch become 0, yaw is kept.
+
+### A.6 Check harness
+
+`phase3_hwm_check._Run.start_container(self, backend: str = "isaac")` passes `ROBOT_BACKEND=backend`.
+`plan_tier_check.py` starts the container with `backend="plan"` and no Isaac, waits for TCP ports 18100 and
+18101 only (not ICON's 18003), then until `ListObjects` returns the default scene's objects (timeout 180 s), and
+never calls `_require_state`. Its scenes are loaded with `ResetScene`, `RemoveObject`, `AddObject` as in
+`pickplace_check.py`.
+
+### A.7 Unit tests (`tests/test_plan_tier.py`, extends decision 7)
+
+`plan_tier.py` imports `rclpy` and ROS messages only inside `PlanClock` (tests pass a fake clock). Tests, with fake
+world/planner stubs that record calls: trajectory jump sets joints, advances virtual time by duration / speed and
+writes `UpdateObjectJoints` to both worlds; `on_started` is called before `stop_when` for trajectory, gripper and
+stop actions; GRASP width for one object, none, two; RELEASE width; unsupported actions raise UNIMPLEMENTED;
+`advancing(5.0)` is True; `clear_faults()` and `clear_faults(3.0)` work; PlanIsaac: spawn/delete/reset results and
+epoch, duplicate and unknown prims, attached prim follows the world pose, detach drops from the synchronous world
+read, reset republishes the default table; `drop` onto the table, a cube, a box floor, the highest of two.

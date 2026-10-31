@@ -44,7 +44,7 @@ Randomised layouts with a seed; train seeds and held-out seeds per family, plus 
 | packing | a box filled to 60–100 % of its spots, more cubes to add | free space, release poses, "box full" |
 | stacking | towers of 2–4 to build or take apart | order, on-top placement |
 | reach | objects near the workspace edge or behind others | reach, singular configurations, approach |
-| mixed (held out) | a sort-by-colour or by-size intent over a cluster plus a near-full box | generalisation |
+| mixed (held out) | a sort-by-colour intent over a cluster plus a partly filled box | generalisation |
 
 ## Training data
 
