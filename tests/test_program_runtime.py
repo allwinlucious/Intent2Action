@@ -374,8 +374,18 @@ def test_recovery_agent_twelve_call_limit():
 
 
 def test_recovery_agent_invalid_decision_stops():
-  client = RecoveryClient([{"content": "not json"}])
-  assert RecoveryAgent(client, object(), ToolSet()).recover({"budget": {}})["rung"] == "stop"
+  client = RecoveryClient([{"content": "not json"}, {"content": "still prose"}])
+  decision = RecoveryAgent(client, object(), ToolSet()).recover({"budget": {}})
+  assert decision["rung"] == "stop" and "still prose" in decision["reason"]
+  assert len(client.calls) == 2
+
+
+def test_recovery_agent_corrective_turn():
+  client = RecoveryClient([{"content": "I think we should clear the neighbours."},
+                           {"content": '{"rung":"skip","reason":"blocked"}'}])
+  decision = RecoveryAgent(client, object(), ToolSet()).recover({"budget": {}})
+  assert decision["rung"] == "skip"
+  assert "not a valid decision" in client.calls[1][0][-1]["content"]
 
 
 def test_cli_fake_scene(tmp_path):

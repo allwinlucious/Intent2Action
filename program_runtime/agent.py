@@ -203,7 +203,7 @@ class RecoveryAgent:
       message = self.client.chat(messages, tools=specs)
       calls = message.get("tool_calls") or []
       if not calls:
-        return _parse_decision(message.get("content"))
+        return self._decide(messages, message)
       messages.append(message)
       for call in calls:
         # Chat endpoints reject a reply whose tool calls are not all answered, so calls past the limit get one.
@@ -214,7 +214,23 @@ class RecoveryAgent:
       "role": "user",
       "content": "Tool budget used. Answer now with the decision JSON only.",
     })
-    return _parse_decision(self.client.chat(messages).get("content"))
+    return self._decide(messages, self.client.chat(messages))
+
+  def _decide(self, messages: list[dict], message: dict) -> dict:
+    """Parses the reply; one corrective turn if it is not a valid decision (models drift into prose)."""
+    decision = _parse_decision(message.get("content"))
+    if not decision["reason"].startswith("invalid decision"):
+      return decision
+    messages = [*messages, {"role": "assistant", "content": message.get("content") or ""}, {
+      "role": "user",
+      "content": f"That reply is not a valid decision ({decision['reason']}). Reply with only one JSON object: "
+                 '{"rung": ..., "reason": ...} plus "patch" or "question" when the rung needs it.',
+    }]
+    reply = self.client.chat(messages).get("content")
+    decision = _parse_decision(reply)
+    if decision["reason"].startswith("invalid decision"):
+      decision["reason"] += f"; reply: {str(reply)[:300]!r}"
+    return decision
 
 
 class ScriptedAgent:
