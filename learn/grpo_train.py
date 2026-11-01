@@ -36,6 +36,9 @@ def main() -> None:
   parser.add_argument("--generations", type=int, default=4)
   parser.add_argument("--lr", type=float, default=5e-6)
   parser.add_argument("--temperature", type=float, default=1.0)
+  parser.add_argument("--beta", type=float, default=0.0, help="KL weight; > 0 needs --merge-init")
+  parser.add_argument("--merge-init", default="", help="dir to write base+init merged (bf16) and train a new LoRA on "
+                      "it: the KL reference (the adapter-disabled model) is then the SFT model, not the base")
   args = parser.parse_args()
 
   import datasets
@@ -71,14 +74,30 @@ def main() -> None:
     quantization = transformers.BitsAndBytesConfig(
         load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_use_double_quant=True,
         bnb_4bit_compute_dtype=torch.bfloat16, bnb_4bit_quant_storage=torch.bfloat16)
+    source = MODEL
+    if args.merge_init:
+      merged = Path(args.merge_init)
+      if not (merged / "config.json").exists():
+        full = transformers.AutoModelForImageTextToText.from_pretrained(MODEL, device_map="cpu", dtype=torch.bfloat16)
+        full = peft.PeftModel.from_pretrained(full, f"{args.root}/runs/{args.init}").merge_and_unload()
+        full.save_pretrained(str(merged))
+        transformers.AutoProcessor.from_pretrained(MODEL).save_pretrained(str(merged))
+        del full
+      source = str(merged)
     base = transformers.AutoModelForImageTextToText.from_pretrained(
-        MODEL, device_map="cuda", dtype=torch.bfloat16, quantization_config=quantization, attn_implementation="sdpa")
+        source, device_map="cuda", dtype=torch.bfloat16, quantization_config=quantization, attn_implementation="sdpa")
     base = peft.prepare_model_for_kbit_training(base, use_gradient_checkpointing=True)
-    model = peft.PeftModel.from_pretrained(base, f"{args.root}/runs/{args.init}", is_trainable=True)
+    if args.merge_init:
+      # A fresh adapter with the cookbook's QLoRA settings on top of the merged SFT model.
+      lora = peft.LoraConfig(r=32, lora_alpha=16, lora_dropout=0.05, task_type="CAUSAL_LM", target_modules=(
+          r"model\.language_model\.layers\.\d+\.(self_attn\.(q|k|v|o)_proj|mlp\.(gate|up|down)_proj)"))
+      model = peft.get_peft_model(base, lora)
+    else:
+      model = peft.PeftModel.from_pretrained(base, f"{args.root}/runs/{args.init}", is_trainable=True)
     config = trl.GRPOConfig(
         output_dir=str(out), learning_rate=args.lr, num_train_epochs=1, per_device_train_batch_size=args.generations,
         gradient_accumulation_steps=2, num_generations=args.generations, max_completion_length=700,
-        temperature=args.temperature, beta=0.0, bf16=True, gradient_checkpointing=True, logging_steps=1,
+        temperature=args.temperature, beta=args.beta, bf16=True, gradient_checkpointing=True, logging_steps=1,
         save_strategy="no", report_to=[], seed=42, warmup_steps=0.05, lr_scheduler_type="cosine")
     trainer = trl.GRPOTrainer(model=model, reward_funcs=reward, args=config, train_dataset=dataset,
                               processing_class=tokenizer)

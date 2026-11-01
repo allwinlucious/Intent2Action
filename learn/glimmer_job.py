@@ -67,7 +67,7 @@ def _adapter(root: str, run: str) -> Path:
   return run_dir if (run_dir / "adapter_config.json").exists() else sorted(run_dir.glob("checkpoint-*"))[-1]
 
 
-def _model(adapter: Path | None, bf16: bool = False):
+def _model(adapter: Path | None, bf16: bool = False, base: str = MODEL):
   """The adapter on a precision-matched base, as the cookbook evaluates: NF4 (its --load-in-4bit) for QLoRA
   adapters and G0, bf16 for adapters trained on a bf16 base (LoRA, `bf16`)."""
   import peft
@@ -76,7 +76,7 @@ def _model(adapter: Path | None, bf16: bool = False):
   quantization = None if bf16 else transformers.BitsAndBytesConfig(
       load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_use_double_quant=True,
       bnb_4bit_compute_dtype=torch.bfloat16, bnb_4bit_quant_storage=torch.bfloat16)
-  model = transformers.AutoModelForImageTextToText.from_pretrained(MODEL, device_map="cuda", dtype=torch.bfloat16,
+  model = transformers.AutoModelForImageTextToText.from_pretrained(base, device_map="cuda", dtype=torch.bfloat16,
                                                                    quantization_config=quantization)
   if adapter is not None:
     model = peft.PeftModel.from_pretrained(model, str(adapter), is_trainable=False)
@@ -102,7 +102,7 @@ def reply_text(raw: str) -> str:
 
 
 def generate(root: str, requests: str, out: str, version: str, batch: int = 8, max_new_tokens: int = 1200,
-             temperature: float = 0.0, samples: int = 1, on_flush=None, bf16: bool = False) -> None:
+             temperature: float = 0.0, samples: int = 1, on_flush=None, bf16: bool = False, base: str = MODEL) -> None:
   """Generation the way the model cookbook evaluates adapters (post-training/sft/axolotl/scripts/evaluate.py):
   transformers + PEFT on a precision-matched NF4 base (G0 = no adapter), <|eot|> as a stop token; greedy unless
   `temperature` > 0 (then `samples` replies per request, keys suffixed #i). `requests`: JSON lines
@@ -112,7 +112,7 @@ def generate(root: str, requests: str, out: str, version: str, batch: int = 8, m
   processor = transformers.AutoProcessor.from_pretrained(MODEL)
   tokenizer = processor.tokenizer
   tokenizer.padding_side = "left"
-  model = _model(None if version == "G0" else _adapter(root, version), bf16)
+  model = _model(None if version == "G0" else _adapter(root, version), bf16, base)
   stop = [tokenizer.eos_token_id, tokenizer.convert_tokens_to_ids("<|eot|>")]
   rows = [json.loads(line) for line in Path(f"{root}/{requests}").read_text().splitlines()]
   if samples > 1:
@@ -159,6 +159,7 @@ def main() -> None:
   p.add_argument("--temperature", type=float, default=0.0)
   p.add_argument("--samples", type=int, default=1)
   p.add_argument("--bf16", action="store_true", help="bf16 base (for an adapter trained on a bf16 base: LoRA)")
+  p.add_argument("--base", default=MODEL, help="base weights (a merged SFT model for an adapter trained on one)")
   args = parser.parse_args()
   if args.command == "train":
     Path(f"{args.root}/runs").mkdir(parents=True, exist_ok=True)
@@ -175,7 +176,7 @@ def main() -> None:
     print(json.dumps({k: v for k, v in status.items() if k != "log_tail"})[:2000])
   else:
     generate(args.root, args.requests, args.out, args.version, args.batch, temperature=args.temperature,
-             samples=args.samples, bf16=args.bf16)
+             samples=args.samples, bf16=args.bf16, base=args.base)
 
 
 if __name__ == "__main__":
