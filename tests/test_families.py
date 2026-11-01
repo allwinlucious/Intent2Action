@@ -384,7 +384,8 @@ def test_load_placements_call_order_and_ids(monkeypatch):
     "ResetScene", "ListTrueObjects", "RemoveObject", "AddObject", "AddObject", "ListObjects", "ListObjects",
   ]
   assert events[2] == ("RemoveObject", "old_id", 30)
-  assert all(event[-1] == 30 for event in events if event[0] != "RemoveObject" or len(event) == 3)
+  assert all(event[-1] == (60 if event[0] == "ResetScene" else 30) for event in events
+             if event[0] != "RemoveObject" or len(event) == 3)
   first_pose = events[3][2]
   assert math.isclose(first_pose.qz, math.sin(math.pi / 4))
   assert math.isclose(first_pose.qw, math.cos(math.pi / 4))

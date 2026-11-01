@@ -10,6 +10,7 @@ import sys
 import time
 from pathlib import Path
 
+import grpc
 import yaml
 from google.protobuf import empty_pb2
 from PIL import Image, ImageDraw
@@ -461,8 +462,26 @@ def tasks(family: str, split: str, n: int, catalog_root: Path = CATALOG_ROOT) ->
   return [generate(family, seed, catalog_root) for seed in range(start, start + n)]
 
 
+RESET_ATTEMPTS = 4
+RESET_RETRY_S = 10.0
+
+
+def _reset(sim_stub) -> None:
+  """ResetScene, retried while ICON is still in a fault transition from the previous episode (Isaac:
+  RESOURCE_EXHAUSTED "All hardware modules have an ongoing transition request")."""
+  for attempt in range(RESET_ATTEMPTS):
+    try:
+      sim_stub.ResetScene(empty_pb2.Empty(), timeout=60)
+      return
+    except grpc.RpcError as error:
+      if error.code() not in (grpc.StatusCode.RESOURCE_EXHAUSTED, grpc.StatusCode.UNAVAILABLE) \
+          or attempt == RESET_ATTEMPTS - 1:
+        raise
+      time.sleep(RESET_RETRY_S)
+
+
 def load_placements(placements, sim_stub, robot_stub, timeout_s: float = 30.0) -> list[str]:
-  sim_stub.ResetScene(empty_pb2.Empty(), timeout=30)
+  _reset(sim_stub)
   true_objects = sim_stub.ListTrueObjects(empty_pb2.Empty(), timeout=30).objects
   for value in true_objects:
     if value.catalog != "table":
