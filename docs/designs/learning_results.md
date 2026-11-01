@@ -127,6 +127,17 @@ exceptions (about one task in five needs another strategy), present in the label
 the scene description. The DPO pairs mostly contrast the label with the listed order, which G1b already avoids.
 GRPO (per-task verified reward within a group of samples) addresses exactly this.
 
+## Training seeds and evaluation noise
+
+A second training seed of G1b (`seed: 7`) writes the **identical program on all 250 held-out tasks**: SFT on these
+labels converges to the same task-type → strategy map. Its single evaluation run scored 88 % (first seed 84 %), yet
+on 24 of the 250 tasks the identical program had a different outcome. The plan tier samples (MoveIt grasp
+candidates, IK seeds, paths), so a task's outcome is a probability, not a fact: about 10 % of tasks flip between
+runs. Consequences: the single-run differences above within about ±4 points (G1b, G1d, G5, G3b, the second seed)
+are evaluation noise; the large effects (G0 vs the fine-tuned versions, the G2 regression, the mixed family) stand.
+From here on every version's programs are run three times and a task's success is the mean of the runs (the
+docs-level reference likewise, as the pseudo-version DOCS).
+
 ## Sim tier: G1b on Isaac physics (50 held-out tasks, 10 per family)
 
 | family | plan tier | Isaac physics |
