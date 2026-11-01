@@ -5,7 +5,7 @@
 set -uo pipefail
 host="$1"; port="$2"; shift 2
 cd "$(dirname "$0")/.."
-until [ "$(date +%H)" -lt 8 ]; do sleep 300; done  # 00:00-07:59: the PC is free
+[ -n "${NOW:-}" ] || until [ "$(date +%H)" -lt 8 ]; do sleep 300; done  # 00:00-07:59 the PC is free (NOW=1: start at once)
 ssh_="ssh -i $HOME/.ssh/runpod_ed25519 -o ConnectTimeout=20 -p $port root@$host"
 for version in "$@"; do
   until [ "$($ssh_ "wc -l < /workspace/train/eval/${version}_replies.jsonl 2>/dev/null || echo 0")" -ge 250 ]; do sleep 120; done
