@@ -53,6 +53,51 @@ def run(version: str, per_family: int) -> None:
     stack.stop_isaac()
 
 
+def label(per_family: int = 30) -> None:
+  """Physics-verified labels for G4: on Isaac, each task's plan-tier label (logs/eval/PHYS_programs.jsonl), then its
+  alternatives (other plan-tier successes, most reliable first) until one succeeds in physics. Writes
+  logs/eval/PHYS_labels.jsonl: {family, seed, program (the first physics success, or null), attempts}. Resumes."""
+  import harness
+  import phase1_check as p1
+  import phase3_cuj_check as cuj
+  import phase3_hwm_check as hwm
+  from learn import families
+  from learn.episodes import connect, run_episode
+
+  out_path = LOGS / "PHYS_labels.jsonl"
+  done = {(v["family"], v["seed"]) for v in read_jsonl(out_path)}
+  todo = [v for v in read_jsonl(LOGS / "PHYS_programs.jsonl") if (v["family"], v["seed"]) not in done]
+  print(f"resume: {len(done)} labelled, {len(todo)} to go", flush=True)
+  harness.ISAAC_COMMAND[-1] += " --physics-only"
+  harness.sync_isaac()
+  hwm.CONTAINER_LOG = LOGS / "PHYS_isaac_container.log"
+  stack = hwm._Run()
+  try:
+    stack.start_isaac(LOGS / "PHYS_isaac.log")
+    stack.start_container()
+    p1._wait_for_ports()
+    hwm._require_state("ENABLED", hwm.ENABLED_TIMEOUT_S)
+    cuj._wait_ready()
+    sim_stub, robot_stub = connect()
+    with out_path.open("a") as out:
+      for value in todo:
+        task = families.generate(value["family"], value["seed"])
+        attempts, verified = [], None
+        for program in [value["program"], *value.get("alternatives", [])]:
+          episode = run_episode(task, program, sim_stub, robot_stub)
+          attempts.append({"ok": episode.ok, "error": episode.error})
+          if episode.ok:
+            verified = program
+            break
+        out.write(json.dumps({"family": value["family"], "seed": value["seed"], "program": verified,
+                              "label_ok": attempts[0]["ok"], "attempts": attempts}) + "\n")
+        out.flush()
+        print(f"{'OK  ' if verified else 'FAIL'} {value['family']} {value['seed']} attempts {len(attempts)}", flush=True)
+  finally:
+    stack.stop_container()
+    stack.stop_isaac()
+
+
 def video(tasks: list[str], versions: list[str]) -> None:
   """One rendered Isaac session (studio look): every version's held-out program on every task, one clip each
   (logs/eval/videos/<family>_<seed>_<version>.mp4) plus its last frame."""
@@ -137,6 +182,7 @@ if __name__ == "__main__":
   p.add_argument("--per-family", type=int, default=10)
   p = sub.add_parser("agreement")
   p.add_argument("--version", required=True)
+  sub.add_parser("label")
   p = sub.add_parser("video")
   p.add_argument("--tasks", nargs="+", required=True, help="family:seed ...")
   p.add_argument("--versions", nargs="+", required=True)
@@ -145,5 +191,7 @@ if __name__ == "__main__":
     run(args.version, args.per_family)
   elif args.command == "agreement":
     agreement(args.version)
+  elif args.command == "label":
+    label()
   else:
     video(args.tasks, args.versions)
