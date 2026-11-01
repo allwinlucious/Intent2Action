@@ -75,7 +75,12 @@ def collect(version: str, requests_path, expected: int, timeout_s: float = 4 * 3
     if time.monotonic() > deadline:
       raise TimeoutError(f"{version}: {have}/{expected} replies after {timeout_s:.0f} s")
     time.sleep(60)
-  replies = {value["key"]: value["text"] for value in read_jsonl(local)}
+  return programs(version, requests_path, local)
+
+
+def programs(version: str, requests_path, replies_path) -> Path:
+  """<version>_programs.jsonl from a replies file (Modal volume download or a pod's generate output)."""
+  replies = {value["key"]: value["text"] for value in read_jsonl(replies_path)}
   out = LOGS / f"{version}_programs.jsonl"
   with out.open("w") as handle:
     for row in read_jsonl(requests_path):
@@ -91,15 +96,19 @@ def main() -> None:
   p = sub.add_parser("requests")
   p.add_argument("--solve", default=str(ROOT / "logs/expert/heldout_all.jsonl"))
   p.add_argument("--out", default=str(LOGS / "requests.jsonl"))
-  for name in ("spawn", "collect"):
+  for name in ("spawn", "collect", "programs"):
     p = sub.add_parser(name)
     p.add_argument("--version", required=True)
     p.add_argument("--requests", default=str(LOGS / "requests.jsonl"))
+    if name == "programs":
+      p.add_argument("--replies", required=True, help="a local replies file (e.g. copied from a pod)")
   args = parser.parse_args()
   if args.command == "requests":
     print(f"{requests(args.solve, args.out)} requests -> {args.out}")
   elif args.command == "spawn":
     spawn(args.version, args.requests)
+  elif args.command == "programs":
+    programs(args.version, args.requests, args.replies)
   else:
     collect(args.version, args.requests, len(read_jsonl(args.requests)))
 
