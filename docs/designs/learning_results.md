@@ -183,6 +183,27 @@ G1d rescues stacking 4/5 (G0 1/5) by rewriting the rest of the program in a work
 which rarely helps on a blocked grasp. On 20 tasks the 9 vs 7 is not a claim; the behaviour change is. Both always
 answer with a valid decision (the corrective turn for non-decision replies).
 
+## Physics labels (for G4)
+
+150 training tasks (30 per family): each task's plan-tier label run in Isaac physics, then up to two alternatives
+(other plan-tier successes, most reliable first) until one succeeds.
+
+| family | label works in physics | some strategy works in physics |
+|---|---|---|
+| cluster | 73 % | 87 % |
+| packing | 100 % | 100 % |
+| reach | 73 % | 93 % |
+| sorting | 93 % | 100 % |
+| stacking | 37 % | 37 % |
+
+The stacking failures are mostly not strategy failures: 23 of the 33 failed stacking attempts are ICON refusing to
+start a trajectory (the Isaac arm lagging its setpoint when placing onto another cube; the half-speed default
+reduced but did not remove it), plus grasp and planning failures. Physics labelling therefore mostly measures the
+sim's robustness. G4 changes a label only where physics showed the label fails and another strategy succeeds (12
+tasks: cluster, reach, sorting); tasks where nothing succeeded keep their plan-tier label instead of being dropped.
+G4 differs from G1b in under 2 % of its rows, so no measurable effect is expected. The stacking arm lag is a
+robustness fix for the demo (see the Isaac notes).
+
 ## Sim tier: G1b on Isaac physics (50 held-out tasks, 10 per family)
 
 | family | plan tier | Isaac physics |
