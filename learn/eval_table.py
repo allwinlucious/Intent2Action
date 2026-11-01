@@ -31,7 +31,14 @@ def main(versions: list[str]) -> None:
   for r in load(ROOT / "logs/expert/heldout_all.jsonl"):
     listed = next((e["ok"] for e in r["episodes"] if e["strategy"] == "listed"), False)
     ref[(r["family"], r["seed"])] = (listed, any(e["ok"] for e in r["episodes"]))
-  results = {v: {(e["family"], e["seed"]): e for e in load(ROOT / f"logs/eval/{v}_episodes.jsonl")} for v in versions}
+  # With repeated runs (<V>_episodes_r<k>.jsonl, flag --repeat k) a task's success is its mean over the runs.
+  results = {}
+  for v in versions:
+    path = ROOT / f"logs/eval/{v}_episodes{SUFFIX}.jsonl"
+    runs = collections.defaultdict(list)
+    for e in load(path):
+      runs[(e["family"], e["seed"])].append(e)
+    results[v] = {k: {**es[0], "ok": sum(bool(e["ok"]) for e in es) / len(es), "runs": es} for k, es in runs.items()}
   families = sorted({f for f, _ in ref})
   print("| family | docs-level | " + " | ".join(versions) + " | best strategy |")
   print("|---|---|" + "---|" * len(versions) + "---|")
@@ -40,15 +47,15 @@ def main(versions: list[str]) -> None:
     n = len(keys)
     cells = []
     for v in versions:
-      ok = sum(bool(results[v].get(k, {}).get("ok")) for k in keys)
-      lo, hi = wilson(ok, n)
+      ok = sum(float(results[v].get(k, {}).get("ok") or 0) for k in keys)
+      lo, hi = wilson(round(ok), n)
       cells.append(f"{100 * ok / n:.0f} % [{lo:.0f}–{hi:.0f}]")
     docs = 100 * sum(ref[k][0] for k in keys) / n
     best = 100 * sum(ref[k][1] for k in keys) / n
     print(f"| {family} | {docs:.0f} % | " + " | ".join(cells) + f" | {best:.0f} % |")
   for v in versions:
     kinds = collections.Counter()
-    for e in results[v].values():
+    for e in (r for value in results[v].values() for r in value["runs"]):
       if not e["ok"]:
         error = e.get("error") or ""
         kind = (e.get("failure") or {}).get("kind")
@@ -56,5 +63,12 @@ def main(versions: list[str]) -> None:
     print(f"{v} failures: {dict(kinds)}")
 
 
+SUFFIX = ""
+
 if __name__ == "__main__":
-  main(sys.argv[1:])
+  args = sys.argv[1:]
+  if "--repeat" in args:
+    i = args.index("--repeat")
+    SUFFIX = f"_r{args[i + 1]}"
+    args = args[:i] + args[i + 2:]
+  main(args)

@@ -90,12 +90,29 @@ def programs(version: str, requests_path, replies_path) -> Path:
   return out
 
 
+def repeat(version: str, times: int) -> Path:
+  """<version>_programs_r<times>.jsonl: every program `times` times (sample = run index). The plan tier samples
+  (grasp candidates, IK seeds, paths): an identical program flips outcome on ~10 % of tasks between runs, so a
+  version's success is the mean over repeated runs."""
+  rows = [v for v in read_jsonl(LOGS / f"{version}_programs.jsonl")]
+  out = LOGS / f"{version}_programs_r{times}.jsonl"
+  with out.open("w") as handle:
+    for value in rows:
+      for run in range(times):
+        handle.write(json.dumps({**value, "sample": run}) + "\n")
+  print(f"wrote {out} ({len(rows)} programs x {times})")
+  return out
+
+
 def main() -> None:
   parser = argparse.ArgumentParser()
   sub = parser.add_subparsers(dest="command", required=True)
   p = sub.add_parser("requests")
   p.add_argument("--solve", default=str(ROOT / "logs/expert/heldout_all.jsonl"))
   p.add_argument("--out", default=str(LOGS / "requests.jsonl"))
+  p = sub.add_parser("repeat")
+  p.add_argument("--version", required=True)
+  p.add_argument("--times", type=int, default=3)
   for name in ("spawn", "collect", "programs"):
     p = sub.add_parser(name)
     p.add_argument("--version", required=True)
@@ -107,6 +124,8 @@ def main() -> None:
     print(f"{requests(args.solve, args.out)} requests -> {args.out}")
   elif args.command == "spawn":
     spawn(args.version, args.requests)
+  elif args.command == "repeat":
+    repeat(args.version, args.times)
   elif args.command == "programs":
     programs(args.version, args.requests, args.replies)
   else:
