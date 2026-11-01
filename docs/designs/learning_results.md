@@ -37,6 +37,25 @@ expert program handles both rules in one work list and frees grasps across colou
 that does not carry over to a new task structure. Next: a two-box training family with different layouts, so the
 held-out family tests the cross-rule ordering rather than the bare presence of two boxes.
 
+## G2 and G3: plain rejection sampling brings the docs-level habit back
+
+| family | docs-level | G0 | G1 | G2 | G3 | best strategy |
+|---|---|---|---|---|---|---|
+| cluster | 52 % | 44 % [31–58] | **62 %** [48–74] | 46 % [33–60] | 50 % [37–63] | 74 % |
+| mixed | 66 % | 58 % [44–71] | 48 % [35–61] | 56 % [42–69] | 54 % [40–67] | 86 % |
+| packing | 100 % | 88 % [76–94] | 100 % [93–100] | 100 % [93–100] | 100 % [93–100] | 100 % |
+| reach | 80 % | 82 % [69–90] | 88 % [76–94] | 88 % [76–94] | 80 % [67–89] | 94 % |
+| stacking | 48 % | 54 % [40–67] | **88 %** [76–94] | 54 % [40–67] | 50 % [37–63] | 100 % |
+| all | 69 % | 65 % [59–71] | **77 %** [72–82] | 69 % [63–74] | 67 % [61–72] | 91 % |
+
+G2 = G1 + 903 of Glimmer's own successful samples (4 per task at temperature 0.7, 1652 of 2400 succeeded, at most
+2 kept per task); G3 = G2 + 41 confirmed recovery rows (sequence length 8192: the recovery prompt carries the tool
+list). Both lose most of G1's gain. Glimmer's successes are mostly the listed order working on easy layouts; 903 of
+them next to 562 expert rows teach the docs-level habit again (stacking 88 % → 54 %). Rejection sampling on a binary
+outcome reinforces lucky behaviour. Only 239 of the 1652 successes are on tasks where the docs-level program fails,
+i.e. where success needed a deliberate order. Follow-ups: G2b (G1 + those informative successes only), G3b (G1 +
+recovery rows only), G1b (G1 + a two-box sorting family, for the held-out mixed family).
+
 ## Pending
 
 G2 (+ Glimmer's own successful attempts), G3 (+ confirmed recovery patches), live-recovery evaluation, Isaac
