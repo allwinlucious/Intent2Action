@@ -157,7 +157,11 @@ def video(tasks: list[str], versions: list[str]) -> None:
 
 
 def agreement(version: str) -> None:
-  plan = {(v["family"], v["seed"]): v["ok"] for v in read_jsonl(LOGS / f"{version}_episodes.jsonl")}
+  single = LOGS / f"{version}_episodes.jsonl"
+  # Versions graded only with repeated runs: their first run, the same single-run basis as the physics side.
+  plan_rows = read_jsonl(single) if single.exists() else [
+      v for v in read_jsonl(LOGS / f"{version}_episodes_r3.jsonl") if v.get("sample") == 0]
+  plan = {(v["family"], v["seed"]): v["ok"] for v in plan_rows}
   physics = {(v["family"], v["seed"]): v for v in read_jsonl(LOGS / f"{version}_isaac_episodes.jsonl")}
   table = collections.Counter()
   for key, value in physics.items():

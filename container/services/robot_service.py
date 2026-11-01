@@ -278,6 +278,16 @@ class World:
       self._toggle(name, other, enable=False)
     self.untouched[name] = others
 
+  def lifted(self, name: str) -> None:
+    """After the lift the held object no longer touches its supports: their collision checks come back on, or later
+    motions could sweep it through the table or the cube it stood on unnoticed."""
+    keep = ["franka", "franka_hand"]
+    for other in self.untouched.get(name, []):
+      if other not in keep:
+        self._toggle(name, other, enable=True)
+    if name in self.untouched:
+      self.untouched[name] = [o for o in self.untouched[name] if o in keep]
+
   def detach(self, name: str) -> None:
     """Parents the object back to the root, keeping its pose; collision checks it had switched off come back on."""
     before = self.pose(name)
@@ -1062,6 +1072,7 @@ class RobotService(api_grpc.RobotServiceServicer):
         lift.CopyFrom(plan.grasp)
         lift.z += PICK_LIFT_M
         self.r.move(op, lift, api.LINEAR, "lifting")
+        self.r.world.lifted(object_id)
       except ApiError as error:
         log.warning("pick object=%s target=%s status=%s duration_s=%.3f message=%s",
                     object_id, "", error.code.name, self.r.clock.now() - start, error.message)
@@ -1197,8 +1208,11 @@ class RobotService(api_grpc.RobotServiceServicer):
     if self.r.motion is not None and not self.r.motion.done:
       raise ApiError(grpc.StatusCode.FAILED_PRECONDITION,
                      f"the speed applies to following motions; {self.r.motion.name} is running")
-    self.r.icon.set_speed(request.factor)
-    self.r.speed = request.factor
+    if self.r.resetting.is_set():
+      raise ApiError(grpc.StatusCode.FAILED_PRECONDITION, "ResetScene is in progress (it sets the default speed)")
+    with self.r.recover_lock:  # the same lock as reset and fault recovery, which also write the speed
+      self.r.icon.set_speed(request.factor)
+      self.r.speed = request.factor
     return empty_pb2.Empty()
 
   def ClearFaults(self, request, context):

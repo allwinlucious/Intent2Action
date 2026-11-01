@@ -2,7 +2,7 @@
 # The owner's PC is free from 00:00: then, for each version whose held-out replies are on the pod, copy them back,
 # grade them 3x on the plan-tier fleet, and run its programs on the 50 Isaac tasks G1b was measured on.
 #   runpod/after_midnight_eval.sh <host> <port> <version>...
-set -uo pipefail
+set -euo pipefail
 host="$1"; port="$2"; shift 2
 cd "$(dirname "$0")/.."
 [ -n "${NOW:-}" ] || until [ "$(date +%H)" -lt 8 ]; do sleep 300; done  # 00:00-07:59 the PC is free (NOW=1: start at once)
@@ -17,4 +17,4 @@ for version in "$@"; do
   timeout 10800 .venv/bin/python learn/isaac_eval.py run --version "$version" --per-family 10 > "logs/eval/${version}_isaac.out" 2>&1
 done
 .venv/bin/python learn/eval_table.py --repeat 3 DOCS G0 G1b "$@"
-for version in G1b "$@"; do .venv/bin/python learn/isaac_eval.py agreement --version "$version" 2>/dev/null | head -3; done
+for version in G1b "$@"; do .venv/bin/python learn/isaac_eval.py agreement --version "$version" | head -3; done

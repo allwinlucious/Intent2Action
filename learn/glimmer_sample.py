@@ -79,7 +79,15 @@ def generate(records: list[dict], k: int, out_path, client) -> None:
 
 def run(samples: list[dict], out_path, sim_stub, robot_stub, shard: str | None = None, agent=None) -> None:
   """`agent`: the recovery agent for handoffs (evaluation of a model version with recovery), or None."""
-  done = {(value["family"], value["seed"], value["sample"]) for value in read_jsonl(out_path)}
+  stored = {(value["family"], value["seed"], value["sample"]): value.get("program") for value in read_jsonl(out_path)}
+  stale = []
+  for value in samples:
+    key = (value["family"], value["seed"], value["sample"])
+    if "program" in value and stored.get(key) not in (None, value["program"]):
+      stale.append(key)
+  if stale:  # regenerated programs: an old episode must not be kept under the same key
+    sys.exit(f"{out_path} has episodes of other programs for {len(stale)} samples (e.g. {stale[:2]}); move it away")
+  done = set(stored)
   todo = [value for value in samples
           if "program" in value and (value["family"], value["seed"], value["sample"]) not in done
           and in_shard(value["family"], value["seed"], shard)]

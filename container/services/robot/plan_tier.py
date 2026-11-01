@@ -365,6 +365,7 @@ class PlanIsaac:
     if service == "/sim/reset":
       with self.lock:
         self._truth = dict(self._defaults)
+        self._was_attached = set()  # a cube held across the reset must not be "dropped" back into the new scene
         self.epoch += 1
       return SimpleNamespace(success=True, message="")
     if service in ("/sim/attach_board", "/sim/detach_board"):
@@ -377,26 +378,31 @@ class PlanIsaac:
 
   def _run(self) -> None:
     while True:
-      self._tick()
+      try:
+        self._tick()
+      except Exception:  # pylint: disable=broad-except
+        # One failed world read (an object mid-delete) must not end the thread that publishes every pose.
+        log.exception("plan_tier tick failed; continuing")
       time.sleep(TICK_S)
 
   def _tick(self) -> None:
     self.clock = time.monotonic() - self._start
     sync = self.sync
     attached = set(sync.attached) if sync is not None else set()
-    for prim in attached:
-      if prim in self._truth:
-        self._truth[prim] = self._world_pose(prim)
-    for prim in self._was_attached - attached:
-      if prim not in self._truth:
-        continue
+    # World reads happen outside the lock; the truth table is changed under it, so a reset in between wins.
+    with self.lock:
+      held = [p for p in attached if p in self._truth]
+      released = [p for p in self._was_attached - attached if p in self._truth]
+      epoch = self.epoch
+    updates = {prim: self._world_pose(prim) for prim in held}
+    for prim in released:
       pose = self._world_pose(prim)
       catalog = self._catalogs.get(prim) or (sync.catalogs.get(prim) if sync is not None else None)
-      if catalog is not None:
-        pose = self._dropped_pose(prim, pose, catalog)
-      self._truth[prim] = pose
-    self._was_attached = attached
+      updates[prim] = self._dropped_pose(prim, pose, catalog) if catalog is not None else pose
     with self.lock:
+      if epoch == self.epoch:
+        self._truth.update({p: pose for p, pose in updates.items() if p in self._truth})
+        self._was_attached = attached
       self.poses.update(self._truth)
       self.pending.update(self._truth)
       present = set(self._truth)
