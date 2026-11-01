@@ -99,7 +99,25 @@ habit such as top-first can flip between runs, so differences inside the interva
 
 **Best so far: G1b, 84 % held-out (zero-shot G0: 65 %, docs-level program: 69 %, best strategy: 91 %).**
 
+## Sim tier: G1b on Isaac physics (50 held-out tasks, 10 per family)
+
+| family | plan tier | Isaac physics |
+|---|---|---|
+| cluster | 80 % | 60 % |
+| mixed | 70 % | 80 % |
+| packing | 100 % | 100 % |
+| reach | 90 % | 70 % |
+| stacking | 100 % | 90 % |
+| all 50 | 88 % | **80 %** |
+
+Agreement 76 % (38/50): both ok 36, both failed 2, plan ok / physics failed 8, plan failed / physics ok 4.
+Physics-only failures: ICON stop outside position limits 2, arm lag (setpoint difference) 2, and 4 planning failures
+that occur only because, in physics, the arm and the cubes end up slightly off the exact poses the plan tier assumes.
+The plan tier is a good but optimistic proxy (about 8 points on this subset, mostly cluster and reach): the case
+for G4 (training on Isaac-verified episodes).
+
 ## Pending
 
-G2 (+ Glimmer's own successful attempts), G3 (+ confirmed recovery patches), live-recovery evaluation, Isaac
-(physics) subset and plan/physics agreement, G4.
+Recovery examples regenerated with the most-reliable-strategy labels (then G1c again); live-recovery evaluation
+(the model as recovery agent); G4 on Isaac-verified episodes; repeat the key versions with a second training seed;
+videos (G0 vs G1b on the same layout).
