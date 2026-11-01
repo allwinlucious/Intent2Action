@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / "gen")]
 
 from learn import families, strategies  # noqa: E402
+from learn import sft_data  # noqa: E402
 from learn.episodes import connect, in_shard, read_jsonl, record, run_episode, stack  # noqa: E402
 
 STACK_TOLERANCE_M = 0.01
@@ -87,7 +88,8 @@ def _task(value: dict):
 def recover(value: dict, sim_stub, robot_stub) -> tuple[str, dict | None, object]:
   """(outcome, example or None, episode) for one solve record with an expert program and a failed `listed` run."""
   listed = value["episodes"][0]
-  agent = CapturingAgent(value["expert_strategy"], value["expert_program"])
+  strategy, program = value.get("label_strategy") or value["expert_strategy"], value.get("label_program") or value["expert_program"]
+  agent = CapturingAgent(strategy, program)
   episode = run_episode(_task(value), listed["program"], sim_stub, robot_stub, agent=agent, strategy="listed")
   if agent.context is None:
     return "no_handoff", None, episode
@@ -146,6 +148,13 @@ def _run_recovery(args, names: list[str], sim_stub, robot_stub) -> None:
   start = 100000 if args.split == "heldout" else 0
   values = [value for value in _solve_records(args.input) if value["split"] == args.split
             and value["family"] in names and value["seed"] < start + args.n]
+  # The patch is the same label the program rows use (sft_data.best_program): the most reliable successful strategy
+  # on the family; with first-success records, two teachers disagreed (G1c, results 2026-11-01).
+  rates = sft_data.strategy_rates(values)
+  for value in values:
+    best = sft_data.best_program(value, rates)
+    value["label_program"] = best
+    value["label_strategy"] = next((e["strategy"] for e in value["episodes"] if e["program"] == best), None)
   done = {(value["family"], value["seed"]) for value in read_jsonl(args.out)}
   print(f"resume: {len(done)} tasks already in {args.out}", flush=True)
   counts = {family: collections.Counter() for family in names}
