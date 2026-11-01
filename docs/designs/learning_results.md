@@ -84,6 +84,21 @@ Filtering Glimmer's own successes to the informative ones removes most of G2's d
 learning from the expert's search beats learning from the model's own successes (packing 100 % for all three).
 Recovery rows help slightly (within the intervals). Next: G1c = G1b + recovery rows.
 
+## G1c: recovery rows with conflicting labels
+
+| version | all | cluster | mixed | packing | reach | stacking |
+|---|---|---|---|---|---|---|
+| G1b | **84 %** [79–88] | 68 % | 78 % | 100 % | 78 % | **98 %** |
+| G1c = G1b + 41 recovery rows | 78 % [72–82] | 68 % | **84 %** | 98 % | 88 % | 50 % |
+
+G1c writes the top-first order in 5 of 50 held-out stacking programs (G1b: 34). The recovery rows were made from
+the first-success expert run (before the most-reliable-strategy labels), so their patches often teach another order
+than the program rows: two teachers that disagree, and the stacking habit flips. Fix: regenerate the recovery
+examples with the same label rule. Also a caution for every comparison here: one training run per version; a
+habit such as top-first can flip between runs, so differences inside the intervals are not claims.
+
+**Best so far: G1b, 84 % held-out (zero-shot G0: 65 %, docs-level program: 69 %, best strategy: 91 %).**
+
 ## Pending
 
 G2 (+ Glimmer's own successful attempts), G3 (+ confirmed recovery patches), live-recovery evaluation, Isaac
