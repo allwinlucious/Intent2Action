@@ -138,6 +138,28 @@ are evaluation noise; the large effects (G0 vs the fine-tuned versions, the G2 r
 From here on every version's programs are run three times and a task's success is the mean of the runs (the
 docs-level reference likewise, as the pseudo-version DOCS).
 
+## Repeated evaluation (3 runs per program; a task's success is its mean)
+
+| family | DOCS (docs-level) | G0 | **G1b** (QLoRA SFT) | G6 (G1b + GRPO, weak) | G1b_lora (bf16 LoRA) | best strategy* |
+|---|---|---|---|---|---|---|
+| cluster | 47 % | 38 % | **65 %** | 59 % | 64 % | 74 % |
+| mixed (held out) | 62 % | 51 % | **82 %** | 85 % | 85 % | 86 % |
+| packing | 99 % | 87 % | 98 % | 99 % | 100 % | 100 % |
+| reach | 84 % | 83 % | 85 % | 86 % | 85 % | 94 % |
+| stacking | 47 % | 47 % | 97 % | 98 % | 61 % | 100 % |
+| **all** | 68 % [62–73] | 61 % [55–67] | **86 % [81–89]** | 86 % [81–89] | 79 % [74–84] | 91 % |
+
+*single run of every strategy (held-out reference).
+
+- Fine-tuning: **61 % → 86 %** (+25) over zero-shot Glimmer, +18 over the docs-level program; zero-shot is below the
+  docs-level program partly because 27 of its 750 runs fail the static checks.
+- G6 (GRPO from G1b: 150 prompts with 4 samples each, lr 5e-6, verified rewards, 75 steps; mean reward by quarter
+  0.78/0.76/0.90/0.82) leaves behaviour unchanged (2 of 250 programs differ): too weak a run, not a verdict on GRPO;
+  a stronger run (G7: 302 prompts, lr 2e-5) follows.
+- bf16 LoRA (the cookbook's lora config on one 96 GB GPU, lr 5e-5, same data as G1b) is worse than QLoRA: it varies
+  its strategy on cluster (most-free-first on 33 of 50) without gaining, and on stacking chooses outer-first instead
+  of top-first on 20 of 50 tasks (61 %). With this data the cookbook's default QLoRA recipe is the better one.
+
 ## Sim tier: G1b on Isaac physics (50 held-out tasks, 10 per family)
 
 | family | plan tier | Isaac physics |
