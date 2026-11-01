@@ -6,6 +6,44 @@ never seen in training. Success = the program runs to the end and the rule check
 Generation follows the model cookbook's adapter evaluation: transformers + PEFT on an NF4 base (G0 = the same base,
 no adapter), greedy, one attempt, the product's writer prompt. 95 % Wilson intervals in brackets.
 
+
+## Corrections after an independent code review (2026-11-01, evening)
+
+Three the reviewer reviewers (training, evaluation, robot code; read-only) found defects that change reported results:
+
+1. **GRPO runs G6, G7, G7b are invalid.** Generation never stopped at Glimmer's end-of-turn token `<|eot|>`; every
+   rollout ran to the 700-token limit (G6: 100 % clipped), so the reward scored the program plus arbitrary
+   continuation. "GRPO leaves behaviour unchanged" (G6) and "GRPO diverges" (G7) are withdrawn; G7b was stopped.
+   Fixed (`generation_kwargs` with `<|eot|>`); a corrected GRPO run is pending.
+2. **Live recovery: G0 had 4 invalid decisions, not 0.** A `patch` decision without a patch passed validation and
+   was rejected later by the runtime (no corrective turn). Fixed (patch and ask_user need their payload); the G0
+   recovery run is to be repeated.
+3. **The intervals were not valid.** Run means were rounded into binomial counts. Recomputed below as a percentile
+   bootstrap over tasks. And the old "best strategy 91 %" is an **oracle** (a task counts if any of 4-5 strategies
+   succeeded); the fair reference, one fixed strategy per family chosen on the training tasks, reaches **84 %**.
+
+Current held-out results (plan tier, 250 tasks, 3 runs per program; a task's success is its run mean; 95 %
+bootstrap intervals over tasks; references from single runs):
+
+| family | DOCS | G0 | G1b | G6 | G1b_lora | G4 | docs-level (1 run) | fixed best strategy (1 run) | oracle |
+|---|---|---|---|---|---|---|---|---|---|
+| cluster | 47 % [37–59] | 38 % [29–49] | 65 % [53–78] | 59 % [47–72] | 64 % [53–76] | 55 % [42–67] | 52 % | 60 % | 74 % |
+| mixed | 62 % [51–73] | 51 % [39–63] | 82 % [73–91] | 85 % [76–93] | 85 % [76–93] | 82 % [72–91] | 66 % | 78 % | 86 % |
+| packing | 99 % [98–100] | 87 % [78–95] | 98 % [95–100] | 99 % [98–100] | 100 % [100–100] | 99 % [98–100] | 100 % | 100 % | 100 % |
+| reach | 84 % [76–91] | 83 % [75–89] | 85 % [77–93] | 86 % [78–93] | 85 % [77–92] | 79 % [71–86] | 80 % | 84 % | 94 % |
+| stacking | 47 % [35–59] | 47 % [35–59] | 97 % [94–100] | 98 % [95–100] | 61 % [49–73] | 99 % [98–100] | 48 % | 100 % | 100 % |
+| all | 68 % [63–73] | 61 % [56–67] | 86 % [82–89] | 86 % [82–89] | 79 % [75–84] | 83 % [79–87] | 69 % | 84 % | 91 % |
+
+**Main claim:** fine-tuning (G1b) lifts Glimmer from 61 % to 86 % — as good as the best fixed strategy per family
+(84 %), learned from the scene description and the intent alone. Choosing per layout (the 91 % oracle) is not
+learned. In Isaac physics G1b reaches 80 % on 50 held-out tasks (G4 82 %).
+
+Known limitations still open (reported, not fixed): the corrective move after an arm-lag stall can also push
+through a real obstruction; the retreat is planned from the commanded release joints rather than the sensed ones;
+SFT train/validation are split per row, not per task (validation loss is optimistic; versions are not exactly
+nested); the DPO validation pairs' labels used strategy rates that included those tasks; strategy programs skip a
+held cube that is already geometrically inside its box. Earlier sections below keep their original single-run
+numbers and Wilson intervals for the record; read them with these corrections.
 ## Training data (600 train tasks, every strategy run on each)
 
 | Family | listed (docs) | most_free_first | outer_first | nearest_target_first | top_first | any |
