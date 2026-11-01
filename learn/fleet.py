@@ -52,10 +52,10 @@ def _planner_answers(stub) -> bool:
 
 
 @contextlib.contextmanager
-def containers(n: int, base_port: int):
-  """Starts plan_0..plan_{n-1}; yields their addresses once each robot_service lists the default scene."""
+def containers(n: int, base_port: int, prefix: str = "plan"):
+  """Starts <prefix>_0..<prefix>_{n-1}; yields their addresses once each robot_service and planner answer."""
   LOGS.mkdir(parents=True, exist_ok=True)
-  names = [f"plan_{k}" for k in range(n)]
+  names = [f"{prefix}_{k}" for k in range(n)]
   try:
     for k, name in enumerate(names):
       env = {**os.environ, "CONTAINER_NAME": name, "PUBLISH_PORT": str(base_port + k), "ROBOT_BACKEND": "plan"}
@@ -112,6 +112,7 @@ def main() -> int:
   parser = argparse.ArgumentParser()
   parser.add_argument("--workers", type=int, default=8)
   parser.add_argument("--base-port", type=int, default=18200)
+  parser.add_argument("--prefix", default="plan", help="container names; a second fleet needs its own (and ports)")
   parser.add_argument("command", nargs=argparse.REMAINDER, help="-- script args... (must include --out PATH)")
   args = parser.parse_args()
   command = args.command[1:] if args.command[:1] == ["--"] else args.command
@@ -122,13 +123,13 @@ def main() -> int:
   out.parent.mkdir(parents=True, exist_ok=True)
   shards = split(out, args.workers)
   failed = 0
-  with containers(args.workers, args.base_port) as addresses:
+  with containers(args.workers, args.base_port, args.prefix) as addresses:
     def start(k: int, address: str) -> subprocess.Popen:
       argv = list(command)
       argv[argv.index("--out") + 1] = str(shards[k])
       argv += ["--shard", f"{k}/{args.workers}"]
-      log = open(LOGS / f"worker_{k}.log", "a")  # noqa: SIM115 (kept open for the child)
-      print(f"worker {k}: {address} -> {shards[k]} (log {LOGS / f'worker_{k}.log'})", flush=True)
+      log = open(LOGS / f"{args.prefix}_worker_{k}.log", "a")  # noqa: SIM115 (kept open for the child)
+      print(f"worker {k}: {address} -> {shards[k]} (log {LOGS / f'{args.prefix}_worker_{k}.log'})", flush=True)
       return subprocess.Popen([sys.executable, *argv], cwd=ROOT, env={**os.environ, "ROBOT_ADDRESS": address},
                               stdout=log, stderr=subprocess.STDOUT)
 

@@ -28,7 +28,7 @@ from robot import place  # noqa: E402
 
 CATALOG_ROOT = ROOT / "assets" / "objects"
 TABLE_SCENE = yaml.safe_load((ROOT / "sim" / "scenes" / "default.yaml").read_text())["objects"]["table"]
-FAMILIES = ("cluster", "packing", "stacking", "reach", "mixed")
+FAMILIES = ("cluster", "packing", "stacking", "reach", "mixed", "sorting")
 CUBE_CATALOGS = ("red_cube", "blue_cube", "green_cube", "small_yellow_cube")
 MEDIUM_CUBES = ("red_cube", "blue_cube", "green_cube")
 BOX_CATALOGS = ("red_box", "blue_box")
@@ -116,16 +116,18 @@ def _shape_offsets(shape: str, n: int) -> tuple[tuple[int, int], ...]:
   return tuple((i, row) for row in range(2) for i in range(columns))[:n]
 
 
-def _cluster_placements(rng: random.Random, specs: dict[str, dict], *, mixed: bool = False) -> list[Placement]:
-  shape = rng.choice(tuple(SHAPE_COUNTS))
+def _cluster_placements(rng: random.Random, specs: dict[str, dict], *, mixed: bool = False,
+                        shape: str | None = None, n: int | None = None,
+                        centre: tuple[float, float] | None = None) -> list[Placement]:
+  shape = shape or rng.choice(tuple(SHAPE_COUNTS))
   low, high = SHAPE_COUNTS[shape]
   if mixed:
     low, high = max(low, 4), min(high, 6)
-  n = rng.randint(low, high)
+  n = n or rng.randint(low, high)
   gap = rng.uniform(*GAP_RANGE_M)
   pitch = float(specs["red_cube"]["dims"][0]) + gap
   theta = rng.uniform(-math.pi / 4, math.pi / 4)
-  centre_x, centre_y = rng.uniform(0.45, 0.55), rng.uniform(0.00, 0.15)
+  centre_x, centre_y = centre or (rng.uniform(0.45, 0.55), rng.uniform(0.00, 0.15))
   offsets = _shape_offsets(shape, n)
   mean_x = sum(x for x, _ in offsets) / n
   mean_y = sum(y for _, y in offsets) / n
@@ -284,12 +286,28 @@ def _mixed_attempt(rng: random.Random, specs: dict[str, dict]) -> tuple[list[Pla
   return placements, intent
 
 
+def _sorting_attempt(rng: random.Random, specs: dict[str, dict]) -> tuple[list[Placement], dict]:
+  """Two-box colour sorting with layouts unlike `mixed` (trained; `mixed` stays held out): two short lines of
+  red and blue cubes, no pre-filled box, the same boxes and intent as `mixed`."""
+  placements = []
+  for centre in ((rng.uniform(0.40, 0.46), rng.uniform(-0.02, 0.06)), (rng.uniform(0.52, 0.58), rng.uniform(0.12, 0.20))):
+    placements += _cluster_placements(rng, specs, mixed=True, shape="line", n=rng.randint(2, 3), centre=centre)
+  placements += [Placement("red_box", rng.uniform(0.34, 0.38), rng.uniform(-0.30, -0.24), 0.0, 0.0),
+                 Placement("blue_box", rng.uniform(0.66, 0.70), rng.uniform(-0.24, -0.18), 0.0, 0.0)]
+  intent = _intent("sort by colour: red cubes into the red box, blue cubes into the blue box", [
+    _rule({"category": "cube", "color": "red"}, "in", {"category": "box", "color": "red"}),
+    _rule({"category": "cube", "color": "blue"}, "in", {"category": "box", "color": "blue"}),
+  ])
+  return placements, intent
+
+
 ATTEMPTS = {
   "cluster": _cluster_attempt,
   "packing": _packing_attempt,
   "stacking": _stacking_attempt,
   "reach": _reach_attempt,
   "mixed": _mixed_attempt,
+  "sorting": _sorting_attempt,
 }
 
 

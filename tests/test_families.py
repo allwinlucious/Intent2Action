@@ -113,7 +113,7 @@ def test_generation_split_determinism_and_intents(family, split, generated):
 
 
 def test_split_errors_and_disjoint_seeds(generated):
-  for family in families.FAMILIES[:-1]:
+  for family in [f for f in families.FAMILIES if f != "mixed"]:
     assert not ({task.seed for task in generated[(family, "train")]} &
                 {task.seed for task in generated[(family, "heldout")]})
   with pytest.raises(ValueError, match="mixed is held out entirely"):
