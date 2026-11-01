@@ -72,6 +72,18 @@ G1b = G1 + 149 expert rows of the `sorting` family (two boxes, two short lines o
 mixed's different layouts (48 % → 78 %). Failures — G1b: grasp 18, reachability 17, place 3, collision 1 (G0: grasp
 53). Reach 88 % → 78 % is within the intervals; to watch.
 
+## Own attempts filtered (G2b), recovery alone (G3b)
+
+| version | data | all | cluster | mixed | reach | stacking |
+|---|---|---|---|---|---|---|
+| G1 | expert programs | 77 % [72–82] | 62 % | 48 % | 88 % | 88 % |
+| G2b | G1 + 166 own successes on tasks where the docs-level program fails | 74 % [69–79] | 48 % | 38 % | 86 % | 100 % |
+| G3b | G1 + 41 confirmed recovery rows | 79 % [73–83] | 66 % | 48 % | 82 % | 98 % |
+
+Filtering Glimmer's own successes to the informative ones removes most of G2's damage but still does not help:
+learning from the expert's search beats learning from the model's own successes (packing 100 % for all three).
+Recovery rows help slightly (within the intervals). Next: G1c = G1b + recovery rows.
+
 ## Pending
 
 G2 (+ Glimmer's own successful attempts), G3 (+ confirmed recovery patches), live-recovery evaluation, Isaac
