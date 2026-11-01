@@ -99,6 +99,18 @@ habit such as top-first can flip between runs, so differences inside the interva
 
 **Best so far: G1b, 84 % held-out (zero-shot G0: 65 %, docs-level program: 69 %, best strategy: 91 %).**
 
+## G1d: consistent recovery labels
+
+| version | all | cluster | mixed | packing | reach | stacking |
+|---|---|---|---|---|---|---|
+| G1b | **84 %** [79–88] | 68 % | 78 % | 100 % | 78 % | 98 % |
+| G1c (G1b + 41 first-success recovery rows) | 78 % [72–82] | 68 % | 84 % | 98 % | 88 % | 50 % |
+| G1d (G1b + 63 recovery rows, same labels as the program rows) | 82 % [76–86] | 56 % | 78 % | 100 % | 82 % | 92 % |
+
+Consistent labels remove G1c's stacking collapse (50 % → 92 %). Recovery rows do not improve program writing
+beyond G1b (inside the intervals); their value is to be measured where they apply, with the model as recovery
+agent (pending).
+
 ## Sim tier: G1b on Isaac physics (50 held-out tasks, 10 per family)
 
 | family | plan tier | Isaac physics |
