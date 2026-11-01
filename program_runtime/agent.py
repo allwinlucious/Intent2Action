@@ -57,7 +57,8 @@ class ChatClient:
       headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
       method="POST",
     )
-    with urllib.request.urlopen(request, timeout=120) as response:
+    # LLM_TIMEOUT_S: a self-hosted server that answers one request at a time needs longer than a hosted endpoint.
+    with urllib.request.urlopen(request, timeout=float(os.environ.get("LLM_TIMEOUT_S", "120"))) as response:
       result = json.loads(response.read())
     return result["choices"][0]["message"]
 
