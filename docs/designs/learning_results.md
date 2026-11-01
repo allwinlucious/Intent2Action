@@ -56,6 +56,22 @@ outcome reinforces lucky behaviour. Only 239 of the 1652 successes are on tasks 
 i.e. where success needed a deliberate order. Follow-ups: G2b (G1 + those informative successes only), G3b (G1 +
 recovery rows only), G1b (G1 + a two-box sorting family, for the held-out mixed family).
 
+## G1b: a two-box training family fixes the held-out family
+
+| family | docs-level | G0 | G1 | **G1b** | best strategy |
+|---|---|---|---|---|---|
+| cluster | 52 % | 44 % [31–58] | 62 % [48–74] | **68 %** [54–79] | 74 % |
+| mixed (held out) | 66 % | 58 % [44–71] | 48 % [35–61] | **78 %** [65–87] | 86 % |
+| packing | 100 % | 88 % [76–94] | 100 % [93–100] | 100 % [93–100] | 100 % |
+| reach | 80 % | 82 % [69–90] | 88 % [76–94] | 78 % [65–87] | 94 % |
+| stacking | 48 % | 54 % [40–67] | 88 % [76–94] | **98 %** [90–100] | 100 % |
+| all | 69 % | 65 % [59–71] | 77 % [72–82] | **84 %** [79–88] | 91 % |
+
+G1b = G1 + 149 expert rows of the `sorting` family (two boxes, two short lines of red and blue cubes; the held-out
+`mixed` family has a dense cluster and a pre-filled box). The cross-rule ordering learned on sorting carries over to
+mixed's different layouts (48 % → 78 %). Failures — G1b: grasp 18, reachability 17, place 3, collision 1 (G0: grasp
+53). Reach 88 % → 78 % is within the intervals; to watch.
+
 ## Pending
 
 G2 (+ Glimmer's own successful attempts), G3 (+ confirmed recovery patches), live-recovery evaluation, Isaac
