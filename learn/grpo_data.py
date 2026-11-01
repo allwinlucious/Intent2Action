@@ -31,7 +31,11 @@ def build(solve_path, out_dir: Path) -> None:
     value = json.loads(line)
     if value.get("split") != "train" or "objects" not in value:
       continue
-    outcomes = {normalize(e["program"]): float(e["ok"]) for e in value["episodes"]}
+    # Strategies can produce the same program (e.g. on a tower), with different sampled outcomes: their mean.
+    runs = {}
+    for e in value["episodes"]:
+      runs.setdefault(normalize(e["program"]), []).append(float(e["ok"]))
+    outcomes = {program: sum(oks) / len(oks) for program, oks in runs.items()}
     if len(set(outcomes.values())) < 2:
       continue
     rows.append({"key": f"{value['family']}:{value['seed']}", "family": value["family"],

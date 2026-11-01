@@ -423,3 +423,10 @@ def test_obj_equality_is_by_id():
           sx=0.05, sy=0.05, sz=0.05, attached=False)
   moved = replace(a, x=0.6, z=0.01)
   assert a == moved and hash(a) == hash(moved) and a != replace(a, id="obj_2")
+
+
+@pytest.mark.parametrize("decision", ['{"rung":"patch","reason":"r"}', '{"rung":"patch","reason":"r","patch":" "}',
+                                      '{"rung":"ask_user","reason":"r"}'])
+def test_decision_without_its_payload_is_invalid(decision):
+  from program_runtime.agent import _parse_decision
+  assert _parse_decision(decision)["reason"].startswith("invalid decision")

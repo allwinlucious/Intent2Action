@@ -97,6 +97,9 @@ def main() -> None:
     config = trl.GRPOConfig(
         output_dir=str(out), learning_rate=args.lr, num_train_epochs=1, per_device_train_batch_size=args.generations,
         gradient_accumulation_steps=2, num_generations=args.generations, max_completion_length=700,
+        # Glimmer ends its turn with <|eot|>, not the tokenizer's EOS: without it every rollout ran to the length
+        # limit (G6: 100 % clipped) and the reward scored the program plus arbitrary continuation.
+        generation_kwargs={"eos_token_id": [tokenizer.eos_token_id, tokenizer.convert_tokens_to_ids("<|eot|>")]},
         temperature=args.temperature, beta=args.beta, bf16=True, gradient_checkpointing=True, logging_steps=1,
         save_strategy="no", report_to=[], seed=42, warmup_steps=0.05, lr_scheduler_type="cosine")
     trainer = trl.GRPOTrainer(model=model, reward_funcs=reward, args=config, train_dataset=dataset,

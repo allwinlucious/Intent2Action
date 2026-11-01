@@ -164,6 +164,11 @@ def _parse_decision(content) -> dict:
     return _invalid("patch must be a string or null")
   if "question" in decision and decision["question"] is not None and not isinstance(decision["question"], str):
     return _invalid("question must be a string or null")
+  # The runtime rejects these anyway; catching them here gives the model its corrective turn.
+  if decision["rung"] == "patch" and not (decision.get("patch") or "").strip():
+    return _invalid("rung patch needs a non-empty patch program")
+  if decision["rung"] == "ask_user" and not (decision.get("question") or "").strip():
+    return _invalid("rung ask_user needs a non-empty question")
   return decision
 
 
