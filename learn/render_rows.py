@@ -15,7 +15,7 @@ from pathlib import Path
 import transformers
 
 MODEL = "meta-models/Muse-Glimmer-30B"
-MAX_TOKENS = 4096
+MAX_TOKENS = 4096  # Axolotl's sequence_len; --max-tokens for longer rows (recovery prompts with the tool list)
 
 
 def render(messages: list[dict], tools, tokenizer) -> dict:
@@ -26,13 +26,13 @@ def render(messages: list[dict], tools, tokenizer) -> dict:
   return {"segments": [{"label": False, "text": prompt}, {"label": True, "text": full[len(prompt):]}]}
 
 
-def render_file(source: Path, target: Path, tokenizer) -> dict:
+def render_file(source: Path, target: Path, tokenizer, max_tokens: int = MAX_TOKENS) -> dict:
   """Renders every row of `source` into `target`; {"rows", "dropped_too_long"}."""
   kept, dropped = [], 0
   for line in source.read_text().splitlines():
     row = json.loads(line)
     rendered = render(row["messages"], row.get("tools"), tokenizer)
-    if len(tokenizer("".join(segment["text"] for segment in rendered["segments"]))["input_ids"]) > MAX_TOKENS:
+    if len(tokenizer("".join(segment["text"] for segment in rendered["segments"]))["input_ids"]) > max_tokens:
       dropped += 1
       continue
     kept.append(rendered)
@@ -43,11 +43,13 @@ def render_file(source: Path, target: Path, tokenizer) -> dict:
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
   parser.add_argument("--data", required=True)
+  parser.add_argument("--max-tokens", type=int, default=MAX_TOKENS)
   args = parser.parse_args()
   data = Path(args.data)
   tokenizer = transformers.AutoTokenizer.from_pretrained(MODEL)
   (data / "rendered").mkdir(exist_ok=True)
-  manifest = {split: render_file(data / f"{split}.jsonl", data / "rendered" / f"{split}.jsonl", tokenizer)
+  manifest = {split: render_file(data / f"{split}.jsonl", data / "rendered" / f"{split}.jsonl", tokenizer,
+                               args.max_tokens)
               for split in ("train", "validation")}
   (data / "rendered" / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
   print(f"{data / 'rendered'}: " + " ".join(f"{split} rows={value['rows']} dropped_too_long="

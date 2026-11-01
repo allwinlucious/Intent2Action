@@ -43,7 +43,7 @@ image = (
 )
 
 
-def _config(data: str, run: str) -> str:
+def _config(data: str, run: str, sequence_len: int = 4096) -> str:
   import yaml
   config = yaml.safe_load(Path("/opt/cookbook-qlora.yaml").read_text())
   config.pop("model_revision", None)
@@ -58,6 +58,7 @@ def _config(data: str, run: str) -> str:
   # The same model class as the cookbook's multimodal path, so the LoRA target names (model.language_model...) match.
   config["model_type"] = "AutoModelForImageTextToText"
   config["attn_implementation"] = "sdpa"
+  config["sequence_len"] = sequence_len  # 8192 for recovery rows (their prompt carries the robot's tool list)
   config.update(dataset_prepared_path=f"/train/cache/{run}", output_dir=f"/train/runs/{run}",
                 wandb_project="", wandb_mode="disabled")
   path = Path(f"/train/runs/{run}.yaml")
@@ -68,8 +69,8 @@ def _config(data: str, run: str) -> str:
 
 @app.function(image=image, gpu=GPU, volumes={"/root/.cache/huggingface": hf_cache, "/train": train_volume},
               timeout=6 * 60 * 60)
-def train(data: str, run: str, max_steps: int = 0) -> dict:
-  config = _config(data, run)
+def train(data: str, run: str, max_steps: int = 0, sequence_len: int = 4096) -> dict:
+  config = _config(data, run, sequence_len)
   command = ["axolotl", "train", config]
   if max_steps:
     command += ["--max-steps", str(max_steps), "--eval-strategy", "no", "--save-strategy", "steps",
@@ -154,12 +155,12 @@ def generate(requests: str, out: str, version: str, batch: int = 8, max_new_toke
 
 
 @app.function(image=image, volumes={"/train": train_volume}, timeout=8 * 60 * 60)
-def pipeline(data: str, run: str, max_steps: int = 0) -> None:
+def pipeline(data: str, run: str, max_steps: int = 0, sequence_len: int = 4096) -> None:
   """Server side, so no client connection has to stay open: train, sample once from the adapter, then write
   runs/<run>.done.json (status, log tail, sample) for tools to poll."""
   status = {"run": run}
   try:
-    status["log_tail"] = train.remote(data, run, max_steps)["log_tail"][-3000:]
+    status["log_tail"] = train.remote(data, run, max_steps, sequence_len)["log_tail"][-3000:]
     status["sample"] = sample.remote(data, run)
     status["ok"] = True
   except Exception as error:  # pylint: disable=broad-except
@@ -169,7 +170,7 @@ def pipeline(data: str, run: str, max_steps: int = 0) -> None:
 
 
 @app.local_entrypoint()
-def main(data: str, run: str, max_steps: int = 0, budget_usd: float = 3.0):
+def main(data: str, run: str, max_steps: int = 0, budget_usd: float = 3.0, sequence_len: int = 4096):
   """Uploads the rendered rows and spawns the pipeline; with `modal run --detach` it keeps running after this
   returns (long blocking calls from WSL hit client deadlines). Poll: modal volume ls show-once-train runs/."""
   subprocess.run(["tools/modal_budget.sh", str(budget_usd)], check=True)  # refuses when the monthly credit is near
@@ -177,5 +178,5 @@ def main(data: str, run: str, max_steps: int = 0, budget_usd: float = 3.0):
   with train_volume.batch_upload(force=True) as batch:
     for split in ("train", "validation"):
       batch.put_file(f"{data}/rendered/{split}.jsonl", f"/data/{name}/{split}.jsonl")
-  call = pipeline.spawn(name, run, max_steps)
+  call = pipeline.spawn(name, run, max_steps, sequence_len)
   print(f"spawned {run}: {call.object_id}; result in runs/{run}.done.json on the volume show-once-train")
