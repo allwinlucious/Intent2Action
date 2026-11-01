@@ -6,7 +6,8 @@
       [--recovery PATH]
       G1: program rows of every solved train task; G2: G1 + rows of Glimmer's successful samples (at most 2 per
       task); G3: G2 + confirmed recovery rows (G1 + recovery rows when the samples file does not exist), recovery
-      rows at most 30 % of the dataset. Writes DIR/{train,validation}.jsonl and DIR/manifest.json; then
+      rows at most 30 % of the dataset; G2b: G1 + Glimmer's successes only on tasks where the docs-level program
+      fails; G3b: G1 + recovery rows. Writes DIR/{train,validation}.jsonl and DIR/manifest.json; then
       learn/render_rows.py renders them with Glimmer's chat template.
 
 Prompts come from program_runtime.agent.program_messages and recovery_messages, the product's own prompts, so
@@ -97,10 +98,17 @@ def program_rows(solve: list[dict]) -> list[tuple[str, str, dict]]:
   return rows
 
 
-def self_rows(solve: list[dict], samples: list[dict]) -> list[tuple[str, str, dict]]:
+def _docs_level_fails(value: dict) -> bool:
+  return not next((e["ok"] for e in value["episodes"] if e["strategy"] == "listed"), True)
+
+
+def self_rows(solve: list[dict], samples: list[dict], informative: bool = False) -> list[tuple[str, str, dict]]:
   """Per task the two lowest sample indexes among the successful, distinct programs, on the scene they were
-  written for (the solve record's)."""
-  scenes = {(value["family"], value["seed"]): value for value in solve}
+  written for (the solve record's). `informative`: only tasks where the docs-level (listed) program fails; a
+  success elsewhere is mostly the listed order working by luck, and training on it brings that habit back
+  (G2 vs G1, 2026-11-01: 69 % vs 77 % held-out)."""
+  scenes = {(value["family"], value["seed"]): value for value in solve
+            if not informative or _docs_level_fails(value)}
   chosen = collections.defaultdict(list)
   for value in sorted((value for value in samples if value["ok"]), key=lambda value: value["sample"]):
     key = (value["family"], value["seed"])
@@ -143,15 +151,15 @@ def build(version: str, solve_path, samples_path, recovery_path, out: Path) -> d
   rows = program_rows(solve)
   sources = [str(solve_path)]
   fallback = None
-  if version in ("G2", "G3"):
+  if version in ("G2", "G3", "G2b"):
     if Path(samples_path).exists():
-      rows += self_rows(solve, _train(samples_path))
+      rows += self_rows(solve, _train(samples_path), informative=version == "G2b")
       sources.append(str(samples_path))
     elif version == "G2":
       sys.exit(f"G2 needs the samples file {samples_path}, which does not exist")
     else:
       fallback = "the samples file does not exist: G1 + recovery rows"
-  if version == "G3":
+  if version in ("G3", "G3b"):
     rows += recovery_rows(_train(recovery_path), tool_specs(Tools(DESCRIPTOR_SET)), len(rows))
     sources.append(str(recovery_path))
   train, validation = split(rows)
@@ -180,7 +188,7 @@ if __name__ == "__main__":
   subparsers = parser.add_subparsers(dest="kind", required=True)
   subparsers.add_parser("smoke").add_argument("--out", default=str(ROOT / "logs/sft/smoke"))
   sub = subparsers.add_parser("build")
-  sub.add_argument("--version", choices=("G1", "G2", "G3"), required=True)
+  sub.add_argument("--version", choices=("G1", "G2", "G3", "G2b", "G3b"), required=True)
   sub.add_argument("--solve", default=str(ROOT / "logs/expert/train.jsonl"))
   sub.add_argument("--samples", default=str(ROOT / "logs/samples/train_episodes.jsonl"))
   sub.add_argument("--recovery", default=str(ROOT / "logs/expert/recovery_train.jsonl"))
