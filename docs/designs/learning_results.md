@@ -111,6 +111,22 @@ Consistent labels remove G1c's stacking collapse (50 % → 92 %). Recovery rows 
 beyond G1b (inside the intervals); their value is to be measured where they apply, with the model as recovery
 agent (pending).
 
+## G5: DPO on top of G1b
+
+| version | all | cluster | mixed | packing | reach | stacking |
+|---|---|---|---|---|---|---|
+| G1b | 84 % [79–88] | 68 % | 78 % | 100 % | 78 % | 98 % |
+| G5 = G1b + DPO | 83 % [78–87] | 64 % | 76 % | 100 % | 84 % | 92 % |
+
+DPO (TRL 1.9, β 0.1, lr 5e-6, one epoch, 287 pairs: the label program against a strategy that failed on the same
+task, 172 of them the listed order; reference = G1b frozen) reaches 15/15 preference accuracy on held-out pairs
+(margin 0.84) but leaves task success unchanged. Both G1b and G5 write **one strategy per family** on every held-out
+task (cluster, mixed, reach: outer-first; stacking: top-first; packing: nearest-target-first). The model learned a
+task-type → strategy map, not a layout-conditioned choice; the remaining gap to the 91 % ceiling is the per-layout
+exceptions (about one task in five needs another strategy), present in the labels but too rare to be learned from
+the scene description. The DPO pairs mostly contrast the label with the listed order, which G1b already avoids.
+GRPO (per-task verified reward within a group of samples) addresses exactly this.
+
 ## Sim tier: G1b on Isaac physics (50 held-out tasks, 10 per family)
 
 | family | plan tier | Isaac physics |
