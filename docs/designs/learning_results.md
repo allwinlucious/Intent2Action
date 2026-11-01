@@ -160,6 +160,29 @@ docs-level reference likewise, as the pseudo-version DOCS).
   its strategy on cluster (most-free-first on 33 of 50) without gaining, and on stacking chooses outer-first instead
   of top-first on 20 of 50 tasks (61 %). With this data the cookbook's default QLoRA recipe is the better one.
 
+## GRPO with a higher learning rate (G7): diverged
+
+All 302 prompts, lr 2e-5, otherwise as G6. Mean training reward by quarter of the samples seen: 0.86, 0.59, 0.54,
+0.54, with programs matching no strategy rising (16 of 472). Stopped at step 59 of 151. Together with G6 (lr 5e-6:
+no change): with LoRA on this 30B model and binary rewards from four samples per prompt, we found no stable step
+size between "no change" and "drifts away from what works" in two runs; a KL term to G1b (rather than to the base
+model, which this TRL's adapter path uses) and more samples per prompt are the next things to try.
+
+## Live recovery (the model as recovery agent)
+
+20 held-out tasks where the docs-level program fails (at most 1 success in its 3 runs; 5 each of cluster, mixed,
+reach, stacking; packing has none), the docs-level program run once with each model as the live recovery agent
+(served by learn/chat_server.py: transformers + PEFT on NF4, as the cookbook evaluates adapters; budget 3 handoffs).
+
+| recovery agent | rescued | decisions (25-26 handoffs) | invalid decisions |
+|---|---|---|---|
+| G0 (zero-shot) | 7 / 20 | reobserve 11, patch 9, skip 2, fix_world 2, retry_step 2 | 0 |
+| G1d (G1b + 63 confirmed recovery rows) | 9 / 20 | patch 25 | 0 |
+
+G1d rescues stacking 4/5 (G0 1/5) by rewriting the rest of the program in a working order; G0 mostly re-observes,
+which rarely helps on a blocked grasp. On 20 tasks the 9 vs 7 is not a claim; the behaviour change is. Both always
+answer with a valid decision (the corrective turn for non-decision replies).
+
 ## Sim tier: G1b on Isaac physics (50 held-out tasks, 10 per family)
 
 | family | plan tier | Isaac physics |
