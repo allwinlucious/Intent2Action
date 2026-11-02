@@ -630,6 +630,8 @@ class Robot:
   # ---- objects ----
 
   def attach(self, object_id: str) -> None:
+    # The attachment is stored relative to the world's flange: a lagging world arm would offset the object.
+    self.wait_arm_synced()
     self.world.attach(object_id)
     self.sim("SetAttached", simlink_pb2.SetAttachedRequest(id=object_id, attached=True))
 
