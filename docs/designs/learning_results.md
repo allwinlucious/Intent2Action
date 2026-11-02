@@ -321,4 +321,7 @@ for G4 (training on Isaac-verified episodes).
 
 ## Pending
 
-Report charts; paper draft (with the limitations above).
+- Muse Spark Open (hosted, zero-shot) as a reference model in the same pipeline: program writing on the 250
+  held-out tasks (3 runs), the 50 Isaac tasks, live recovery on the 20 tasks, and demo-clip reading with its
+  native video and audio input versus the frames + speech-to-text reader.
+- Report charts; paper draft (with the limitations above).
