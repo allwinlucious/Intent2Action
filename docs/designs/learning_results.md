@@ -35,6 +35,26 @@ Limitations (scope set by the time available):
 - The G4 physics labels were made before the support-collision fix.
 - Plus the open items listed at the end of the code-review corrections below.
 
+## One model for writing and recovery (2026-11-02)
+
+The demo used two adapters: G1b writes the program and G1d recovers. The question was whether one adapter can do
+both. The decision rule, set before the measurement: use G1d alone if its 3-run program score lies inside G1b's 95%
+interval.
+
+| family | G1b | G1d |
+|---|---|---|
+| cluster | 65 % [53–78] | 61 % [49–73] |
+| mixed | 82 % [73–91] | 83 % [73–91] |
+| packing | 98 % [95–100] | 99 % [97–100] |
+| reach | 85 % [77–93] | 83 % [75–91] |
+| stacking | 97 % [94–100] | 89 % [81–97] |
+| all | 86 % [82–89] | **83 % [79–87]** |
+
+G1d's 83% lies inside G1b's interval (82–89), so **G1d is the single model** for program writing and recovery. Its
+recovery result stands as measured (9/20 live rescues, against 4/20 for base Glimmer). The cost is in stacking (97%
+→ 89%): 4 of the 50 stacking tasks fail in all 3 runs. The tower-unload demo task (`stacking:100007`) passes 3/3 with
+the same top-first program as G1b. G1b remains the best program writer and the headline number (86%).
+
 ## Robot fix found by the review, measured in physics (2026-11-02, night)
 
 The review found that a held object's collisions with **its original support stayed disabled until placement**, so

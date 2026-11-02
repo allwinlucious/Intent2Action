@@ -463,7 +463,7 @@ class Handler(BaseHTTPRequestHandler):
 def build_server(
     *, port: int = 0, fake: bool = True, frames: Path | str | None = None,
     address: str = "127.0.0.1:18100", sim_address: str | None = None,
-    reader_model: str = "G0", writer_model: str = "G1b", recovery_model: str = "G1d",
+    reader_model: str = "G0", writer_model: str = "G1d", recovery_model: str = "G1d",
 ) -> DemoHTTPServer:
   frames = Path(frames or "/mnt/c/isaac-sim-work/viewer_frames")
   if fake:
@@ -499,7 +499,7 @@ def _parser() -> argparse.ArgumentParser:
   parser.add_argument("--sim-address")
   parser.add_argument("--frames", type=Path, default=Path("/mnt/c/isaac-sim-work/viewer_frames"))
   parser.add_argument("--reader-model", default="G0")
-  parser.add_argument("--writer-model", default="G1b")
+  parser.add_argument("--writer-model", default="G1d")
   parser.add_argument("--recovery-model", default="G1d")
   parser.add_argument("--fake", action="store_true")
   return parser

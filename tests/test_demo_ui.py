@@ -321,5 +321,5 @@ def test_writer_switch_routes_to_the_untrained_model(demo):
   _, written = post(base, "/api/write", {"intent": reading["intent"], "confirm": True, "writer": "untrained"})
   assert written["writer"] == "untrained" and models[-1] == "G0"
   _, written = post(base, "/api/write", {"intent": reading["intent"], "confirm": True})
-  assert written["writer"] == "fine_tuned" and models[-1] == "G1b"
+  assert written["writer"] == "fine_tuned" and models[-1] == "G1d"
   assert post_error(base, "/api/write", {"intent": reading["intent"], "confirm": True, "writer": "big"})[0] == 400
