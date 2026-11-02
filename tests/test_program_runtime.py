@@ -294,8 +294,8 @@ class WriterClient:
   def __init__(self, replies):
     self.replies = iter(replies)
 
-  def chat(self, messages):
-    del messages
+  def chat(self, messages, model=None):
+    del messages, model
     return {"content": next(self.replies)}
 
 
@@ -342,7 +342,8 @@ class RecoveryClient:
     self.replies = iter(replies)
     self.calls = []
 
-  def chat(self, messages, tools=None):
+  def chat(self, messages, tools=None, model=None):
+    del model
     self.calls.append((messages, tools))
     return next(self.replies)
 

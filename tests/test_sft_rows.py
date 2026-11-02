@@ -33,7 +33,8 @@ def test_program_row_is_writer_prompt_and_fenced_program():
 def test_recovery_row_prompt_equals_what_the_agent_sends(monkeypatch):
   captured = []
 
-  def chat(self, messages, tools=None, tool_choice=None):
+  def chat(self, messages, tools=None, tool_choice=None, model=None):
+    del model
     captured.append((list(messages), tools))
     return {"content": json.dumps(DECISION)}
 

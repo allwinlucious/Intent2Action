@@ -38,7 +38,7 @@ class ChatClient:
     # Endpoint-specific request fields, e.g. {"chat_template_kwargs": {"reasoning_strength": "low"}} for Glimmer.
     self.extra = json.loads(os.environ.get("LLM_EXTRA_BODY") or "{}")
 
-  def chat(self, messages: list[dict], tools=None, tool_choice=None) -> dict:
+  def chat(self, messages: list[dict], tools=None, tool_choice=None, model: str | None = None) -> dict:
     """Returns the first assistant message from one chat completion."""
     body = {
       "model": self.model,
@@ -47,6 +47,8 @@ class ChatClient:
       "max_tokens": 8192,  # reasoning models spend part of it before the answer
       **self.extra,
     }
+    if model is not None:
+      body["model"] = model
     if tools is not None:
       body["tools"] = tools
     if tool_choice is not None:
@@ -111,8 +113,9 @@ def program_messages(intent: dict, objects: list[Obj]) -> list[dict]:
 class ProgramWriter:
   """Writes policy-checked programs from intents and perceived scenes."""
 
-  def __init__(self, client: ChatClient):
+  def __init__(self, client: ChatClient, model: str | None = None):
     self.client = client
+    self.model = model
     self.last_attempts = 0
 
   def write(self, intent: dict, objects: list[Obj]) -> str:
@@ -121,7 +124,7 @@ class ProgramWriter:
     last = ""
     for attempt in range(1, 3):
       self.last_attempts = attempt
-      last = _program_text(self.client.chat(messages).get("content") or "")
+      last = _program_text(self.client.chat(messages, model=self.model).get("content") or "")
       problems = check(last)
       if not problems:
         error = dry_run(last, RobotAPI(FakeBackend(objects)))
@@ -204,10 +207,11 @@ def recovery_messages(context: dict) -> list[dict]:
 class RecoveryAgent:
   """Climbs the budgeted recovery ladder, optionally using robot tools first."""
 
-  def __init__(self, client: ChatClient, stub, tools):
+  def __init__(self, client: ChatClient, stub, tools, model: str | None = None):
     self.client = client
     self.stub = stub
     self.tools = tools
+    self.model = model
 
   def _specs(self) -> list[dict]:
     return tool_specs(self.tools)
@@ -234,7 +238,7 @@ class RecoveryAgent:
     names = {spec["function"]["name"] for spec in specs}
     used = 0
     while used < 12:
-      message = self.client.chat(messages, tools=specs)
+      message = self.client.chat(messages, tools=specs, model=self.model)
       calls = message.get("tool_calls") or []
       if not calls:
         return self._decide(messages, message)
@@ -248,7 +252,7 @@ class RecoveryAgent:
       "role": "user",
       "content": "Tool budget used. Answer now with the decision JSON only.",
     })
-    return self._decide(messages, self.client.chat(messages))
+    return self._decide(messages, self.client.chat(messages, model=self.model))
 
   def _decide(self, messages: list[dict], message: dict) -> dict:
     """Parses the reply; one corrective turn if it is not a valid decision (models drift into prose)."""
@@ -260,7 +264,7 @@ class RecoveryAgent:
       "content": f"That reply is not a valid decision ({decision['reason']}). Reply with only one JSON object: "
                  '{"rung": ..., "reason": ...} plus "patch" or "question" when the rung needs it.',
     }]
-    reply = self.client.chat(messages).get("content")
+    reply = self.client.chat(messages, model=self.model).get("content")
     decision = _parse_decision(reply)
     if decision["reason"].startswith("invalid decision"):
       decision["reason"] += f"; reply: {str(reply)[:300]!r}"

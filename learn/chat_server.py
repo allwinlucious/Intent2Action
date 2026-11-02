@@ -10,22 +10,53 @@ dict arguments (Glimmer's template requires them) and parsed back from its ATEM 
 """
 
 import argparse
+import base64
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from io import BytesIO
 import json
 from pathlib import Path
 import re
 import threading
 import uuid
 
+from PIL import Image
+
 MODEL = "meta-models/Muse-Glimmer-30B"
 INVOKE = re.compile(r'<atem:invoke name="([^"]+)">(.*?)</atem:invoke>', re.DOTALL)
 PARAMETER = re.compile(r'<atem:parameter name="([^"]+)">(.*?)</atem:parameter>', re.DOTALL)
+DATA_IMAGE = re.compile(r"^data:(image/[^;,]+);base64,(.*)$", re.DOTALL)
+
+
+def _image(url: str) -> Image.Image:
+  if not isinstance(url, str) or not url.startswith("data:"):
+    raise ValueError("only data image URLs are accepted; network URLs are not fetched")
+  match = DATA_IMAGE.fullmatch(url)
+  if not match:
+    raise ValueError("image URL must be data:image/...;base64,...")
+  try:
+    data = base64.b64decode(match.group(2), validate=True)
+    image = Image.open(BytesIO(data))
+    image.load()
+  except Exception as error:
+    raise ValueError(f"invalid data image URL: {error}") from error
+  return image
 
 
 def template_messages(messages: list[dict]) -> list[dict]:
   """OpenAI messages -> Glimmer's template: tool-call arguments as dicts, not JSON strings."""
   out = []
   for message in messages:
+    content = message.get("content")
+    if isinstance(content, list):
+      parts = []
+      for part in content:
+        if part.get("type") == "text":
+          parts.append({"type": "text", "text": part.get("text", "")})
+        elif part.get("type") == "image_url":
+          parts.append({"type": "image", "image": _image((part.get("image_url") or {}).get("url"))})
+        else:
+          raise ValueError(f"unsupported content part type {part.get('type')!r}")
+      message = {**message, "content": parts}
     if message.get("tool_calls"):
       calls = []
       for call in message["tool_calls"]:
@@ -99,9 +130,21 @@ class Model:
     if name != "G0" and name not in self.adapters:
       raise ValueError(f"unknown model {name!r}; served: G0, {', '.join(sorted(self.adapters))}")
     kwargs = {"reasoning_strength": "low", **(request.get("chat_template_kwargs") or {})}
-    prompt = self.processor.apply_chat_template(template_messages(request["messages"]), tools=request.get("tools"),
-                                                add_generation_prompt=True, tokenize=False, **kwargs)
-    inputs = self.tokenizer(prompt, return_tensors="pt", add_special_tokens=False).to("cuda")
+    messages = template_messages(request["messages"])
+    has_image = any(
+      isinstance(message.get("content"), list)
+      and any(part.get("type") == "image" for part in message["content"])
+      for message in messages
+    )
+    if has_image:
+      inputs = self.processor.apply_chat_template(
+        messages, tools=request.get("tools"), add_generation_prompt=True, tokenize=True, return_dict=True,
+        return_tensors="pt", **kwargs,
+      ).to("cuda")
+    else:
+      prompt = self.processor.apply_chat_template(messages, tools=request.get("tools"),
+                                                  add_generation_prompt=True, tokenize=False, **kwargs)
+      inputs = self.tokenizer(prompt, return_tensors="pt", add_special_tokens=False).to("cuda")
     temperature = float(request.get("temperature") or 0.0)
     sampling = {"do_sample": True, "temperature": temperature} if temperature > 0 else {"do_sample": False}
     with self.lock, self.torch.no_grad():
