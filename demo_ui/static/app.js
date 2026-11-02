@@ -18,7 +18,9 @@ const state = {
   uploadUrl: null,
   pendingPatch: null,
   pendingCallRow: null,
+  pendingCallText: "",
   eventSource: null,
+  sidebarOpen: true,
 };
 
 function escapeHtml(value) {
@@ -64,8 +66,48 @@ function setStage(name, status = "active", note = "") {
   void note;
 }
 
+function setSidebar(open, {focus = false} = {}) {
+  const sidebar = $("#sidebar");
+  const toggle = $("#sidebar-toggle");
+  state.sidebarOpen = open;
+  sidebar.classList.toggle("open", open);
+  sidebar.inert = !open;
+  sidebar.setAttribute("aria-hidden", String(!open));
+  document.body.classList.toggle("sidebar-closed", !open);
+  toggle.setAttribute("aria-expanded", String(open));
+  toggle.setAttribute("aria-label", open ? "Close sidebar" : "Open sidebar");
+  toggle.querySelector("span").textContent = open ? "›" : "‹";
+  if (!open && sidebar.contains(document.activeElement)) toggle.focus();
+  else if (open && focus) requestAnimationFrame(() => sidebar.focus());
+}
+
+function revealWaiting() {
+  const wasClosed = !state.sidebarOpen;
+  setSidebar(true);
+  requestAnimationFrame(() => {
+    const block = $("#waiting-block");
+    block.scrollIntoView({behavior: "smooth", block: "center"});
+    if (wasClosed) block.focus({preventScroll: true});
+  });
+}
+
+function renderViewRuntime(text = "", status = "") {
+  const mark = status === "ok" ? '<span class="ok">✓</span>' : status === "fail" ? '<span class="fail">✗</span>' : "";
+  $("#view-runtime").innerHTML = `${escapeHtml(text)}${mark ? ` ${mark}` : ""}`;
+}
+
+function renderViewFinal(ok, reason) {
+  $("#view-runtime").innerHTML = ok
+    ? 'Passed <span class="ok">✓</span>'
+    : `Failed <span class="fail">✗</span> — ${escapeHtml(reason)}`;
+}
+
 function updateButtons() {
-  $("#run-btn").disabled = !(state.confirmed && state.programId && !state.running);
+  const canRun = state.confirmed && state.programId && !state.running;
+  const runHint = state.running ? "Run in progress" : !state.confirmed ? "Confirm a task first" : !state.programId || !state.program ? "Write the program first" : "Play";
+  $("#run-btn").disabled = !canRun;
+  $("#run-btn").title = runHint;
+  $("#play-control").title = runHint;
   $("#rewrite-btn").disabled = !(state.intent && !state.running);
   $("#stop-btn").disabled = !state.running;
   $("#confirm-btn").disabled = !state.intent || state.running;
@@ -187,6 +229,7 @@ function showApproval(data) {
   };
   $("#approve-patch").addEventListener("click", () => submit(true));
   $("#decline-patch").addEventListener("click", () => submit(false));
+  revealWaiting();
 }
 
 function clearWaiting() {
@@ -208,12 +251,17 @@ function showQuestion(data) {
       addLog("QUESTION", `${data.text} — ${text}`, "", "full");
     } catch (error) { errorAt("#program-error", error); }
   });
+  revealWaiting();
 }
 
 function handleRuntime(event) {
   const data = JSON.parse(event.data);
   if (data.kind === "line") renderProgram(state.program, data.line);
-  else if (data.kind === "call") state.pendingCallRow = addLog("CALL", `${data.fn}(${(data.args || []).map((arg) => typeof arg === "string" ? arg : JSON.stringify(arg)).join(", ")})`);
+  else if (data.kind === "call") {
+    state.pendingCallText = `${data.fn}(${(data.args || []).map((arg) => typeof arg === "string" ? arg : JSON.stringify(arg)).join(", ")})`;
+    state.pendingCallRow = addLog("CALL", state.pendingCallText);
+    renderViewRuntime(state.pendingCallText);
+  }
   else if (data.kind === "result") {
     const value = data.ok ? `✓${data.message ? ` ${data.message}` : ""}` : `✗ ${data.message || "failed"}`;
     if (state.pendingCallRow) {
@@ -222,6 +270,7 @@ function handleRuntime(event) {
       result.textContent = value;
       state.pendingCallRow = null;
     } else addLog("RESULT", data.fn, value);
+    renderViewRuntime(state.pendingCallText || data.fn || "Call", data.ok ? "ok" : "fail");
   }
   else if (["handoff", "failure", "report", "decision", "dry_run", "check"].includes(data.kind)) addLog(data.kind.toUpperCase(), data.message || data.text || data.reason || (data.ok === false ? data.error : "checked"), "", "full");
   else if (data.kind === "patch" && data.accepted && state.pendingPatch) { renderProgram(state.pendingPatch); state.pendingPatch = null; }
@@ -237,6 +286,8 @@ function renderFinal(data) {
   $("#verdict").className = `verdict ${data.ok ? "pass" : "fail"}`;
   const reason = data.error || data.rules?.summary || "Run did not complete";
   $("#verdict").textContent = data.ok ? "Passed ✓" : `Failed ✗ — ${reason}`;
+  renderViewFinal(data.ok, reason);
+  state.pendingCallText = "";
   if (!data.rules) {
     $("#result-body").innerHTML = "";
   } else {
@@ -411,11 +462,13 @@ $("#run-btn").addEventListener("click", async () => {
     state.runId = data.run_id;
     state.running = true;
     state.pendingCallRow = null;
+    state.pendingCallText = "";
     $("#run-state").textContent = "Running";
     $("#call-log").innerHTML = "";
     $("#result-body").innerHTML = "";
     $("#verdict").className = "verdict";
     $("#verdict").textContent = "";
+    renderViewRuntime();
     setStage("run", "active", "Executing the approved program");
     updateButtons();
     connectEvents();
@@ -449,12 +502,37 @@ async function pollStatus() {
     const fresh = data.frames !== null && data.frames <= 2;
     $("#live-dot").className = `feed-dot ${fresh ? "fresh" : ""}`;
     $("#live-dot").setAttribute("aria-label", fresh ? "Feed current" : "Feed stale");
-    $("#waiting-label").hidden = data.run !== "waiting";
+    const waiting = data.run === "waiting";
+    $("#waiting-label").hidden = !waiting;
+    if (waiting && !state.sidebarOpen && !$("#waiting-block").hidden) revealWaiting();
     $("#run-state").textContent = data.run === "idle" ? "" : data.run[0].toUpperCase() + data.run.slice(1);
   } catch (_) { $("#system-status").textContent = "Status unavailable"; }
 }
 
+$("#sidebar-toggle").addEventListener("click", () => setSidebar(!state.sidebarOpen, {focus: !state.sidebarOpen}));
+$(".skip-link").addEventListener("click", () => setSidebar(true, {focus: true}));
+// ?panel: controls only, for docking beside the real Isaac window (native camera controls, full render quality).
+const PANEL_ONLY = new URLSearchParams(location.search).has("panel");
+if (PANEL_ONLY) {
+  document.body.classList.add("panel-only");
+  $("#sim-view").removeAttribute("src");
+}
+
+document.addEventListener("keydown", (event) => {
+  if (PANEL_ONLY) return;
+  const target = event.target;
+  const typing = target instanceof HTMLElement && (target.matches("input, textarea, select") || target.isContentEditable);
+  if (event.key === "Escape" && state.sidebarOpen) {
+    event.preventDefault();
+    setSidebar(false);
+  } else if (!typing && event.key.toLowerCase() === "s" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    event.preventDefault();
+    setSidebar(!state.sidebarOpen, {focus: !state.sidebarOpen});
+  }
+});
+
 setInterval(pollStatus, 2000);
+setSidebar(true);
 loadScenes();
 pollStatus();
 updateButtons();

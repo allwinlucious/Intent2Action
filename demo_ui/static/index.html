@@ -3,137 +3,148 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#111111">
+  <meta name="theme-color" content="#090909">
   <title>Show once</title>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <a class="skip-link" href="#main">Skip to main content</a>
+  <a class="skip-link" href="#sidebar">Skip to controls</a>
 
   <header class="topbar">
     <h1>Show once</h1>
-    <div class="header-status" id="system-status" role="status" aria-live="polite"></div>
-    <div class="scene-controls">
-      <label class="sr-only" for="scene-select">Scene</label>
-      <select id="scene-select" name="scene" autocomplete="off"></select>
-      <button class="outline-button" id="load-scene-btn" type="button">Load</button>
-      <button class="text-button" id="reset-btn" type="button">Reset</button>
+    <div class="topbar-right">
+      <div class="header-status" id="system-status" role="status" aria-live="polite"></div>
+      <span class="waiting-label" id="waiting-label" aria-live="polite" hidden>Waiting for you</span>
+      <button class="text-button stop-button" id="stop-btn" type="button" disabled>Stop</button>
     </div>
-    <span class="waiting-label" id="waiting-label" aria-live="polite" hidden>Waiting for you</span>
-    <button class="outline-button stop-button" id="stop-btn" type="button" disabled>Stop</button>
   </header>
 
   <main class="workspace" id="main">
-    <div class="left-flow">
-      <section class="request-section" aria-labelledby="request-heading">
-        <h2 id="request-heading">Request</h2>
-        <label class="sr-only" for="task-text">Request</label>
-        <textarea id="task-text" name="request" rows="3" autocomplete="off"></textarea>
-        <div class="request-actions">
-          <div class="clip-actions">
-            <button class="text-button clip-toggle" type="button" data-input="record">Record clip</button>
-            <button class="text-button clip-toggle" type="button" data-input="upload">Attach clip</button>
-          </div>
-          <button class="outline-button" id="send-text-btn" type="button">Read</button>
-        </div>
+    <section class="view-section" aria-labelledby="view-heading">
+      <h2 class="sr-only" id="view-heading">Robot view</h2>
+      <div class="view-frame">
+        <img id="sim-view" src="/api/sim.mjpg" alt="Live simulated robot view" width="960" height="540" fetchpriority="high">
+        <video id="camera-view" autoplay muted playsinline aria-label="Live robot camera view" hidden></video>
+      </div>
+      <div class="view-controls" aria-label="View source and feed status">
+        <span class="feed-dot" id="live-dot" aria-label="Feed status"></span>
+        <button class="source-button active" type="button" data-source="sim">Isaac</button>
+        <span aria-hidden="true">/</span>
+        <button class="source-button" type="button" data-source="camera">Camera</button>
+      </div>
+      <p class="view-error error" id="view-error" role="status" aria-live="polite"></p>
+      <div class="view-runtime" id="view-runtime" aria-live="polite"></div>
+    </section>
 
-        <div class="clip-input" id="clip-record" hidden>
-          <video id="record-preview" muted playsinline aria-label="Recorded clip preview"></video>
-          <label for="record-note">Note <span>(optional)</span></label>
-          <input id="record-note" name="record-note" autocomplete="off" placeholder="Only the red ones…">
-          <div class="clip-controls">
-            <button class="text-button" id="record-btn" type="button">Record</button>
-            <button class="text-button" id="record-stop-btn" type="button" disabled>Stop recording</button>
-            <button class="outline-button" id="send-record-btn" type="button" disabled>Read</button>
-          </div>
-        </div>
-
-        <div class="clip-input" id="clip-upload" hidden>
-          <video id="upload-preview" controls playsinline aria-label="Attached clip preview" hidden></video>
-          <label class="file-button">Choose clip
-            <input id="clip-file" class="sr-only" name="clip" type="file" accept="video/webm,video/mp4,video/quicktime" autocomplete="off">
-          </label>
-          <span class="file-name" id="file-name" aria-live="polite"></span>
-          <label for="upload-note">Note <span>(optional)</span></label>
-          <input id="upload-note" name="upload-note" autocomplete="off" placeholder="Into the blue box…">
-          <div class="clip-controls">
-            <button class="outline-button" id="send-upload-btn" type="button" disabled>Read</button>
-          </div>
-        </div>
-        <p class="error" id="task-error" role="status" aria-live="polite"></p>
-      </section>
-
-      <section class="understood-section" id="understood-section" aria-labelledby="understood-heading" hidden>
-        <h2 id="understood-heading">Understood</h2>
-        <div class="intent-readable" id="intent-readable"></div>
-        <p class="seen" id="seen-text"></p>
-        <div class="frames" id="read-frames"></div>
-        <p class="note-display" id="note-display" hidden></p>
-        <label class="sr-only" for="intent-json">Intent JSON</label>
-        <textarea class="intent-json" id="intent-json" name="intent-json" autocomplete="off" spellcheck="false" hidden></textarea>
-        <div class="clarify-form">
-          <label for="clarify-text">Not right? Say what you meant</label>
-          <div class="inline-form">
-            <input id="clarify-text" name="clarification" autocomplete="off" placeholder="Only the red ones…">
-            <button class="outline-button" id="clarify-btn" type="button">Send</button>
-          </div>
-        </div>
-        <div class="history" id="intent-history"></div>
-        <div class="confirm-actions">
-          <button class="primary-button" id="confirm-btn" type="button">Confirm</button>
-          <button class="text-button" id="edit-intent-btn" type="button">Edit JSON</button>
-          <span class="round" id="round-label"></span>
-        </div>
-        <p class="error" id="intent-error" role="status" aria-live="polite"></p>
-      </section>
-
-      <section class="program-section" id="program-section" aria-labelledby="program-heading" hidden>
-        <h2 id="program-heading">Program <span class="program-meta" id="program-meta"></span></h2>
-        <div class="waiting-block" id="waiting-block" role="status" aria-live="polite" hidden>
-          <p class="waiting-title">Waiting for you</p>
-          <div id="waiting-content"></div>
-        </div>
-        <div class="code-window" id="code-window"></div>
-        <div class="program-actions">
-          <button class="primary-button run-button" id="run-btn" type="button" disabled>Run</button>
-          <button class="text-button" id="rewrite-btn" type="button" disabled>Rewrite</button>
-        </div>
-        <p class="error" id="program-error" role="status" aria-live="polite"></p>
-      </section>
+    <div class="play-control" id="play-control" title="Confirm a task first">
+      <button class="play-button" id="run-btn" type="button" aria-label="Play" title="Confirm a task first" disabled>
+        <span aria-hidden="true">▶</span>
+      </button>
     </div>
 
-    <div class="right-flow">
-      <section class="view-section" aria-labelledby="view-heading">
-        <div class="section-line">
-          <h2 id="view-heading">Robot view</h2>
-          <div class="view-controls">
-            <span class="feed-dot" id="live-dot" aria-label="Feed status"></span>
-            <button class="source-button active" type="button" data-source="sim">Isaac</button>
-            <span aria-hidden="true">/</span>
-            <button class="source-button" type="button" data-source="camera">Camera</button>
+    <button class="sidebar-toggle" id="sidebar-toggle" type="button" aria-controls="sidebar" aria-expanded="true" aria-label="Close sidebar">
+      <span aria-hidden="true">›</span>
+    </button>
+
+    <aside class="sidebar open" id="sidebar" aria-label="Task controls" tabindex="-1">
+      <div class="sidebar-scroll">
+        <div class="scene-controls">
+          <label class="sr-only" for="scene-select">Scene</label>
+          <select id="scene-select" name="scene" autocomplete="off"></select>
+          <button class="outline-button" id="load-scene-btn" type="button">Load</button>
+          <button class="text-button" id="reset-btn" type="button">Reset</button>
+        </div>
+
+        <section class="request-section" aria-labelledby="request-heading">
+          <h2 id="request-heading">Request</h2>
+          <label class="sr-only" for="task-text">Request</label>
+          <textarea id="task-text" name="request" rows="3" autocomplete="off" placeholder="Do this…"></textarea>
+          <div class="request-actions">
+            <div class="clip-actions">
+              <button class="text-button clip-toggle" type="button" data-input="record">Record clip</button>
+              <button class="text-button clip-toggle" type="button" data-input="upload">Attach clip</button>
+            </div>
+            <button class="outline-button" id="send-text-btn" type="button">Read</button>
           </div>
-        </div>
-        <div class="view-frame">
-          <img id="sim-view" src="/api/sim.mjpg" alt="Live simulated robot view" width="960" height="540" fetchpriority="high">
-          <video id="camera-view" autoplay muted playsinline aria-label="Live robot camera view" hidden></video>
-        </div>
-        <p class="error" id="view-error" role="status" aria-live="polite"></p>
-      </section>
 
-      <section class="log-section" aria-labelledby="log-heading">
-        <div class="section-line">
-          <h2 id="log-heading">Call log</h2>
-          <span class="run-state" id="run-state"></span>
-        </div>
-        <div class="call-log" id="call-log" aria-live="polite"></div>
-      </section>
+          <div class="clip-input" id="clip-record" hidden>
+            <video id="record-preview" muted playsinline aria-label="Recorded clip preview"></video>
+            <label for="record-note">Note <span>(optional)</span></label>
+            <input id="record-note" name="record-note" autocomplete="off" placeholder="Only the red ones…">
+            <div class="clip-controls">
+              <button class="text-button" id="record-btn" type="button">Record</button>
+              <button class="text-button" id="record-stop-btn" type="button" disabled>Stop recording</button>
+              <button class="outline-button" id="send-record-btn" type="button" disabled>Read</button>
+            </div>
+          </div>
 
-      <section class="result-section" aria-labelledby="result-heading">
-        <h2 id="result-heading">Result</h2>
-        <p class="verdict" id="verdict" aria-live="polite"></p>
-        <div class="result-body" id="result-body"></div>
-      </section>
-    </div>
+          <div class="clip-input" id="clip-upload" hidden>
+            <video id="upload-preview" controls playsinline aria-label="Attached clip preview" hidden></video>
+            <label class="file-button">Choose clip
+              <input id="clip-file" class="sr-only" name="clip" type="file" accept="video/webm,video/mp4,video/quicktime" autocomplete="off">
+            </label>
+            <span class="file-name" id="file-name" aria-live="polite"></span>
+            <label for="upload-note">Note <span>(optional)</span></label>
+            <input id="upload-note" name="upload-note" autocomplete="off" placeholder="Into the blue box…">
+            <div class="clip-controls">
+              <button class="outline-button" id="send-upload-btn" type="button" disabled>Read</button>
+            </div>
+          </div>
+          <p class="error" id="task-error" role="status" aria-live="polite"></p>
+        </section>
+
+        <section class="understood-section" id="understood-section" aria-labelledby="understood-heading" hidden>
+          <h2 id="understood-heading">Understood</h2>
+          <div class="intent-readable" id="intent-readable"></div>
+          <p class="seen" id="seen-text"></p>
+          <div class="frames" id="read-frames"></div>
+          <p class="note-display" id="note-display" hidden></p>
+          <label class="sr-only" for="intent-json">Intent JSON</label>
+          <textarea class="intent-json" id="intent-json" name="intent-json" autocomplete="off" spellcheck="false" hidden></textarea>
+          <div class="clarify-form">
+            <label for="clarify-text">Not right? Say what you meant</label>
+            <div class="inline-form">
+              <input id="clarify-text" name="clarification" autocomplete="off" placeholder="Only the red ones…">
+              <button class="outline-button" id="clarify-btn" type="button">Send</button>
+            </div>
+          </div>
+          <div class="history" id="intent-history"></div>
+          <div class="confirm-actions">
+            <button class="primary-button" id="confirm-btn" type="button">Confirm</button>
+            <button class="text-button" id="edit-intent-btn" type="button">Edit JSON</button>
+            <span class="round" id="round-label"></span>
+          </div>
+          <p class="error" id="intent-error" role="status" aria-live="polite"></p>
+        </section>
+
+        <section class="program-section" id="program-section" aria-labelledby="program-heading" hidden>
+          <h2 id="program-heading">Program <span class="program-meta" id="program-meta"></span></h2>
+          <div class="waiting-block" id="waiting-block" role="status" aria-live="polite" tabindex="-1" hidden>
+            <p class="waiting-title">Waiting for you</p>
+            <div id="waiting-content"></div>
+          </div>
+          <div class="code-window" id="code-window"></div>
+          <div class="program-actions">
+            <button class="text-button" id="rewrite-btn" type="button" disabled>Rewrite</button>
+          </div>
+          <p class="error" id="program-error" role="status" aria-live="polite"></p>
+        </section>
+
+        <section class="log-section" aria-labelledby="log-heading">
+          <div class="section-line">
+            <h2 id="log-heading">Call log</h2>
+            <span class="run-state" id="run-state"></span>
+          </div>
+          <div class="call-log" id="call-log" aria-live="polite"></div>
+        </section>
+
+        <section class="result-section" aria-labelledby="result-heading">
+          <h2 id="result-heading">Result</h2>
+          <p class="verdict" id="verdict" aria-live="polite"></p>
+          <div class="result-body" id="result-body"></div>
+        </section>
+      </div>
+    </aside>
   </main>
   <script src="/app.js"></script>
 </body>
