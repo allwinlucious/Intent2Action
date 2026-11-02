@@ -44,7 +44,7 @@ recorded for the video. Shots marked *(to measure)* are filmed only if the measu
 *   **Data (overall only):**
     *   base Glimmer **61%** → fine-tuned **83%** on 250 held-out tasks, 3 runs each;
     *   live recovery: **9/20** failed runs rescued, against 4/20;
-    *   Isaac physics: base 34/50 → fine-tuned *(to measure for G1d)*.
+    *   Isaac physics, 50 held-out tasks: base **34/50** → fine-tuned **42/50**.
 *   **Narration:** "We fine-tuned a small open model on what the robot actually achieved in simulation: learning
     from experience. It learned which order works for which kind of task."
 

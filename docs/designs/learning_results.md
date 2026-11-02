@@ -55,6 +55,9 @@ recovery result stands as measured (9/20 live rescues, against 4/20 for base Gli
 → 89%): 4 of the 50 stacking tasks fail in all 3 runs. The tower-unload demo task (`stacking:100007`) passes 3/3 with
 the same top-first program as G1b. G1b remains the best program writer and the headline number (86%).
 
+In Isaac physics, on the same 50 held-out tasks: **G1d 42/50** (G1b 41/50, docs-level 35/50, base 34/50); the
+tower-unload task passes there too.
+
 ## Robot fix found by the review, measured in physics (2026-11-02, night)
 
 The review found that a held object's collisions with **its original support stayed disabled until placement**, so
