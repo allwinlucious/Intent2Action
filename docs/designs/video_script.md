@@ -82,8 +82,11 @@ recorded for the video. Shots marked *(to measure)* are filmed only if the measu
         touches with a 10 N guarded move, then makes one soft push;
     *   **"Waiting for you"** appears, and the owner approves;
     *   the carton lands **3 mm** from the target, never above 12 N.
-*   **Narration:** "When the part is too wide to grip, a capable model works out another way: a slow,
-    force-limited push. And it still asks first."
+*   **Narration:** "The robot already knows how to move, approach and push. The reasoning model works out how to
+    combine those capabilities to solve a problem it cannot handle with a grasp. And it still asks first."
+*   **Framing (keep the claim exact):** the model does not discover a new physical capability. It composes the
+    robot's existing, force-limited motions into a different strategy. On screen, show those calls as they were
+    issued: `move_to_contact`, then `move_compliant`.
 
 ## 2:45–3:00 · Close
 
