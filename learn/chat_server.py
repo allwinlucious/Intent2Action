@@ -161,14 +161,8 @@ class Model:
             "choices": [{"index": 0, "message": parse(raw), "finish_reason": "stop"}]}
 
 
-def main() -> None:
-  parser = argparse.ArgumentParser()
-  parser.add_argument("--root", default="/workspace/train")
-  parser.add_argument("--adapters", nargs="+", required=True)
-  parser.add_argument("--port", type=int, default=8000)
-  parser.add_argument("--api-key", default="")
-  args = parser.parse_args()
-  model = Model(args.root, args.adapters)
+def serve(model, names: list[str], port: int, api_key: str = "", tag: str = "chat_server") -> None:
+  """OpenAI-compatible HTTP front for any `model` with chat(request) -> completion; local only."""
 
   class Handler(BaseHTTPRequestHandler):
     def _send(self, code: int, body: dict) -> None:
@@ -180,13 +174,13 @@ def main() -> None:
       self.wfile.write(data)
 
     def _authorized(self) -> bool:
-      return not args.api_key or self.headers.get("Authorization") == f"Bearer {args.api_key}"
+      return not api_key or self.headers.get("Authorization") == f"Bearer {api_key}"
 
     def do_GET(self):  # noqa: N802
       if not self._authorized():
         return self._send(401, {"error": "unauthorized"})
       if self.path.rstrip("/").endswith("/models"):
-        return self._send(200, {"data": [{"id": n} for n in ["G0", *sorted(model.adapters)]]})
+        return self._send(200, {"data": [{"id": n} for n in names]})
       self._send(404, {"error": "not found"})
 
     def do_POST(self):  # noqa: N802
@@ -199,10 +193,21 @@ def main() -> None:
         self._send(400, {"error": f"{type(error).__name__}: {error}"})
 
     def log_message(self, fmt, *a):
-      print(f"[chat_server] {self.address_string()} {fmt % a}", flush=True)
+      print(f"[{tag}] {self.address_string()} {fmt % a}", flush=True)
 
-  print(f"serving G0 and {args.adapters} on :{args.port}", flush=True)
-  ThreadingHTTPServer(("127.0.0.1", args.port), Handler).serve_forever()
+  print(f"serving {names} on :{port}", flush=True)
+  ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
+
+
+def main() -> None:
+  parser = argparse.ArgumentParser()
+  parser.add_argument("--root", default="/workspace/train")
+  parser.add_argument("--adapters", nargs="+", required=True)
+  parser.add_argument("--port", type=int, default=8000)
+  parser.add_argument("--api-key", default="")
+  args = parser.parse_args()
+  model = Model(args.root, args.adapters)
+  serve(model, ["G0", *sorted(model.adapters)], args.port, args.api_key)
 
 
 if __name__ == "__main__":
