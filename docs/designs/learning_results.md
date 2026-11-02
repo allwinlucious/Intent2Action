@@ -7,6 +7,19 @@ Generation follows the model cookbook's adapter evaluation: transformers + PEFT 
 no adapter), greedy, one attempt, the product's writer prompt. 95 % Wilson intervals in brackets.
 
 
+## Robot fix found by the review, measured in physics (2026-11-02, night)
+
+The review found that a held object's collisions with **its original support stayed disabled until placement**, so
+a carry could be planned through the table (or the cube below). In Isaac this showed up as the "arm lag" stalls:
+the held cube hit the table and the arm jammed. Fixed (supports collide again right after the lift); the corrective
+move after a stall now settles the arm first (ICON accepts a trajectory only near its last setpoint).
+- The 19 stacking training tasks whose label failed in physics: **16/19 now succeed** (before: 0/19). The other 3
+  fail cleanly: the arm does not settle even after a stop (a real obstruction).
+- `pickplace_check` all pass; `program_check` 8/9 (one place started with the held cube touching another cube; to
+  investigate).
+- G1b on the 50 held-out Isaac tasks: **41/50 (82 %)** (before the fix 40/50); plan/physics agreement 86 %.
+The physics labels for G4 were measured before this fix, so G4's stacking relabelling was based on the bug.
+
 ## Corrections after an independent code review (2026-11-01, evening)
 
 Three the reviewer reviewers (training, evaluation, robot code; read-only) found defects that change reported results:
