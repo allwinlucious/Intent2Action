@@ -1,0 +1,15 @@
+category: carton
+collision: convexHull
+color:
+- 0.66
+- 0.5
+- 0.33
+color_name: brown
+dims:
+- 0.12
+- 0.12
+- 0.08
+friction_dynamic: 0.3
+friction_static: 0.35
+mass: 0.4
+static: false

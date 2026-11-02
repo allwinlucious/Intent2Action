@@ -55,6 +55,10 @@ def write_model(directory: Path) -> None:
   # Rendered as the flat triangles PhysX collides with, not a subdivision surface.
   geom.CreateSubdivisionSchemeAttr(UsdGeom.Tokens.none)
   geom.CreateDisplayColorAttr([Gf.Vec3f(*description["color"])])
+  if not description.get("collides", True):  # paint only (a floor marking): no physics at all
+    stage.GetRootLayer().Save()
+    print(f"CATALOG {directory.name}: {len(mesh.faces)} faces, visual only", flush=True)
+    return
   UsdPhysics.CollisionAPI.Apply(geom.GetPrim())
   UsdPhysics.MeshCollisionAPI.Apply(geom.GetPrim()).CreateApproximationAttr(
       description["collision"]

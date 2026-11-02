@@ -64,6 +64,10 @@ OBJECTS = {
     # Static: Isaac uses the exact triangle mesh, so the walls collide and the inside is free.
     "red_box": (_open_box(0.25, 0.21, 0.05, 0.01, 0.01), True, None, (0.8, 0.15, 0.15)),
     "blue_box": (_open_box(0.25, 0.21, 0.05, 0.01, 0.01), True, None, (0.15, 0.25, 0.8)),
+    # Push demo: a carton wider than the gripper opens (0.075 m) in every direction, so it can only be pushed.
+    "big_carton": (_box(0.12, 0.12, 0.08), False, 0.40, (0.66, 0.50, 0.33)),
+    # A painted area: 2 mm thick, spawned 1.9 mm into the table so it is flush and a pushed carton slides over it.
+    "target_zone": (_box(0.16, 0.16, 0.002), True, None, (0.20, 0.65, 0.30)),
 }
 # name: (category, colour word), the attributes list_objects reports (phase_ids.md decision 3).
 ATTRIBUTES = {
@@ -79,10 +83,14 @@ ATTRIBUTES = {
     "calib_board": ("calibration_board", "white"),
     "red_box": ("box", "red"),
     "blue_box": ("box", "blue"),
+    "big_carton": ("carton", "brown"),
+    "target_zone": ("zone", "green"),
 }
 # Static/dynamic friction where not build_catalog.py's default 0.5/0.4: the peg
 # must slide on the block's face to the hole (phase_5b.md, Addendum B2).
-FRICTION = {"peg": (0.3, 0.25), "hole_block": (0.3, 0.25)}
+FRICTION = {"peg": (0.3, 0.25), "hole_block": (0.3, 0.25), "big_carton": (0.35, 0.3)}
+# Paint only: no collision in Isaac (a pushed object must slide over the zone's edge, not snag on it).
+NO_COLLISION = {"target_zone"}
 # name: (wall, floor) thickness (m) of the open boxes.
 CONTAINERS = {"red_box": (0.01, 0.01), "blue_box": (0.01, 0.01)}
 
@@ -124,6 +132,8 @@ def main() -> int:
     }
     if name == "calib_board":
       description["origin"] = "center"
+    if name in NO_COLLISION:
+      description["collides"] = False
     if name in FRICTION:
       description["friction_static"], description["friction_dynamic"] = FRICTION[name]
     if name in CONTAINERS:
