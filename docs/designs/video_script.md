@@ -3,6 +3,9 @@
 The owner narrates. Every number on screen comes from [learning_results.md](learning_results.md), or from a run
 recorded for the video. Shots marked *(to measure)* are filmed only if the measurement supports them.
 
+**One model on screen:** G1d, the fine-tuned Glimmer that writes the programs and handles recovery. The video shows
+**overall** percentages only, no per-family numbers.
+
 ## 0:00–0:15 · Hook
 
 *   **Visual:** the owner's real clip: unloading a stack of cartons into a bin, wearing gloves. Cut to Isaac: the
@@ -38,11 +41,10 @@ recorded for the video. Shots marked *(to measure)* are filmed only if the measu
     *   the fine-tuned model works top-first and passes.
 
     Then the chart.
-*   **Data:**
-    *   61% → **86%** on 250 held-out tasks, 3 runs each;
-    *   stacking 47% → 97%;
-    *   an unseen task family 51% → 82%;
-    *   Isaac physics 34/50 → 41/50.
+*   **Data (overall only):**
+    *   base Glimmer **61%** → fine-tuned **83%** on 250 held-out tasks, 3 runs each;
+    *   live recovery: **9/20** failed runs rescued, against 4/20;
+    *   Isaac physics: base 34/50 → fine-tuned *(to measure for G1d)*.
 *   **Narration:** "We fine-tuned a small open model on what the robot actually achieved in simulation: learning
     from experience. It learned which order works for which kind of task."
 
@@ -55,7 +57,7 @@ recorded for the video. Shots marked *(to measure)* are filmed only if the measu
     Then a bar chart over all 250 tasks: base model, fine-tuned model, large model.
 *   **Data:**
     *   a task where the large model fails all 3 runs and ours passes all 3, confirmed in Isaac;
-    *   the large model's overall score (X%) next to 86%.
+    *   the large model's overall score (X%) next to 83%.
 *   **Narration:** "A model a hundred times larger still fails here, because it has never seen what this robot can
     actually do. Experience beats size on this task." On the overall numbers: "On average it scores X%."
 *   **If the measurement does not support it** (the large model wins everywhere), replace the shot with the
@@ -69,8 +71,9 @@ recorded for the video. Shots marked *(to measure)* are filmed only if the measu
     *   training on its own successes brought its old habits back (69–74%);
     *   preference training and reinforcement learning added nothing, because nearly every attempt in a group got
         the same reward;
-    *   it learned a rule per task type, not judgement per scene (86% vs a 91% oracle);
-    *   physics is harder than planning (82% vs 88%).
+    *   it learned a rule per task type, not judgement per scene: overall 83% against 91% for an oracle that
+        picks the best strategy per scene;
+    *   physics is harder than planning.
 *   **Narration:** "Some things didn't work, and that shows where the real problem is."
 
 ## 2:10–2:45 · Industrial finale: a real limit
