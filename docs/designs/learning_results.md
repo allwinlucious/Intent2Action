@@ -38,6 +38,10 @@ bootstrap intervals over tasks; references from single runs):
 (84 %), learned from the scene description and the intent alone. Choosing per layout (the 91 % oracle) is not
 learned. In Isaac physics G1b reaches 80 % on 50 held-out tasks (G4 82 %).
 
+Live recovery after the validation fix (G0 rerun, same 20 tasks): **G0 rescues 4/20** (32 handoffs: reobserve 8,
+skip 8, patch 10, retry 3, stop 2, fix_world 1; 1 decision still invalid after its corrective turn); **G1d rescues
+9/20** (25 handoffs, all patches, none invalid; unaffected by the fix). Small sample, consistent direction.
+
 Known limitations still open (reported, not fixed): the corrective move after an arm-lag stall can also push
 through a real obstruction; the retreat is planned from the commanded release joints rather than the sensed ones;
 SFT train/validation are split per row, not per task (validation loss is optimistic; versions are not exactly
