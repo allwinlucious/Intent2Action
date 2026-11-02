@@ -381,6 +381,7 @@ async function writeProgram(button) {
     $("#program-meta").textContent = `${data.attempts} attempt${data.attempts === 1 ? "" : "s"}`;
     setStage("run", "active", "Program ready — press Run");
   } catch (error) { errorAt("#intent-error", error); setStage("write", "failed", error.message); }
+  finally { updateButtons(); }
 }
 
 $$('[data-input]').forEach((button) => button.addEventListener("click", async () => {
