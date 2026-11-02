@@ -507,6 +507,32 @@ V0 and V1 run in parallel; V2 needs V1; V3 needs the clips from V0; V7 starts wi
     *   DPO and GRPO with process rewards;
     *   V4 training of the video model.
 
+### Video framing: industrial use, safety first (owner, 2026-11-02)
+
+The video says plainly that the target is industrial work cells, where safety is the first concern. The
+safety story is what the system really does, shown on screen, not claimed:
+
+*   **A person approves every change to what the robot will do:**
+    *   the intent is confirmed, or clarified in text;
+    *   the program is shown before a person presses Run;
+    *   every recovery patch is approved or declined.
+
+    Nothing moves on the model's say-so alone.
+*   **The model writes a program, not motions.** The program is short and readable, and can be reviewed and
+    audited. It runs in a sandbox, checked and dry-run before execution. Motion is planned by the robot stack,
+    collision-checked against the world model, at a limited speed.
+*   **Failures stop safely and visibly:**
+    *   fail-fast execution;
+    *   a budgeted recovery ladder;
+    *   an operator Stop that cancels the run, not only the motion;
+    *   every decision recorded in an attempt log (the audit trail).
+*   **The result is verified against ground truth** by an independent rule checker. The result is not reported
+    by the model.
+*   **What the video must not claim:** certified functional safety. A real deployment still needs the cell's
+    own safety layer (guarding, safety-rated stops and speed monitoring, a risk assessment to the applicable
+    robot-safety standards). Say this as one line on screen, or in the closing narration, near the kitting
+    example.
+
 ## Risks and Mitigations
 
 *   **The gap between simulated hands and real video.** Mitigations:
