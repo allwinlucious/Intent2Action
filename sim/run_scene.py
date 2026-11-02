@@ -26,7 +26,7 @@ GUI_RENDER_PERIOD_S = 1 / 30
 GUI_FRAME_PERIOD_S = float(os.environ.get("ISAAC_FRAME_PERIOD_S", "0.2"))
 # --pretty renders only when a video frame is due, every PRETTY_FRAME_PERIOD_S of sim time: the heavy scene would
 # otherwise slow physics far below real time, and the video plays at real speed whatever a render costs.
-PRETTY_FRAME_PERIOD_S = 1 / 15
+PRETTY_FRAME_PERIOD_S = 1 / 30  # video frames: encode at 30 fps for real speed
 sys.path += [REPO, r"C:\isaac-sim\exts\omni.pip.compute\pip_prebundle"]
 
 # The bridge needs these before SimulationApp starts (phase_0_5_inventory.md §1.5).
