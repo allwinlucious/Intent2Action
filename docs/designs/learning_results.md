@@ -38,6 +38,17 @@ bootstrap intervals over tasks; references from single runs):
 (84 %), learned from the scene description and the intent alone. Choosing per layout (the 91 % oracle) is not
 learned. In Isaac physics G1b reaches 80 % on 50 held-out tasks (G4 82 %).
 
+**Corrected GRPO (G8).** Rollouts now stop at `<|eot|>` (mean completion 321-406 tokens, 12-25 % clipped instead
+of 100 %); G1b merged into the base and a fresh adapter trained with a KL term (β 0.04) to it, lr 1e-5, all 302
+prompts, 4 samples each, verified rewards (plan-tier outcome of the strategy a sample reproduces; conflicting
+outcomes averaged). Mean reward by quarter 0.80 / 0.76 / 0.84 / 0.82 (stable, no rise). G8 writes **the identical
+program to G1b on all 250 held-out tasks**: 85 % [81-88] in the plan tier (G1b 86 %), 38/50 in Isaac (G1b 40/50).
+GRPO in this setting does not change the learned task-type → strategy map: within a group of four samples the
+model almost always writes the same strategy, so the group has no contrast to learn from (the reward signal needs
+sampling diversity that an SFT model this certain does not produce). (A first grading of G8 had 87 failures from one
+fleet container whose world service degraded — "UpdateTransform: Too many inaccurate links"; re-graded on fresh
+containers.)
+
 Live recovery after the validation fix (G0 rerun, same 20 tasks): **G0 rescues 4/20** (32 handoffs: reobserve 8,
 skip 8, patch 10, retry 3, stop 2, fix_world 1; 1 decision still invalid after its corrective turn); **G1d rescues
 9/20** (25 handoffs, all patches, none invalid; unaffected by the fix). Small sample, consistent direction.
