@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Show once</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark"></span><h1>Show once</h1></div>
+    <div class="chips" aria-label="System status">
+      <span class="chip" id="robot-status"><i></i>Robot · unknown</span>
+      <span class="chip" id="model-status"><i></i>Model · unknown</span>
+      <span class="chip" id="frame-status"><i></i>Sim view · waiting</span>
+    </div>
+    <div class="top-actions">
+      <button class="danger" id="stop-btn" disabled>Stop</button>
+      <button class="quiet" id="reset-btn">Reset scene</button>
+    </div>
+  </header>
+
+  <nav class="stages" aria-label="Progress">
+    <div data-stage="read"><span>1</span>Read</div><b></b>
+    <div data-stage="confirm"><span>2</span>Confirm</div><b></b>
+    <div data-stage="write"><span>3</span>Write</div><b></b>
+    <div data-stage="run"><span>4</span>Run</div><b></b>
+    <div data-stage="check"><span>5</span>Check</div>
+    <p id="stage-note">Ready for a task</p>
+  </nav>
+
+  <main class="workspace">
+    <section class="column left-column" aria-label="Task and intent">
+      <article class="panel task-panel">
+        <div class="panel-title"><div><small>01 · INPUT</small><h2>Task</h2></div></div>
+        <div class="scene-row">
+          <label class="sr-only" for="scene-select">Scene</label>
+          <select id="scene-select"></select>
+          <button class="quiet" id="load-scene-btn">Load</button>
+        </div>
+        <div class="tabs" role="tablist" aria-label="Input source">
+          <button class="active" role="tab" data-tab="type">Type</button>
+          <button role="tab" data-tab="record">Record</button>
+          <button role="tab" data-tab="upload">Upload</button>
+        </div>
+        <div class="tab active" id="tab-type">
+          <label for="task-text">Describe what should happen</label>
+          <textarea id="task-text" rows="3" placeholder="Put all the cubes in the red box"></textarea>
+          <div class="action-row"><span class="hint">Ctrl + Enter</span><button class="primary" id="send-text-btn">Read task</button></div>
+        </div>
+        <div class="tab" id="tab-record">
+          <video id="record-preview" muted playsinline></video>
+          <label for="record-note">Optional note</label>
+          <input id="record-note" placeholder="Add a note, e.g. only the red ones">
+          <div class="action-row triple">
+            <button class="quiet" id="record-btn">Record</button>
+            <button class="quiet" id="record-stop-btn" disabled>Stop</button>
+            <button class="primary" id="send-record-btn" disabled>Read clip</button>
+          </div>
+        </div>
+        <div class="tab" id="tab-upload">
+          <label class="file-drop" for="clip-file"><span>Choose a short video clip</span><small>WebM, MP4 or MOV · up to 200 MB</small></label>
+          <input id="clip-file" class="sr-only" type="file" accept="video/webm,video/mp4,video/quicktime">
+          <label for="upload-note">Optional note</label>
+          <input id="upload-note" placeholder="Add a note, e.g. into the blue box">
+          <div class="action-row"><span id="file-name" class="hint">No clip selected</span><button class="primary" id="send-upload-btn" disabled>Read clip</button></div>
+        </div>
+        <p class="error" id="task-error" role="status"></p>
+      </article>
+
+      <article class="panel understood-panel">
+        <div class="panel-title"><div><small>02 · VERIFY</small><h2>Understood</h2></div><span class="round" id="round-label"></span></div>
+        <div class="empty-state" id="intent-empty">The reading will appear here for confirmation.</div>
+        <div id="intent-content" hidden>
+          <p class="seen" id="seen-text"></p>
+          <div class="note-display" id="note-display" hidden></div>
+          <div class="frames" id="read-frames"></div>
+          <div class="intent-readable" id="intent-readable"></div>
+          <label class="sr-only" for="intent-json">Intent JSON</label>
+          <textarea class="intent-json" id="intent-json" spellcheck="false" hidden></textarea>
+          <div class="history" id="intent-history"></div>
+          <label for="clarify-text">Not right? Tell it what you meant</label>
+          <div class="inline-form"><input id="clarify-text" placeholder="No, only the red ones"><button class="quiet" id="clarify-btn">Send</button></div>
+          <div class="action-row">
+            <button class="quiet" id="edit-intent-btn">Edit JSON</button>
+            <button class="primary" id="confirm-btn">Confirm &amp; write</button>
+          </div>
+        </div>
+        <p class="error" id="intent-error" role="status"></p>
+      </article>
+    </section>
+
+    <section class="column middle-column" aria-label="Program and run">
+      <article class="panel program-panel">
+        <div class="panel-title"><div><small>03 · PROGRAM</small><h2>Program</h2></div><span class="program-meta" id="program-meta">Waiting</span></div>
+        <div class="code-window" id="code-window"><div class="code-empty">A checked program will appear after confirmation.</div></div>
+        <div class="patch-diff" id="patch-diff" hidden></div>
+        <div class="action-row program-actions">
+          <button class="quiet" id="rewrite-btn" disabled>Rewrite</button>
+          <button class="primary run-button" id="run-btn" disabled><span>Run</span><i>▶</i></button>
+        </div>
+        <p class="error" id="program-error" role="status"></p>
+      </article>
+
+      <article class="panel log-panel">
+        <div class="panel-title"><div><small>04 · EXECUTION</small><h2>Call log</h2></div><span class="run-state" id="run-state">Idle</span></div>
+        <div class="call-log" id="call-log"><div class="empty-state">Calls and results will stream here.</div></div>
+      </article>
+    </section>
+
+    <section class="column right-column" aria-label="Robot and result">
+      <article class="panel view-panel">
+        <div class="panel-title view-title">
+          <div><small>LIVE OUTPUT</small><h2>Robot view</h2></div>
+          <div class="view-controls"><span class="live" id="live-dot"><i></i>LIVE</span><div class="source-switch"><button class="active" data-source="sim">Isaac</button><button data-source="camera">Camera</button></div></div>
+        </div>
+        <div class="view-frame">
+          <img id="sim-view" src="/api/sim.mjpg" alt="Live simulated robot view">
+          <video id="camera-view" autoplay muted playsinline hidden></video>
+          <div class="view-label"><span>Workspace camera</span><span id="view-time">—</span></div>
+        </div>
+        <p class="error" id="view-error" role="status"></p>
+      </article>
+
+      <article class="panel result-panel">
+        <div class="panel-title"><div><small>05 · GROUND TRUTH</small><h2>Result</h2></div><span class="verdict pending" id="verdict">Pending</span></div>
+        <div class="result-body" id="result-body">
+          <div class="empty-state">The final rule check will appear here.</div>
+        </div>
+      </article>
+    </section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

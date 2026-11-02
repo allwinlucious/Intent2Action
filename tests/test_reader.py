@@ -7,7 +7,7 @@ import pytest
 
 from program_runtime import cli
 from program_runtime.agent import ChatClient, ProgramWriter, RecoveryAgent
-from program_runtime.reader import IntentReader, ReadError, frames
+from program_runtime.reader import IntentReader, ReadError, Reading, frames
 
 
 INTENT = {
@@ -94,6 +94,55 @@ def test_reader_clip_sends_requested_image_parts_before_text(monkeypatch):
   assert counts == [4]
   assert [part["type"] for part in parts] == ["image_url"] * 4 + ["text"]
   assert all(part["image_url"]["url"].startswith("data:image/jpeg;base64,") for part in parts[:-1])
+
+
+def test_reader_clip_note_is_after_images_and_frames_are_kept(monkeypatch):
+  monkeypatch.setattr("program_runtime.reader.frames", lambda path, count=6, max_side=768: [b"jpeg"] * count)
+  client = FakeClient([VALID])
+  reading = IntentReader(client).read_clip("demo.mp4", note="only the yellow one")
+  parts = client.calls[0]["messages"][1]["content"]
+  assert parts[-1]["type"] == "text"
+  assert 'The person also wrote: "only the yellow one"' in parts[-1]["text"]
+  assert len(reading.frames) == 6
+
+
+def test_clarify_keeps_old_reading_immutable_and_includes_earlier_turns():
+  client = FakeClient([VALID, VALID])
+  reader = IntentReader(client)
+  first = reader.read_text("put yellow on red")
+  old_messages = json.loads(json.dumps(first.messages))
+  second = reader.clarify(first, "only the yellow cube")
+  assert first.messages == old_messages and second is not first
+  sent = client.calls[1]["messages"]
+  assert sent[:len(old_messages)] == old_messages
+  assert "That is not what I meant: only the yellow cube" in sent[-1]["content"]
+
+
+def test_failed_clarify_does_not_mutate_input():
+  reading = Reading(INTENT, "seen", VALID, [{"role": "user", "content": "old"}], [])
+  before = json.loads(json.dumps(reading.messages))
+  with pytest.raises(ReadError):
+    IntentReader(FakeClient(["bad", "bad again"])).clarify(reading, "correction")
+  assert reading.messages == before
+
+
+def test_oversized_reported_dimensions_fail_before_retrieve(monkeypatch):
+  class Capture:
+    retrieved = 0
+
+    def isOpened(self): return True
+    def get(self, prop): return 5000 if prop == cv2.CAP_PROP_FRAME_WIDTH else 10
+    def grab(self): return True
+    def retrieve(self):
+      self.retrieved += 1
+      return True, np.zeros((2, 2, 3), dtype=np.uint8)
+    def release(self): pass
+
+  capture = Capture()
+  monkeypatch.setattr(cv2, "VideoCapture", lambda path: capture)
+  with pytest.raises(ValueError, match="oversized"):
+    frames("large.mp4")
+  assert capture.retrieved == 0
 
 
 def test_chat_client_call_model_wins_over_extra_body(monkeypatch):
@@ -190,6 +239,18 @@ def test_cli_frame_count_reaches_reader_frames(monkeypatch, capsys):
   assert cli.main(["read", "--clip", "demo.mp4", "--frames", "4"]) == 0
   assert counts == [4]
   capsys.readouterr()
+
+
+def test_cli_note_is_forwarded_and_rejected_with_text(monkeypatch, capsys):
+  monkeypatch.setattr("program_runtime.reader.frames", lambda path, count=6, max_side=768: [b"jpeg"] * count)
+  client = FakeClient([VALID])
+  monkeypatch.setattr(cli, "ChatClient", lambda: client)
+  assert cli.main(["read", "--clip", "demo.mp4", "--note", "red only"]) == 0
+  assert "red only" in client.calls[0]["messages"][1]["content"][-1]["text"]
+  capsys.readouterr()
+  with pytest.raises(SystemExit) as caught:
+    cli.main(["read", "--text", "stack", "--note", "red only"])
+  assert caught.value.code == 2
 
 
 def test_reader_logs_one_success_record(caplog):

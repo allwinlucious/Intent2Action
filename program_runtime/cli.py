@@ -43,6 +43,7 @@ def _parser() -> argparse.ArgumentParser:
   source = command.add_mutually_exclusive_group(required=True)
   source.add_argument("--clip", type=Path)
   source.add_argument("--text")
+  command.add_argument("--note")
   command.add_argument("--frames", type=_frame_count, default=6)
   command.add_argument("--model", default="G0")
   command.add_argument("--out", type=Path)
@@ -57,7 +58,8 @@ def _default_log() -> Path:
 def _read(args) -> int:
   reader = IntentReader(ChatClient(), model=args.model)
   try:
-    reading = reader.read_clip(args.clip, count=args.frames) if args.clip else reader.read_text(args.text)
+    reading = reader.read_clip(args.clip, count=args.frames, note=args.note) \
+        if args.clip else reader.read_text(args.text)
   except ReadError as error:
     print(f"FAILED: {error}", file=sys.stderr)
     for problem in error.problems:
@@ -117,7 +119,10 @@ def _run(args) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-  args = _parser().parse_args(argv)
+  parser = _parser()
+  args = parser.parse_args(argv)
+  if args.command == "read" and args.note is not None and args.clip is None:
+    parser.error("--note requires --clip")
   return _read(args) if args.command == "read" else _run(args)
 
 

@@ -4,6 +4,7 @@ import math
 from pathlib import Path
 import subprocess
 import sys
+import threading
 
 from google.longrunning import operations_pb2
 from google.rpc import status_pb2
@@ -167,6 +168,67 @@ def test_valid_patch_becomes_result():
     "rung": "patch", "reason": "replace", "patch": patch,
   }]))
   assert result.ok and result.patches == 1
+
+
+def test_patch_approval_applies_and_decline_rejects_with_note():
+  patch = "cube = find(category='cube')\npick(cube)\nverify(lambda: held(cube))"
+  decision = {"rung": "patch", "reason": "replace", "patch": patch}
+  approved_backend = FakeBackend([obj("cube")])
+  approved_backend.inject = {"pick": [RobotFailure("grasp", "blocked")]}
+  approvals = []
+  approved = run(
+    one_cube_source(), RobotAPI(approved_backend), ScriptedAgent([decision]),
+    approve=lambda source, reason: approvals.append((source, reason)) or (True, ""),
+  )
+  assert approved.ok and approved.patches == 1 and approvals == [(patch, "replace")]
+
+  declined_backend = FakeBackend([obj("cube")])
+  declined_backend.inject = {"pick": [RobotFailure("grasp", "blocked")]}
+  events = []
+  declined = run(
+    one_cube_source(), RobotAPI(declined_backend), ScriptedAgent([decision]), log=events.append,
+    approve=lambda source, reason: (False, "keep the original"),
+  )
+  patch_event = next(event for event in events if event["kind"] == "patch")
+  assert not declined.ok and patch_event == {
+    **{key: patch_event[key] for key in ("t", "kind")},
+    "accepted": False, "problems": ["declined by the operator: keep the original"],
+  }
+
+
+class LatchedPickBackend(FakeBackend):
+  def __init__(self, objects):
+    super().__init__(objects)
+    self.started = threading.Event()
+    self.release = threading.Event()
+    self.calls = []
+
+  def pick(self, object_id):
+    self.calls.append(object_id)
+    self.started.set()
+    assert self.release.wait(2)
+    super().pick(object_id)
+
+
+def test_cancel_during_successful_last_call_wins_and_skips_recovery():
+  backend = LatchedPickBackend([obj("cube")])
+  cancel = threading.Event()
+  agent = ScriptedAgent([{"rung": "retry_step", "reason": "unused"}])
+  events = []
+  result = {}
+  thread = threading.Thread(target=lambda: result.setdefault(
+    "value", run(one_cube_source(), RobotAPI(backend), agent, log=events.append, cancel=cancel),
+  ))
+  thread.start()
+  assert backend.started.wait(2)
+  cancel.set()
+  backend.release.set()
+  thread.join(2)
+  assert not thread.is_alive()
+  assert result["value"].error == "stopped by the operator"
+  assert backend.calls == ["cube"] and agent.decisions
+  done = [event for event in events if event["kind"] == "done"]
+  assert len(done) == 1 and done[0]["ok"] is False
 
 
 def test_ask_user_once_without_second_handoff():

@@ -1,0 +1,420 @@
+const $ = (selector) => document.querySelector(selector);
+const $$ = (selector) => [...document.querySelectorAll(selector)];
+
+const state = {
+  intent: null,
+  confirmed: false,
+  program: "",
+  programId: null,
+  runId: null,
+  running: false,
+  round: 0,
+  history: [],
+  objects: {},
+  recorder: null,
+  recordStream: null,
+  recordBlob: null,
+  cameraStream: null,
+  pendingPatch: null,
+  eventSource: null,
+};
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (char) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"})[char]);
+}
+
+async function request(path, options = {}) {
+  const response = await fetch(path, options);
+  let body = {};
+  try { body = await response.json(); } catch (_) { body = {}; }
+  if (!response.ok) throw new Error(body.error || `${response.status} ${response.statusText}`);
+  return body;
+}
+
+async function jsonRequest(path, body) {
+  return request(path, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(body),
+  });
+}
+
+function errorAt(selector, error = "") {
+  $(selector).textContent = error ? String(error.message || error) : "";
+}
+
+async function busy(button, label, work) {
+  const old = button.textContent;
+  button.disabled = true;
+  button.textContent = label;
+  try { return await work(); }
+  finally { button.textContent = old; updateButtons(); }
+}
+
+function setStage(name, status = "active", note = "") {
+  const order = ["read", "confirm", "write", "run", "check"];
+  const index = order.indexOf(name);
+  $$(".stages div[data-stage]").forEach((item) => {
+    const itemIndex = order.indexOf(item.dataset.stage);
+    item.className = itemIndex < index ? "done" : "";
+    if (item.dataset.stage === name) item.className = status;
+  });
+  $("#stage-note").textContent = note || (status === "failed" ? "Needs attention" : name === "run" ? "Executing the approved program" : "Ready");
+}
+
+function updateButtons() {
+  $("#run-btn").disabled = !(state.confirmed && state.programId && !state.running);
+  $("#rewrite-btn").disabled = !(state.intent && !state.running);
+  $("#stop-btn").disabled = !state.running;
+  $("#confirm-btn").disabled = !state.intent || state.running;
+  $("#clarify-btn").disabled = !state.intent || state.running;
+}
+
+function invalidateProgram() {
+  state.confirmed = false;
+  state.program = "";
+  state.programId = null;
+  renderProgram("");
+  $("#program-meta").textContent = "Waiting";
+  updateButtons();
+}
+
+function readableIntent(intent) {
+  return (intent.rules || []).map((rule) => {
+    const select = Object.values(rule.select || {}).join(" · ") || "objects";
+    const target = Object.values(rule.target || {}).join(" · ") || "target";
+    return `<p>${escapeHtml(select)} <span>→ ${escapeHtml(rule.relation)} →</span> ${escapeHtml(target)}</p>`;
+  }).join("");
+}
+
+function showReading(data, correction = "") {
+  state.intent = data.intent;
+  state.round = data.round || state.round + 1;
+  state.confirmed = false;
+  $("#intent-empty").hidden = true;
+  $("#intent-content").hidden = false;
+  $("#seen-text").textContent = data.seen;
+  $("#round-label").textContent = `Round ${state.round}`;
+  $("#intent-readable").innerHTML = readableIntent(data.intent);
+  $("#intent-json").value = JSON.stringify(data.intent, null, 2);
+  $("#intent-json").hidden = true;
+  $("#intent-readable").hidden = false;
+  $("#edit-intent-btn").textContent = "Edit JSON";
+  const note = data.note || "";
+  $("#note-display").hidden = !note;
+  $("#note-display").textContent = note ? `Note · ${note}` : "";
+  $("#read-frames").innerHTML = (data.frames || []).map((src, index) => `<img src="${src}" alt="Sampled clip frame ${index + 1}">`).join("");
+  if (correction) state.history.push(`round ${state.round}: ${correction}`);
+  $("#intent-history").innerHTML = state.history.map((item) => `<div>${escapeHtml(item)}</div>`).join("");
+  invalidateProgram();
+  setStage("confirm", "active", "Check the reading before writing");
+}
+
+function syntaxLine(line) {
+  let value = escapeHtml(line);
+  value = value.replace(/(&quot;.*?&quot;|&#39;.*?&#39;)/g, '<span class="tok-string">$1</span>');
+  value = value.replace(/\b(for|in|if|else|while|lambda|and|or|not|True|False|None)\b/g, '<span class="tok-key">$1</span>');
+  value = value.replace(/\b(find|find_all|pick|place|verify|report|inside|on_top|held)(?=\()/g, '<span class="tok-call">$1</span>');
+  return value || " ";
+}
+
+function renderProgram(source, currentLine = null) {
+  state.program = source || "";
+  if (!source) {
+    $("#code-window").innerHTML = '<div class="code-empty">A checked program will appear after confirmation.</div>';
+    return;
+  }
+  $("#code-window").innerHTML = source.replace(/\n$/, "").split("\n").map((line, index) => (
+    `<div class="code-line ${currentLine === index + 1 ? "current" : ""}" data-line="${index + 1}"><span class="line-no">${index + 1}</span><span>${syntaxLine(line)}</span></div>`
+  )).join("");
+  if (currentLine) $(".code-line.current")?.scrollIntoView({block: "nearest"});
+}
+
+function addLog(kind, text, result = "", extraClass = "") {
+  const log = $("#call-log");
+  if (log.querySelector(".empty-state")) log.innerHTML = "";
+  const row = document.createElement("div");
+  row.className = `log-row ${extraClass}`;
+  if (extraClass.includes("full")) {
+    row.innerHTML = `<strong>${escapeHtml(kind)}</strong> · ${escapeHtml(text)}`;
+  } else {
+    row.innerHTML = `<span class="time">${new Date().toLocaleTimeString([], {hour12: false, minute: "2-digit", second: "2-digit"})}</span><span>${escapeHtml(text)}</span><span class="result ${result === "✓" ? "ok" : result ? "fail" : ""}">${escapeHtml(result)}</span>`;
+  }
+  log.append(row);
+  log.scrollTop = log.scrollHeight;
+  return row;
+}
+
+function lineDiff(oldSource, newSource) {
+  const oldLines = oldSource.replace(/\n$/, "").split("\n");
+  const newLines = newSource.replace(/\n$/, "").split("\n");
+  const rows = Array.from({length: oldLines.length + 1}, () => Array(newLines.length + 1).fill(0));
+  for (let i = oldLines.length - 1; i >= 0; i -= 1) {
+    for (let j = newLines.length - 1; j >= 0; j -= 1) rows[i][j] = oldLines[i] === newLines[j] ? rows[i + 1][j + 1] + 1 : Math.max(rows[i + 1][j], rows[i][j + 1]);
+  }
+  const output = [];
+  let i = 0;
+  let j = 0;
+  while (i < oldLines.length || j < newLines.length) {
+    if (i < oldLines.length && j < newLines.length && oldLines[i] === newLines[j]) { output.push([" ", oldLines[i]]); i += 1; j += 1; }
+    else if (j < newLines.length && (i === oldLines.length || rows[i][j + 1] >= rows[i + 1][j])) { output.push(["+", newLines[j]]); j += 1; }
+    else { output.push(["−", oldLines[i]]); i += 1; }
+  }
+  return output;
+}
+
+function showApproval(data) {
+  state.pendingPatch = data.patch;
+  setStage("run", "active", "Waiting for you");
+  const diff = $("#patch-diff");
+  diff.hidden = false;
+  diff.innerHTML = `<div class="diff-line">Proposed patch · ${escapeHtml(data.reason || "")}</div>` + lineDiff(state.program, data.patch).map(([mark, line]) => (
+    `<div class="diff-line ${mark === "+" ? "add" : mark === "−" ? "remove" : ""}">${mark} ${escapeHtml(line)}</div>`
+  )).join("") + `<div class="diff-actions"><input id="decline-note" aria-label="Optional decline note" placeholder="Optional note"><button class="danger" id="decline-patch">Decline</button><button class="primary" id="approve-patch">Approve patch</button></div>`;
+  const submit = async (approved) => {
+    try {
+      await jsonRequest("/api/approve", {run_id: data.run_id, question_id: data.question_id, approved, note: $("#decline-note").value});
+      diff.hidden = true;
+      addLog("PATCH", approved ? "Approved by operator" : "Declined by operator", "", "full");
+    } catch (error) { errorAt("#program-error", error); }
+  };
+  $("#approve-patch").addEventListener("click", () => submit(true));
+  $("#decline-patch").addEventListener("click", () => submit(false));
+}
+
+function handleRuntime(event) {
+  const data = JSON.parse(event.data);
+  if (data.kind === "line") renderProgram(state.program, data.line);
+  else if (data.kind === "call") addLog("CALL", `${data.fn}(${(data.args || []).join(", ")})`);
+  else if (data.kind === "result") addLog("RESULT", data.fn, data.ok ? "✓" : `✗ ${data.message || "failed"}`);
+  else if (["handoff", "failure", "report", "decision", "dry_run", "check"].includes(data.kind)) addLog(data.kind.toUpperCase(), data.message || data.text || data.reason || (data.ok === false ? data.error : "checked"), "", "full");
+  else if (data.kind === "patch" && data.accepted && state.pendingPatch) { renderProgram(state.pendingPatch); state.pendingPatch = null; }
+  else if (data.kind === "done" && !data.ok) addLog("DONE", data.error || "Run failed", "", "full");
+}
+
+function renderFinal(data) {
+  state.running = false;
+  state.runId = null;
+  $("#run-state").textContent = data.ok ? "Complete" : "Stopped";
+  $("#verdict").className = `verdict ${data.ok ? "pass" : "fail"}`;
+  $("#verdict").textContent = data.ok ? "✓ Passed" : "✗ Failed";
+  if (!data.rules) {
+    $("#result-body").innerHTML = `<p class="result-summary">${escapeHtml(data.error || (data.ok ? "Program completed in fake mode." : "Run did not complete."))}</p>`;
+  } else {
+    const rows = Object.entries(data.rules.per_object || {}).map(([id, status]) => {
+      const object = state.objects[id] || {};
+      const ok = status === "ok";
+      return `<div class="check-row"><span class="check-mark ${ok ? "pass" : "fail"}">${ok ? "✓" : "✗"}</span><span class="check-object">${escapeHtml(id)}<small>${escapeHtml([object.color, object.category].filter(Boolean).join(" · "))}</small></span><span class="check-status">${escapeHtml(status)}</span></div>`;
+    }).join("");
+    $("#result-body").innerHTML = `<p class="result-summary">${escapeHtml(data.rules.summary)}</p>${rows}`;
+  }
+  setStage("check", data.ok ? "done" : "failed", data.error || (data.ok ? "All checks complete" : "Run failed"));
+  updateButtons();
+}
+
+function connectEvents() {
+  state.eventSource?.close();
+  const source = new EventSource("/api/events");
+  state.eventSource = source;
+  source.addEventListener("runtime", handleRuntime);
+  source.addEventListener("stage", (event) => {
+    const data = JSON.parse(event.data);
+    setStage(data.name, data.state === "failed" ? "failed" : "active", data.detail || "");
+  });
+  source.addEventListener("question", (event) => {
+    const data = JSON.parse(event.data);
+    setStage("run", "active", "Waiting for you");
+    const row = addLog("QUESTION", data.text, "", "full question");
+    row.innerHTML += '<div><input aria-label="Answer" placeholder="Type an answer"><button class="primary">Send</button></div>';
+    row.querySelector("button").addEventListener("click", async () => {
+      try { await jsonRequest("/api/answer", {run_id: data.run_id, question_id: data.question_id, text: row.querySelector("input").value}); row.querySelector("div").remove(); }
+      catch (error) { errorAt("#program-error", error); }
+    });
+  });
+  source.addEventListener("approval", (event) => showApproval(JSON.parse(event.data)));
+  source.addEventListener("final", (event) => { renderFinal(JSON.parse(event.data)); source.close(); });
+}
+
+async function loadScenes() {
+  try {
+    const scenes = await request("/api/scenes");
+    $("#scene-select").innerHTML = scenes.map((scene) => `<option value="${escapeHtml(scene.id)}" data-request="${escapeHtml(scene.request)}">${escapeHtml(scene.label)}</option>`).join("");
+    $("#task-text").value = scenes[0].request;
+    await loadScene();
+  } catch (error) { errorAt("#task-error", error); }
+}
+
+async function loadScene(button = $("#load-scene-btn")) {
+  errorAt("#task-error");
+  await busy(button, "Loading…", async () => {
+    const data = await jsonRequest("/api/scene", {id: $("#scene-select").value});
+    state.objects = Object.fromEntries(data.objects.map((object) => [object.id, object]));
+    state.intent = null;
+    state.history = [];
+    state.confirmed = false;
+    $("#intent-content").hidden = true;
+    $("#intent-empty").hidden = false;
+    invalidateProgram();
+    setStage("read", "active", "Scene ready");
+  });
+}
+
+async function readText() {
+  errorAt("#task-error");
+  const button = $("#send-text-btn");
+  try {
+    const data = await busy(button, "Reading…", () => jsonRequest("/api/read", {text: $("#task-text").value}));
+    state.history = [];
+    showReading(data);
+  } catch (error) { errorAt("#task-error", error); setStage("read", "failed", error.message); }
+}
+
+async function readClip(blob, note, button) {
+  errorAt("#task-error");
+  try {
+    const type = blob.type || "video/webm";
+    const data = await busy(button, "Reading…", () => request(`/api/read_clip?note=${encodeURIComponent(note)}`, {method: "POST", headers: {"Content-Type": type}, body: blob}));
+    state.history = [];
+    showReading(data);
+  } catch (error) { errorAt("#task-error", error); setStage("read", "failed", error.message); }
+}
+
+async function writeProgram(button) {
+  errorAt("#intent-error");
+  let intent;
+  try { intent = JSON.parse($("#intent-json").value); }
+  catch (error) { errorAt("#intent-error", new Error(`Invalid JSON: ${error.message}`)); return; }
+  state.confirmed = false;
+  state.programId = null;
+  updateButtons();
+  try {
+    setStage("write", "active", "Writing a checked program");
+    const data = await busy(button, "Writing…", () => jsonRequest("/api/write", {intent, confirm: true}));
+    state.intent = intent;
+    state.confirmed = true;
+    state.programId = data.program_id;
+    renderProgram(data.program);
+    $("#program-meta").textContent = `${data.attempts} attempt${data.attempts === 1 ? "" : "s"}`;
+    setStage("run", "active", "Program ready — press Run");
+  } catch (error) { errorAt("#intent-error", error); setStage("write", "failed", error.message); }
+}
+
+$$('[data-tab]').forEach((button) => button.addEventListener("click", async () => {
+  $$('[data-tab]').forEach((item) => item.classList.toggle("active", item === button));
+  $$(".tab").forEach((item) => item.classList.toggle("active", item.id === `tab-${button.dataset.tab}`));
+  if (button.dataset.tab === "record" && !state.recordStream) {
+    try { state.recordStream = await navigator.mediaDevices.getUserMedia({video: true, audio: false}); $("#record-preview").srcObject = state.recordStream; await $("#record-preview").play(); }
+    catch (error) { errorAt("#task-error", error); }
+  }
+}));
+
+$("#scene-select").addEventListener("change", () => {
+  const option = $("#scene-select").selectedOptions[0];
+  if (option?.dataset.request) $("#task-text").value = option.dataset.request;
+});
+$("#load-scene-btn").addEventListener("click", () => loadScene($("#load-scene-btn")).catch((error) => errorAt("#task-error", error)));
+$("#reset-btn").addEventListener("click", () => loadScene($("#reset-btn")).catch((error) => errorAt("#task-error", error)));
+$("#send-text-btn").addEventListener("click", readText);
+$("#task-text").addEventListener("keydown", (event) => { if (event.ctrlKey && event.key === "Enter") readText(); });
+
+$("#record-btn").addEventListener("click", async () => {
+  if (!state.recordStream) return;
+  const chunks = [];
+  state.recorder = new MediaRecorder(state.recordStream, {mimeType: "video/webm"});
+  state.recorder.addEventListener("dataavailable", (event) => { if (event.data.size) chunks.push(event.data); });
+  state.recorder.addEventListener("stop", () => {
+    state.recordBlob = new Blob(chunks, {type: "video/webm"});
+    $("#record-preview").srcObject = null;
+    $("#record-preview").src = URL.createObjectURL(state.recordBlob);
+    $("#record-preview").controls = true;
+    $("#send-record-btn").disabled = false;
+  });
+  state.recorder.start();
+  $("#record-btn").disabled = true;
+  $("#record-stop-btn").disabled = false;
+});
+$("#record-stop-btn").addEventListener("click", () => { state.recorder?.stop(); $("#record-stop-btn").disabled = true; });
+$("#send-record-btn").addEventListener("click", () => readClip(state.recordBlob, $("#record-note").value, $("#send-record-btn")));
+
+$("#clip-file").addEventListener("change", () => {
+  const file = $("#clip-file").files[0];
+  $("#file-name").textContent = file?.name || "No clip selected";
+  $("#send-upload-btn").disabled = !file;
+});
+$("#send-upload-btn").addEventListener("click", () => readClip($("#clip-file").files[0], $("#upload-note").value, $("#send-upload-btn")));
+
+$("#clarify-btn").addEventListener("click", async () => {
+  const correction = $("#clarify-text").value.trim();
+  if (!correction) return;
+  errorAt("#intent-error");
+  try {
+    const data = await busy($("#clarify-btn"), "Reading…", () => jsonRequest("/api/clarify", {text: correction}));
+    showReading(data, correction);
+    $("#clarify-text").value = "";
+  } catch (error) { errorAt("#intent-error", error); }
+});
+$("#edit-intent-btn").addEventListener("click", () => {
+  const raw = $("#intent-json");
+  raw.hidden = !raw.hidden;
+  $("#intent-readable").hidden = !raw.hidden;
+  $("#edit-intent-btn").textContent = raw.hidden ? "Edit JSON" : "Readable view";
+  invalidateProgram();
+});
+$("#confirm-btn").addEventListener("click", () => writeProgram($("#confirm-btn")));
+$("#rewrite-btn").addEventListener("click", () => writeProgram($("#rewrite-btn")));
+
+$("#run-btn").addEventListener("click", async () => {
+  errorAt("#program-error");
+  try {
+    const data = await jsonRequest("/api/run", {program_id: state.programId});
+    state.runId = data.run_id;
+    state.running = true;
+    $("#run-state").textContent = "Running";
+    $("#call-log").innerHTML = "";
+    $("#result-body").innerHTML = '<div class="empty-state">Checking the live run…</div>';
+    $("#verdict").className = "verdict pending";
+    $("#verdict").textContent = "Running";
+    setStage("run", "active", "Executing the approved program");
+    updateButtons();
+    connectEvents();
+  } catch (error) { errorAt("#program-error", error); }
+});
+
+$("#stop-btn").addEventListener("click", async () => {
+  try { await busy($("#stop-btn"), "Stopping…", () => jsonRequest("/api/stop", {})); }
+  catch (error) { errorAt("#program-error", error); }
+});
+
+$$('[data-source]').forEach((button) => button.addEventListener("click", async () => {
+  $$('[data-source]').forEach((item) => item.classList.toggle("active", item === button));
+  const camera = button.dataset.source === "camera";
+  $("#sim-view").hidden = camera;
+  $("#camera-view").hidden = !camera;
+  if (camera && !state.cameraStream) {
+    try { state.cameraStream = await navigator.mediaDevices.getUserMedia({video: true, audio: false}); $("#camera-view").srcObject = state.cameraStream; }
+    catch (error) { errorAt("#view-error", error); }
+  }
+}));
+
+async function pollStatus() {
+  try {
+    const data = await request("/api/status");
+    [["#robot-status", "Robot", data.robot], ["#model-status", "Model", data.model]].forEach(([selector, label, value]) => {
+      const item = $(selector);
+      item.className = `chip ${value.status}`;
+      item.innerHTML = `<i></i>${label} · ${value.status}`;
+      item.title = value.message || "";
+    });
+    const fresh = data.frames !== null && data.frames <= 2;
+    $("#frame-status").className = `chip ${fresh ? "ok" : "error"}`;
+    $("#frame-status").innerHTML = `<i></i>Sim view · ${fresh ? "live" : "waiting"}`;
+    $("#live-dot").className = `live ${fresh ? "ok" : "error"}`;
+    $("#run-state").textContent = data.run[0].toUpperCase() + data.run.slice(1);
+  } catch (_) { $("#robot-status").className = "chip error"; }
+}
+
+setInterval(() => { $("#view-time").textContent = new Date().toLocaleTimeString([], {hour12: false}); }, 1000);
+setInterval(pollStatus, 2000);
+loadScenes();
+pollStatus();
+updateButtons();

@@ -22,7 +22,8 @@ PHYSICS_ONLY = "--physics-only" in sys.argv
 PRETTY = "--pretty" in sys.argv
 GUI_FRAMES = r"C:\isaac-sim-work\viewer_frames"
 GUI_RENDER_PERIOD_S = 1 / 30
-GUI_FRAME_PERIOD_S = 0.2
+# ISAAC_FRAME_PERIOD_S lets the demo stream run at video frame rate.
+GUI_FRAME_PERIOD_S = float(os.environ.get("ISAAC_FRAME_PERIOD_S", "0.2"))
 # --pretty renders only when a video frame is due, every PRETTY_FRAME_PERIOD_S of sim time: the heavy scene would
 # otherwise slow physics far below real time, and the video plays at real speed whatever a render costs.
 PRETTY_FRAME_PERIOD_S = 1 / 15

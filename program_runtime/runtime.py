@@ -3,6 +3,7 @@
 import builtins
 from dataclasses import asdict, dataclass, replace
 import sys
+import threading
 import time
 from typing import Callable
 
@@ -35,6 +36,10 @@ class _Patch(Exception):
     self.entry = entry
 
 
+class _Stopped(Exception):
+  pass
+
+
 def _failure_dict(failure: RobotFailure) -> dict:
   return {
     "kind": failure.kind,
@@ -60,18 +65,24 @@ def _arg_text(value) -> str:
 
 
 class _Session:
-  def __init__(self, api: RobotAPI, agent, log, budget: Budget, ask):
+  def __init__(self, api: RobotAPI, agent, log, budget: Budget, ask, cancel, approve):
     self.api = api
     self.agent = agent
     self.log = log
     self.budget = budget
     self.ask = ask
+    self.cancel = cancel
+    self.approve = approve
     self.source = ""
     self.line = None
     self.last_logged_line = None
     self.failures: list[dict] = []
     self.handoffs: list[dict] = []
     self.patch_count = 0
+
+  def _check_cancel(self) -> None:
+    if self.cancel is not None and self.cancel.is_set():
+      raise _Stopped()
 
   def emit(self, kind: str, **fields) -> None:
     self.log({"t": time.time(), "kind": kind, **fields})
@@ -94,7 +105,9 @@ class _Session:
   def _resolve(self, value):
     if not isinstance(value, Obj):
       return value
+    self._check_cancel()
     fresh = {obj.id: obj for obj in self.api.backend.list_objects()}
+    self._check_cancel()
     if value.id not in fresh:
       raise RobotFailure("perception", f"object {value.id} no longer exists")
     return fresh[value.id]
@@ -111,14 +124,19 @@ class _Session:
     return data
 
   def _context(self, failure: RobotFailure) -> dict:
+    self._check_cancel()
+    objects = self.api.backend.list_objects()
+    self._check_cancel()
+    state = self.api.backend.state()
+    self._check_cancel()
     context = {
       "program": _numbered(self.source),
       "line": failure.line,
       "kind": failure.kind,
       "message": failure.message,
       "call": failure.call,
-      "objects": [asdict(obj) for obj in self.api.backend.list_objects()],
-      "state": self.api.backend.state(),
+      "objects": [asdict(obj) for obj in objects],
+      "state": state,
       "history": list(self.handoffs),
       "budget": {"handoffs": self.budget.handoffs, "patches": self.budget.patches},
     }
@@ -127,15 +145,19 @@ class _Session:
     return context
 
   def _decision(self, context: dict) -> dict:
+    self._check_cancel()
     decision = self.agent.recover(context)
+    self._check_cancel()
     if not isinstance(decision, dict):
       return {"rung": "stop", "reason": "invalid decision: expected an object"}
     return decision
 
   def _recover(self, failure: RobotFailure, retry: Callable[[], object]):
+    self._check_cancel()
     data = self._record_failure(failure)
     if self.agent is None or self.budget.handoffs <= 0:
       raise failure
+    self._check_cancel()
     number = len(self.handoffs) + 1
     self.emit("handoff", n=number)
     context = self._context(failure)
@@ -151,6 +173,7 @@ class _Session:
       if self.ask is None:
         raise RobotFailure("other", "ask_user is not available", line=self.line)
       context["user_answer"] = self.ask(decision.get("question") or "")
+      self._check_cancel()
       decision = self._decision(context)
     rung = decision.get("rung", "stop")
     self.emit(
@@ -172,6 +195,14 @@ class _Session:
       accepted = self.budget.patches > 0 and not problems
       if self.budget.patches <= 0:
         problems = ["patch budget exhausted", *problems]
+      if accepted and self.approve is not None:
+        self.emit("approval", patch=patch_source, reason=decision.get("reason", ""))
+        self._check_cancel()
+        approved, note = self.approve(patch_source, decision.get("reason", ""))
+        self._check_cancel()
+        if not approved:
+          accepted = False
+          problems = [f"declined by the operator: {note}"]
       self.emit("patch", accepted=accepted, problems=problems)
       if not accepted:
         entry["outcome"] = "rejected"
@@ -182,6 +213,7 @@ class _Session:
     raise failure
 
   def _postcondition_retry(self, name: str, args: tuple, failure: RobotFailure):
+    self._check_cancel()
     self.budget.calls -= 1
     if self.budget.calls < 0:
       raise RobotFailure("other", "call budget exceeded", line=self.line)
@@ -194,13 +226,16 @@ class _Session:
       )
     self.emit("call", fn="postcondition", args=[_arg_text(value) for value in resolved])
     if not self.api._postcondition(name, resolved):
+      self._check_cancel()
       self.emit("result", fn="postcondition", ok=False, message=failure.message)
       repeated = RobotFailure("postcondition", failure.message, failure.call, self.line)
       return self._recover(repeated, lambda: self._postcondition_retry(name, args, repeated))
+    self._check_cancel()
     self.emit("result", fn="postcondition", ok=True, message="")
     return None
 
   def _retry_call(self, name: str, args: tuple, kwargs: dict):
+    self._check_cancel()
     try:
       resolved = tuple(self._resolve(value) for value in args)
     except RobotFailure as failure:
@@ -209,6 +244,7 @@ class _Session:
     return self.call(name, *resolved, **kwargs)
 
   def call(self, name: str, *args, **kwargs):
+    self._check_cancel()
     self.budget.calls -= 1
     if self.budget.calls < 0:
       raise RobotFailure("other", "call budget exceeded", call=name, line=self.line)
@@ -219,6 +255,7 @@ class _Session:
     try:
       result = method(*args, **kwargs)
     except RobotFailure as failure:
+      self._check_cancel()
       # A step-budget failure (from a verify lambda) is final: Python also unsets the trace after it raises.
       if self.budget.steps < 0:
         raise
@@ -232,6 +269,7 @@ class _Session:
       else:
         retry = lambda: self._retry_call(name, args, kwargs)
       return self._recover(failure, retry)
+    self._check_cancel()
     self.emit("result", fn=name, ok=True, message="")
     if name == "report":
       self.emit("report", text=str(args[0]))
@@ -257,15 +295,28 @@ class _Session:
       sys.settrace(previous)
 
 
-def dry_run(source: str, api: RobotAPI, log=lambda event: None, budget: Budget | None = None) -> str | None:
+def dry_run(
+    source: str,
+    api: RobotAPI,
+    log=lambda event: None,
+    budget: Budget | None = None,
+    cancel: threading.Event | None = None,
+) -> str | None:
   """Runs *source* on a FakeBackend copy of *api*'s scene; returns the error text, or None if it passed."""
   # Only the dry run's summary event is logged: its line/call events would mix with the real run's in the UI.
-  session = _Session(None, None, lambda event: None, replace(budget or Budget(), handoffs=0, patches=0), None)
+  session = _Session(
+    None, None, lambda event: None, replace(budget or Budget(), handoffs=0, patches=0), None, cancel, None,
+  )
   summary = lambda **fields: log({"t": time.time(), "kind": "dry_run", **fields})
   failure = None
   try:
-    session.api = RobotAPI(FakeBackend(api.backend.list_objects()))
+    session._check_cancel()
+    objects = api.backend.list_objects()
+    session._check_cancel()
+    session.api = RobotAPI(FakeBackend(objects))
     session.execute(source)
+  except _Stopped:
+    raise
   except RobotFailure as error:
     failure = error
   except Exception as error:
@@ -291,53 +342,66 @@ def run(
     log=lambda event: None,
     budget: Budget | None = None,
     ask: Callable[[str], str] | None = None,
+    cancel: threading.Event | None = None,
+    approve: Callable[[str, str], tuple[bool, str]] | None = None,
 ) -> RunResult:
   """Checks, dry-runs, and executes a program with budgeted recovery."""
   remaining = replace(budget or Budget())
   report_start = len(api.report_lines)
-  session = _Session(api, agent, log, remaining, ask)
+  session = _Session(api, agent, log, remaining, ask, cancel, approve)
   current = source
   pending_patch = None
   error = None
   ok = False
-  while True:
-    problems = check(current)
-    session.emit("check", problems=problems)
-    if problems:
-      error = "check: " + "; ".join(problems)
+  try:
+    while True:
+      session._check_cancel()
+      problems = check(current)
+      session.emit("check", problems=problems)
+      if problems:
+        error = "check: " + "; ".join(problems)
+        if pending_patch:
+          pending_patch["outcome"] = "failed"
+        break
+      dry_error = dry_run(current, api, session.log, remaining, cancel=cancel)
+      session._check_cancel()
+      if dry_error:
+        error = "dry run: " + dry_error
+        if pending_patch:
+          pending_patch["outcome"] = "failed"
+        break
+      try:
+        session.execute(current)
+      except _Patch as patch:
+        current = patch.source
+        pending_patch = patch.entry
+        continue
+      except RobotFailure as failure:
+        session._check_cancel()
+        if failure.line is None:
+          failure.line = session.line
+        if _failure_dict(failure) not in session.failures:
+          session._record_failure(failure)
+        error = _error_text(failure)
+        if pending_patch:
+          pending_patch["outcome"] = "failed"
+        break
+      except _Stopped:
+        raise
+      except Exception as exception:
+        session._check_cancel()
+        error = f"other: {exception}"
+        if pending_patch:
+          pending_patch["outcome"] = "failed"
+        break
+      session._check_cancel()
       if pending_patch:
-        pending_patch["outcome"] = "failed"
+        pending_patch["outcome"] = "resolved"
+      ok = True
       break
-    dry_error = dry_run(current, api, session.log, remaining)
-    if dry_error:
-      error = "dry run: " + dry_error
-      if pending_patch:
-        pending_patch["outcome"] = "failed"
-      break
-    try:
-      session.execute(current)
-    except _Patch as patch:
-      current = patch.source
-      pending_patch = patch.entry
-      continue
-    except RobotFailure as failure:
-      if failure.line is None:
-        failure.line = session.line
-      if _failure_dict(failure) not in session.failures:
-        session._record_failure(failure)
-      error = _error_text(failure)
-      if pending_patch:
-        pending_patch["outcome"] = "failed"
-      break
-    except Exception as exception:
-      error = f"other: {exception}"
-      if pending_patch:
-        pending_patch["outcome"] = "failed"
-      break
-    if pending_patch:
-      pending_patch["outcome"] = "resolved"
-    ok = True
-    break
+  except _Stopped:
+    ok = False
+    error = "stopped by the operator"
   result = RunResult(
     ok=ok,
     report=list(api.report_lines[report_start:]),
