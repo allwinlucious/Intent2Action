@@ -43,9 +43,10 @@ of 100 %); G1b merged into the base and a fresh adapter trained with a KL term (
 prompts, 4 samples each, verified rewards (plan-tier outcome of the strategy a sample reproduces; conflicting
 outcomes averaged). Mean reward by quarter 0.80 / 0.76 / 0.84 / 0.82 (stable, no rise). G8 writes **the identical
 program to G1b on all 250 held-out tasks**: 85 % [81-88] in the plan tier (G1b 86 %), 38/50 in Isaac (G1b 40/50).
-GRPO in this setting does not change the learned task-type → strategy map: within a group of four samples the
-model almost always writes the same strategy, so the group has no contrast to learn from (the reward signal needs
-sampling diversity that an SFT model this certain does not produce). (A first grading of G8 had 87 failures from one
+GRPO in this setting does not change the learned task-type → strategy map. In 203 of the 302 groups (67 %) all four
+samples earned the same reward, so those steps carry no learning signal; the remaining third did not move the policy
+within one epoch at this learning rate and KL weight. An SFT model this certain samples too little diversity for
+group-relative rewards; more samples per prompt, a higher temperature or fewer SFT epochs are the levers to try. (A first grading of G8 had 87 failures from one
 fleet container whose world service degraded — "UpdateTransform: Too many inaccurate links"; re-graded on fresh
 containers.)
 
