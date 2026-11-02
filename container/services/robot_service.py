@@ -489,7 +489,10 @@ class Robot:
       # obstruction fails it again.
       if error.code != grpc.StatusCode.DEADLINE_EXCEEDED or corrected or op.cancel.is_set():
         raise
-      log.warning("arm short of the trajectory end (%s); one corrective move", error.message)
+      log.warning("arm short of the trajectory end (%s); settling, then one corrective move", error.message)
+      # ICON accepts a trajectory only within 0.1 rad of its last setpoint; after a large lag the arm is further
+      # away, so the stop action first makes the arm's actual position the setpoint.
+      self.settle()
       return self.execute(op, [segment(api.Waypoint(joints=api.Joints(positions=end)), api.TCP)],
                           detail="correcting the arm to the trajectory end", corrected=True)
     return took, planned
@@ -526,6 +529,10 @@ class Robot:
     if state != "ENABLED":
       log.info("stop: ICON is %s (%s); no intrinsic.stop needed", state, reason)
       return
+    self.settle()
+
+  def settle(self) -> None:
+    """intrinsic.stop until the arm is settled: ICON's setpoint becomes where the arm actually is."""
     start = self.clock.now()
 
     def settled(done: bool) -> bool:
