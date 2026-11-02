@@ -111,6 +111,7 @@ class FrameWatcher:
   def __init__(self, directory: Path, fake: bool = False):
     self.directory = Path(directory)
     self.fake = fake
+    self._fake_image = None
     self.condition = threading.Condition()
     self.generation = 0
     self.jpeg = None
@@ -143,19 +144,10 @@ class FrameWatcher:
       self.condition.notify_all()
 
   def _fake_frame(self, tick: int):
-    image = np.zeros((720, 1120, 3), dtype=np.uint8)
-    image[:] = (22, 24, 28)
-    cv2.rectangle(image, (80, 120), (1040, 650), (48, 52, 60), -1)
-    cv2.line(image, (80, 540), (1040, 540), (88, 93, 103), 3)
-    x = 180 + (tick * 13) % 760
-    cv2.circle(image, (x, 420), 42, (77, 198, 178), -1)
-    cv2.circle(image, (690, 460), 76, (45, 60, 145), 8)
-    stamp = datetime.now().strftime("%H:%M:%S")
-    cv2.putText(image, "SIMULATED ROBOT VIEW", (112, 180), cv2.FONT_HERSHEY_SIMPLEX,
-                0.8, (210, 215, 224), 2, cv2.LINE_AA)
-    cv2.putText(image, stamp, (850, 180), cv2.FONT_HERSHEY_SIMPLEX,
-                0.8, (210, 215, 224), 2, cv2.LINE_AA)
-    return image
+    # A real Isaac viewer frame (scene cubes_in_box), so fake mode looks like the product.
+    if self._fake_image is None:
+      self._fake_image = cv2.imread(str(Path(__file__).resolve().parent / "fake_view.jpg"))
+    return self._fake_image
 
   def _scan(self) -> Path | None:
     newest = None

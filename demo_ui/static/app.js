@@ -15,7 +15,9 @@ const state = {
   recordStream: null,
   recordBlob: null,
   cameraStream: null,
+  uploadUrl: null,
   pendingPatch: null,
+  pendingCallRow: null,
   eventSource: null,
 };
 
@@ -40,7 +42,12 @@ async function jsonRequest(path, body) {
 }
 
 function errorAt(selector, error = "") {
-  $(selector).textContent = error ? String(error.message || error) : "";
+  const target = $(selector);
+  target.textContent = error ? String(error.message || error) : "";
+  if (error) {
+    target.tabIndex = -1;
+    target.focus();
+  }
 }
 
 async function busy(button, label, work) {
@@ -52,14 +59,9 @@ async function busy(button, label, work) {
 }
 
 function setStage(name, status = "active", note = "") {
-  const order = ["read", "confirm", "write", "run", "check"];
-  const index = order.indexOf(name);
-  $$(".stages div[data-stage]").forEach((item) => {
-    const itemIndex = order.indexOf(item.dataset.stage);
-    item.className = itemIndex < index ? "done" : "";
-    if (item.dataset.stage === name) item.className = status;
-  });
-  $("#stage-note").textContent = note || (status === "failed" ? "Needs attention" : name === "run" ? "Executing the approved program" : "Ready");
+  void name;
+  void status;
+  void note;
 }
 
 function updateButtons() {
@@ -75,15 +77,21 @@ function invalidateProgram() {
   state.program = "";
   state.programId = null;
   renderProgram("");
-  $("#program-meta").textContent = "Waiting";
+  $("#program-section").hidden = true;
+  $("#program-meta").textContent = "";
   updateButtons();
 }
 
 function readableIntent(intent) {
+  if (intent.description) {
+    const sentence = intent.description.trim();
+    return `<p>${escapeHtml(sentence.charAt(0).toUpperCase() + sentence.slice(1))}${/[.!?]$/.test(sentence) ? "" : "."}</p>`;
+  }
   return (intent.rules || []).map((rule) => {
     const select = Object.values(rule.select || {}).join(" · ") || "objects";
     const target = Object.values(rule.target || {}).join(" · ") || "target";
-    return `<p>${escapeHtml(select)} <span>→ ${escapeHtml(rule.relation)} →</span> ${escapeHtml(target)}</p>`;
+    const relation = rule.relation === "on" ? "on top of" : "inside";
+    return `<p>${escapeHtml(select)} <span>goes ${relation}</span> ${escapeHtml(target)}.</p>`;
   }).join("");
 }
 
@@ -91,8 +99,7 @@ function showReading(data, correction = "") {
   state.intent = data.intent;
   state.round = data.round || state.round + 1;
   state.confirmed = false;
-  $("#intent-empty").hidden = true;
-  $("#intent-content").hidden = false;
+  $("#understood-section").hidden = false;
   $("#seen-text").textContent = data.seen;
   $("#round-label").textContent = `Round ${state.round}`;
   $("#intent-readable").innerHTML = readableIntent(data.intent);
@@ -102,8 +109,8 @@ function showReading(data, correction = "") {
   $("#edit-intent-btn").textContent = "Edit JSON";
   const note = data.note || "";
   $("#note-display").hidden = !note;
-  $("#note-display").textContent = note ? `Note · ${note}` : "";
-  $("#read-frames").innerHTML = (data.frames || []).map((src, index) => `<img src="${src}" alt="Sampled clip frame ${index + 1}">`).join("");
+  $("#note-display").textContent = note;
+  $("#read-frames").innerHTML = (data.frames || []).map((src, index) => `<img src="${src}" alt="Sampled clip frame ${index + 1}" width="64" height="44">`).join("");
   if (correction) state.history.push(`round ${state.round}: ${correction}`);
   $("#intent-history").innerHTML = state.history.map((item) => `<div>${escapeHtml(item)}</div>`).join("");
   invalidateProgram();
@@ -111,19 +118,18 @@ function showReading(data, correction = "") {
 }
 
 function syntaxLine(line) {
-  let value = escapeHtml(line);
-  value = value.replace(/(&quot;.*?&quot;|&#39;.*?&#39;)/g, '<span class="tok-string">$1</span>');
-  value = value.replace(/\b(for|in|if|else|while|lambda|and|or|not|True|False|None)\b/g, '<span class="tok-key">$1</span>');
-  value = value.replace(/\b(find|find_all|pick|place|verify|report|inside|on_top|held)(?=\()/g, '<span class="tok-call">$1</span>');
-  return value || " ";
+  const marker = line.indexOf("#");
+  if (marker < 0) return escapeHtml(line) || " ";
+  return `${escapeHtml(line.slice(0, marker))}<span class="tok-comment">${escapeHtml(line.slice(marker))}</span>`;
 }
 
 function renderProgram(source, currentLine = null) {
   state.program = source || "";
   if (!source) {
-    $("#code-window").innerHTML = '<div class="code-empty">A checked program will appear after confirmation.</div>';
+    $("#code-window").innerHTML = "";
     return;
   }
+  $("#program-section").hidden = false;
   $("#code-window").innerHTML = source.replace(/\n$/, "").split("\n").map((line, index) => (
     `<div class="code-line ${currentLine === index + 1 ? "current" : ""}" data-line="${index + 1}"><span class="line-no">${index + 1}</span><span>${syntaxLine(line)}</span></div>`
   )).join("");
@@ -132,13 +138,12 @@ function renderProgram(source, currentLine = null) {
 
 function addLog(kind, text, result = "", extraClass = "") {
   const log = $("#call-log");
-  if (log.querySelector(".empty-state")) log.innerHTML = "";
   const row = document.createElement("div");
   row.className = `log-row ${extraClass}`;
   if (extraClass.includes("full")) {
     row.innerHTML = `<strong>${escapeHtml(kind)}</strong> · ${escapeHtml(text)}`;
   } else {
-    row.innerHTML = `<span class="time">${new Date().toLocaleTimeString([], {hour12: false, minute: "2-digit", second: "2-digit"})}</span><span>${escapeHtml(text)}</span><span class="result ${result === "✓" ? "ok" : result ? "fail" : ""}">${escapeHtml(result)}</span>`;
+    row.innerHTML = `<span>${escapeHtml(text)}</span><span class="result ${result === "✓" ? "ok" : result ? "fail" : ""}">${escapeHtml(result)}</span>`;
   }
   log.append(row);
   log.scrollTop = log.scrollHeight;
@@ -166,15 +171,17 @@ function lineDiff(oldSource, newSource) {
 function showApproval(data) {
   state.pendingPatch = data.patch;
   setStage("run", "active", "Waiting for you");
-  const diff = $("#patch-diff");
-  diff.hidden = false;
-  diff.innerHTML = `<div class="diff-line">Proposed patch · ${escapeHtml(data.reason || "")}</div>` + lineDiff(state.program, data.patch).map(([mark, line]) => (
+  $("#program-section").hidden = false;
+  $("#waiting-block").hidden = false;
+  $("#waiting-label").hidden = false;
+  $("#waiting-content").innerHTML = `<p class="waiting-reason">${escapeHtml(data.reason || "Patch approval requested")}</p><div class="diff">` + lineDiff(state.program, data.patch).map(([mark, line]) => (
     `<div class="diff-line ${mark === "+" ? "add" : mark === "−" ? "remove" : ""}">${mark} ${escapeHtml(line)}</div>`
-  )).join("") + `<div class="diff-actions"><input id="decline-note" aria-label="Optional decline note" placeholder="Optional note"><button class="danger" id="decline-patch">Decline</button><button class="primary" id="approve-patch">Approve patch</button></div>`;
+  )).join("") + `</div><div class="waiting-form"><label class="sr-only" for="decline-note">Optional note</label><input id="decline-note" name="decline-note" autocomplete="off" placeholder="Optional note…"><button class="outline-button" type="button" id="decline-patch">Decline</button><button class="outline-button" type="button" id="approve-patch">Approve</button></div>`;
   const submit = async (approved) => {
     try {
       await jsonRequest("/api/approve", {run_id: data.run_id, question_id: data.question_id, approved, note: $("#decline-note").value});
-      diff.hidden = true;
+      clearWaiting();
+      if (!approved) state.pendingPatch = null;
       addLog("PATCH", approved ? "Approved by operator" : "Declined by operator", "", "full");
     } catch (error) { errorAt("#program-error", error); }
   };
@@ -182,11 +189,40 @@ function showApproval(data) {
   $("#decline-patch").addEventListener("click", () => submit(false));
 }
 
+function clearWaiting() {
+  $("#waiting-block").hidden = true;
+  $("#waiting-content").innerHTML = "";
+  $("#waiting-label").hidden = true;
+}
+
+function showQuestion(data) {
+  $("#program-section").hidden = false;
+  $("#waiting-block").hidden = false;
+  $("#waiting-label").hidden = false;
+  $("#waiting-content").innerHTML = `<p class="waiting-reason">${escapeHtml(data.text)}</p><div class="waiting-form"><label class="sr-only" for="question-answer">Answer</label><input id="question-answer" name="question-answer" autocomplete="off" placeholder="Your answer…"><button class="outline-button" type="button" id="send-answer">Send</button></div>`;
+  $("#send-answer").addEventListener("click", async () => {
+    try {
+      const text = $("#question-answer").value;
+      await jsonRequest("/api/answer", {run_id: data.run_id, question_id: data.question_id, text});
+      clearWaiting();
+      addLog("QUESTION", `${data.text} — ${text}`, "", "full");
+    } catch (error) { errorAt("#program-error", error); }
+  });
+}
+
 function handleRuntime(event) {
   const data = JSON.parse(event.data);
   if (data.kind === "line") renderProgram(state.program, data.line);
-  else if (data.kind === "call") addLog("CALL", `${data.fn}(${(data.args || []).join(", ")})`);
-  else if (data.kind === "result") addLog("RESULT", data.fn, data.ok ? "✓" : `✗ ${data.message || "failed"}`);
+  else if (data.kind === "call") state.pendingCallRow = addLog("CALL", `${data.fn}(${(data.args || []).map((arg) => typeof arg === "string" ? arg : JSON.stringify(arg)).join(", ")})`);
+  else if (data.kind === "result") {
+    const value = data.ok ? `✓${data.message ? ` ${data.message}` : ""}` : `✗ ${data.message || "failed"}`;
+    if (state.pendingCallRow) {
+      const result = state.pendingCallRow.querySelector(".result");
+      result.className = `result ${data.ok ? "ok" : "fail"}`;
+      result.textContent = value;
+      state.pendingCallRow = null;
+    } else addLog("RESULT", data.fn, value);
+  }
   else if (["handoff", "failure", "report", "decision", "dry_run", "check"].includes(data.kind)) addLog(data.kind.toUpperCase(), data.message || data.text || data.reason || (data.ok === false ? data.error : "checked"), "", "full");
   else if (data.kind === "patch" && data.accepted && state.pendingPatch) { renderProgram(state.pendingPatch); state.pendingPatch = null; }
   else if (data.kind === "done" && !data.ok) addLog("DONE", data.error || "Run failed", "", "full");
@@ -195,18 +231,21 @@ function handleRuntime(event) {
 function renderFinal(data) {
   state.running = false;
   state.runId = null;
+  state.pendingPatch = null;
+  clearWaiting();
   $("#run-state").textContent = data.ok ? "Complete" : "Stopped";
   $("#verdict").className = `verdict ${data.ok ? "pass" : "fail"}`;
-  $("#verdict").textContent = data.ok ? "✓ Passed" : "✗ Failed";
+  const reason = data.error || data.rules?.summary || "Run did not complete";
+  $("#verdict").textContent = data.ok ? "Passed ✓" : `Failed ✗ — ${reason}`;
   if (!data.rules) {
-    $("#result-body").innerHTML = `<p class="result-summary">${escapeHtml(data.error || (data.ok ? "Program completed in fake mode." : "Run did not complete."))}</p>`;
+    $("#result-body").innerHTML = "";
   } else {
     const rows = Object.entries(data.rules.per_object || {}).map(([id, status]) => {
       const object = state.objects[id] || {};
       const ok = status === "ok";
       return `<div class="check-row"><span class="check-mark ${ok ? "pass" : "fail"}">${ok ? "✓" : "✗"}</span><span class="check-object">${escapeHtml(id)}<small>${escapeHtml([object.color, object.category].filter(Boolean).join(" · "))}</small></span><span class="check-status">${escapeHtml(status)}</span></div>`;
     }).join("");
-    $("#result-body").innerHTML = `<p class="result-summary">${escapeHtml(data.rules.summary)}</p>${rows}`;
+    $("#result-body").innerHTML = rows;
   }
   setStage("check", data.ok ? "done" : "failed", data.error || (data.ok ? "All checks complete" : "Run failed"));
   updateButtons();
@@ -224,12 +263,7 @@ function connectEvents() {
   source.addEventListener("question", (event) => {
     const data = JSON.parse(event.data);
     setStage("run", "active", "Waiting for you");
-    const row = addLog("QUESTION", data.text, "", "full question");
-    row.innerHTML += '<div><input aria-label="Answer" placeholder="Type an answer"><button class="primary">Send</button></div>';
-    row.querySelector("button").addEventListener("click", async () => {
-      try { await jsonRequest("/api/answer", {run_id: data.run_id, question_id: data.question_id, text: row.querySelector("input").value}); row.querySelector("div").remove(); }
-      catch (error) { errorAt("#program-error", error); }
-    });
+    showQuestion(data);
   });
   source.addEventListener("approval", (event) => showApproval(JSON.parse(event.data)));
   source.addEventListener("final", (event) => { renderFinal(JSON.parse(event.data)); source.close(); });
@@ -252,8 +286,7 @@ async function loadScene(button = $("#load-scene-btn")) {
     state.intent = null;
     state.history = [];
     state.confirmed = false;
-    $("#intent-content").hidden = true;
-    $("#intent-empty").hidden = false;
+    $("#understood-section").hidden = true;
     invalidateProgram();
     setStage("read", "active", "Scene ready");
   });
@@ -299,10 +332,14 @@ async function writeProgram(button) {
   } catch (error) { errorAt("#intent-error", error); setStage("write", "failed", error.message); }
 }
 
-$$('[data-tab]').forEach((button) => button.addEventListener("click", async () => {
-  $$('[data-tab]').forEach((item) => item.classList.toggle("active", item === button));
-  $$(".tab").forEach((item) => item.classList.toggle("active", item.id === `tab-${button.dataset.tab}`));
-  if (button.dataset.tab === "record" && !state.recordStream) {
+$$('[data-input]').forEach((button) => button.addEventListener("click", async () => {
+  const target = `#clip-${button.dataset.input}`;
+  const opening = $(target).hidden;
+  $$(".clip-input").forEach((item) => { item.hidden = true; });
+  $$("[data-input]").forEach((item) => item.classList.remove("active"));
+  $(target).hidden = !opening;
+  button.classList.toggle("active", opening);
+  if (opening && button.dataset.input === "record" && !state.recordStream) {
     try { state.recordStream = await navigator.mediaDevices.getUserMedia({video: true, audio: false}); $("#record-preview").srcObject = state.recordStream; await $("#record-preview").play(); }
     catch (error) { errorAt("#task-error", error); }
   }
@@ -338,8 +375,12 @@ $("#send-record-btn").addEventListener("click", () => readClip(state.recordBlob,
 
 $("#clip-file").addEventListener("change", () => {
   const file = $("#clip-file").files[0];
-  $("#file-name").textContent = file?.name || "No clip selected";
+  $("#file-name").textContent = file?.name || "";
   $("#send-upload-btn").disabled = !file;
+  if (state.uploadUrl) URL.revokeObjectURL(state.uploadUrl);
+  state.uploadUrl = file ? URL.createObjectURL(file) : null;
+  $("#upload-preview").hidden = !file;
+  $("#upload-preview").src = state.uploadUrl || "";
 });
 $("#send-upload-btn").addEventListener("click", () => readClip($("#clip-file").files[0], $("#upload-note").value, $("#send-upload-btn")));
 
@@ -369,11 +410,12 @@ $("#run-btn").addEventListener("click", async () => {
     const data = await jsonRequest("/api/run", {program_id: state.programId});
     state.runId = data.run_id;
     state.running = true;
+    state.pendingCallRow = null;
     $("#run-state").textContent = "Running";
     $("#call-log").innerHTML = "";
-    $("#result-body").innerHTML = '<div class="empty-state">Checking the live run…</div>';
-    $("#verdict").className = "verdict pending";
-    $("#verdict").textContent = "Running";
+    $("#result-body").innerHTML = "";
+    $("#verdict").className = "verdict";
+    $("#verdict").textContent = "";
     setStage("run", "active", "Executing the approved program");
     updateButtons();
     connectEvents();
@@ -399,21 +441,19 @@ $$('[data-source]').forEach((button) => button.addEventListener("click", async (
 async function pollStatus() {
   try {
     const data = await request("/api/status");
-    [["#robot-status", "Robot", data.robot], ["#model-status", "Model", data.model]].forEach(([selector, label, value]) => {
-      const item = $(selector);
-      item.className = `chip ${value.status}`;
-      item.innerHTML = `<i></i>${label} · ${value.status}`;
-      item.title = value.message || "";
-    });
+    const problems = [];
+    if (data.robot.status === "error") problems.push("Robot offline");
+    if (data.model.status === "error") problems.push("Model unreachable");
+    $("#system-status").textContent = problems.join(" · ");
+    $("#system-status").title = [data.robot.message, data.model.message].filter(Boolean).join(" · ");
     const fresh = data.frames !== null && data.frames <= 2;
-    $("#frame-status").className = `chip ${fresh ? "ok" : "error"}`;
-    $("#frame-status").innerHTML = `<i></i>Sim view · ${fresh ? "live" : "waiting"}`;
-    $("#live-dot").className = `live ${fresh ? "ok" : "error"}`;
-    $("#run-state").textContent = data.run[0].toUpperCase() + data.run.slice(1);
-  } catch (_) { $("#robot-status").className = "chip error"; }
+    $("#live-dot").className = `feed-dot ${fresh ? "fresh" : ""}`;
+    $("#live-dot").setAttribute("aria-label", fresh ? "Feed current" : "Feed stale");
+    $("#waiting-label").hidden = data.run !== "waiting";
+    $("#run-state").textContent = data.run === "idle" ? "" : data.run[0].toUpperCase() + data.run.slice(1);
+  } catch (_) { $("#system-status").textContent = "Status unavailable"; }
 }
 
-setInterval(() => { $("#view-time").textContent = new Date().toLocaleTimeString([], {hour12: false}); }, 1000);
 setInterval(pollStatus, 2000);
 loadScenes();
 pollStatus();
