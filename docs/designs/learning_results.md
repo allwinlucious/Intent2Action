@@ -7,6 +7,34 @@ Generation follows the model cookbook's adapter evaluation: transformers + PEFT 
 no adapter), greedy, one attempt, the product's writer prompt. 95 % Wilson intervals in brackets.
 
 
+## Findings and limitations (summary)
+
+Findings:
+1. SFT on the plan tier's verdicts (the most reliable strategy per task) lifts Glimmer from 61 % to **86 %**, equal to
+   the best fixed strategy per family (84 %).
+2. What it learned is a mapping from task type to strategy, not per-scene choice: the oracle (91 %) is not reached,
+   DPO learns the preference without a task gain, and in GRPO two thirds of the sample groups carry no reward signal.
+3. A held-out family gains only once a similar family is trained (51 % → 82 %).
+4. Training on the model's own successes brings its naive listed-order habit back (G2 69 %, G2b 74 %).
+5. Label consistency matters: recovery rows that contradict the program rows flip a habit (G1c stacking).
+6. In Isaac physics the gain is smaller (G1b 41/50 vs G0 34/50, docs-level 35/50); most remaining failures are
+   grasp and reach limits that no program fixes. Plan tier and physics agree on 86 % of G1b's programs.
+7. As recovery agent, the fine-tuned model rescues 9/20 tasks, the base model 4/20.
+
+Limitations (scope set by the time available):
+- Synthetic tabletop tasks only: cubes, boxes and plates in five generated families; no real robot, no clutter
+  from real scenes, no perception noise (the program gets the true object list).
+- One base model (Glimmer) and parameter-efficient methods only; full fine-tuning was not run.
+- Physics evaluation covers 50 tasks (10 per family): the G1b vs G0 difference is a trend, not tested for
+  significance. Plan-tier results (250 tasks, 3 runs, bootstrap intervals) are the main evidence.
+- Live recovery covers 20 tasks, one run each.
+- The plan tier samples (~10 % of tasks flip between identical runs); 3 runs reduce but do not remove this noise.
+- Learning stays at the strategy level (which order to pick and place in); grasp choice and motion are left to the
+  robot stack, so the failures they cause are out of reach of the model.
+- GRPO and DPO were run once each with one setting; their lack of gain is shown for this data, not in general.
+- The G4 physics labels were made before the support-collision fix.
+- Plus the open items listed at the end of the code-review corrections below.
+
 ## Robot fix found by the review, measured in physics (2026-11-02, night)
 
 The review found that a held object's collisions with **its original support stayed disabled until placement**, so
@@ -293,6 +321,4 @@ for G4 (training on Isaac-verified episodes).
 
 ## Pending
 
-Recovery examples regenerated with the most-reliable-strategy labels (then G1c again); live-recovery evaluation
-(the model as recovery agent); G4 on Isaac-verified episodes; repeat the key versions with a second training seed;
-videos (G0 vs G1b on the same layout).
+Report charts; paper draft (with the limitations above).
