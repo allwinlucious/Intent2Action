@@ -25,7 +25,7 @@ LOOKS = "/World/Looks"
 FINISH = {"cube": (None, 0.28, 0.0), "box": (None, 0.55, 0.0), "carton": (None, 0.7, 0.0),
           "table": ((0.78, 0.79, 0.81), 0.3, 1.0)}
 FLOOR_COLOR = (0.03, 0.03, 0.035)
-EYE, TARGET = [1.45, 1.0, 0.85], [0.42, 0.0, 0.18]  # closer and lower: the whole arm, the work area large in frame
+EYE, TARGET = [1.6, 1.05, 1.05], [0.32, 0.0, 0.3]  # closer and lower: the whole arm, the work area large in frame
 
 
 
@@ -47,6 +47,8 @@ def apply(stage, asset_root: str) -> None:
   dome.CreateTextureFileAttr().Set(Sdf.AssetPath(f"{asset_root}/{HDRI}"))
   dome.CreateTextureFormatAttr().Set(UsdLux.Tokens.latlong)
   dome.GetIntensityAttr().Set(140.0)  # reflections for the steel, no visible backdrop
+  # RTX: the dome still lights and reflects, but the camera sees black behind the scene.
+  dome.GetPrim().CreateAttribute("visibleInPrimaryRay", Sdf.ValueTypeNames.Bool).Set(False)
   sun = UsdLux.DistantLight(stage.GetPrimAtPath("/World/lights/sun"))
   sun.GetIntensityAttr().Set(0.0)
   key = UsdLux.RectLight.Define(stage, "/World/lights/key")  # a softbox above the robot and table, facing down

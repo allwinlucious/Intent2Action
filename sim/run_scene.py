@@ -261,6 +261,12 @@ def _save_viewer_frame(force: bool = False) -> None:
   from omni.kit.viewport.utility import capture_viewport_to_file  # pylint: disable=g-import-not-at-top
   from omni.kit.viewport.utility import get_active_viewport  # pylint: disable=g-import-not-at-top
 
+  if PRETTY and _frame_state["index"] == 3:
+    # The viewport resets its camera after start-up; set the video framing again once it is rendering.
+    from isaacsim.core.utils.viewports import set_camera_view  # pylint: disable=g-import-not-at-top
+    from sim import pretty  # pylint: disable=g-import-not-at-top
+
+    set_camera_view(eye=pretty.EYE, target=pretty.TARGET)
   path = os.path.join(GUI_FRAMES, f"frame_{_frame_state['index']:05d}.png")
   capture_viewport_to_file(get_active_viewport(), path)
   _frame_state["index"] += 1
