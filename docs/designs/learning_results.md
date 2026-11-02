@@ -18,6 +18,8 @@ move after a stall now settles the arm first (ICON accepts a trajectory only nea
 - `pickplace_check` all pass; `program_check` 8/9 (one place started with the held cube touching another cube; to
   investigate).
 - G1b on the 50 held-out Isaac tasks: **41/50 (82 %)** (before the fix 40/50); plan/physics agreement 86 %.
+- Same 50 tasks with the fixed robot: docs-level program **35/50**, G0 **34/50**, G1b **41/50**
+  (stacking 6 / 6 / 8, cluster 5 / 5 / 8). Fine-tuning's gain holds in physics, smaller than in the plan tier.
 The physics labels for G4 were measured before this fix, so G4's stacking relabelling was based on the bug.
 
 ## Corrections after an independent code review (2026-11-01, evening)
