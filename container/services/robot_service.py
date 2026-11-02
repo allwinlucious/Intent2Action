@@ -124,6 +124,7 @@ CAPTURE_SETTLE_S = 0.2
 SYNC_TOLERANCE_RAD = 1e-4
 SYNC_POLL_S = 0.02
 SYNC_TIMEOUT_S = 2.0
+ARM_SYNC_TOLERANCE_RAD = 1e-3  # world arm vs sensed after a move (~1 mm at the hand; the arm may still creep)
 # Planner codes that reject a calibration pose (unreachable, no plan); anything else fails the calibration.
 POSE_REJECTED_CODES = (grpc.StatusCode.ABORTED, grpc.StatusCode.NOT_FOUND, grpc.StatusCode.INVALID_ARGUMENT)
 # Pick and Place (phase_v1.md decision 6): one planned attempt each, no retries.
@@ -653,6 +654,21 @@ class Robot:
                        f"{name!r} in world is {error * 1e3:.0f} mm from its true pose {OBJECT_WAIT_S:.0f} s after detaching")
       time.sleep(0.05)
 
+  def wait_arm_synced(self) -> None:
+    """Waits until scene_sync has put the world's arm at ICON's sensed joints. A held object's world pose follows
+    the world's arm, so checking it against its supports earlier sees it still at the grasp (in the table)."""
+    if not self.mirror_world:
+      return
+    deadline = time.monotonic() + OBJECT_WAIT_S
+    while True:
+      error = max(abs(a - b) for a, b in zip(self.world.joints(ROBOT), self.icon.arm_joints(), strict=True))
+      if error <= ARM_SYNC_TOLERANCE_RAD:
+        return
+      if time.monotonic() > deadline:
+        raise ApiError(grpc.StatusCode.DEADLINE_EXCEEDED,
+                       f"the world's arm is {error:.4f} rad from the sensed joints {OBJECT_WAIT_S:.0f} s after the move")
+      time.sleep(SYNC_POLL_S)
+
   def held(self) -> list[str]:
     """Scene objects attached to the robot."""
     return [name for name in self.world.attached() if name not in NOT_SCENE_OBJECTS]
@@ -1079,6 +1095,7 @@ class RobotService(api_grpc.RobotServiceServicer):
         lift.CopyFrom(plan.grasp)
         lift.z += PICK_LIFT_M
         self.r.move(op, lift, api.LINEAR, "lifting")
+        self.r.wait_arm_synced()
         self.r.world.lifted(object_id)
       except ApiError as error:
         log.warning("pick object=%s target=%s status=%s duration_s=%.3f message=%s",

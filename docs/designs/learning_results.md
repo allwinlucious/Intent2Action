@@ -15,8 +15,9 @@ the held cube hit the table and the arm jammed. Fixed (supports collide again ri
 move after a stall now settles the arm first (ICON accepts a trajectory only near its last setpoint).
 - The 19 stacking training tasks whose label failed in physics: **16/19 now succeed** (before: 0/19). The other 3
   fail cleanly: the arm does not settle even after a stop (a real obstruction).
-- `pickplace_check` all pass; `program_check` 8/9 (one place started with the held cube touching another cube; to
-  investigate).
+- `pickplace_check` all pass; `program_check` **9/9**. Its one failure before was a race the bug had hidden: right
+  after the lift the world model's arm was still at the grasp, so the held cube looked inside the table. Pick now
+  waits for the world's arm to match the sensed joints before supports collide again.
 - G1b on the 50 held-out Isaac tasks: **41/50 (82 %)** (before the fix 40/50); plan/physics agreement 86 %.
 - Same 50 tasks with the fixed robot: docs-level program **35/50**, G0 **34/50**, G1b **41/50**
   (stacking 6 / 6 / 8, cluster 5 / 5 / 8). Fine-tuning's gain holds in physics, smaller than in the plan tier.
