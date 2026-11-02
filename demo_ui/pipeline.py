@@ -12,6 +12,7 @@ import uuid
 from google.protobuf import empty_pb2
 
 from learn import families
+from program_runtime.agent import ProgramWriter
 from program_runtime.api import RobotAPI
 from program_runtime.rules import check_intent, truth_snapshot
 from program_runtime.rules import validate_intent
@@ -66,8 +67,11 @@ class Pipeline:
       truth=truth_snapshot,
       checker=check_intent,
       runner=runtime_run,
+      untrained_model: str | None = None,
   ):
     self.backend = backend
+    # The writer for the side-by-side comparison: the same endpoint, the base model without the fine-tuning.
+    self.untrained_model = untrained_model
     self.api = RobotAPI(backend)
     self.reader = reader
     self.writer = writer
@@ -291,9 +295,14 @@ class Pipeline:
     self._attempt_record("clarification", {"correction": correction}, output, attempt_id)
     return output
 
-  def write(self, intent: dict, confirm: bool) -> dict:
+  def write(self, intent: dict, confirm: bool, writer: str = "fine_tuned") -> dict:
     if confirm is not True:
       raise PipelineError(400, "confirm must be true")
+    if writer not in ("fine_tuned", "untrained"):
+      raise PipelineError(400, "writer must be fine_tuned or untrained")
+    program_writer = self.writer
+    if writer == "untrained":
+      program_writer = ProgramWriter(self.writer.client, model=self.untrained_model)
     problems = validate_intent(intent)
     if problems:
       raise PipelineError(400, "intent: " + "; ".join(problems))
@@ -316,8 +325,8 @@ class Pipeline:
     self._attempt_record("confirm", {"intent": intent}, {"confirmed": True}, attempt_id)
     try:
       objects = self.backend.list_objects()
-      program = self._model_call(lambda: self.writer.write(intent, objects))
-      attempts = self.writer.last_attempts
+      program = self._model_call(lambda: program_writer.write(intent, objects))
+      attempts = program_writer.last_attempts
     except Exception as error:
       with self.lock:
         self._stage_trail("write", "failed", str(error))
@@ -330,7 +339,7 @@ class Pipeline:
       self.program_id = program_id
       self.program_revisions = revisions
       self._stage_trail("write", "done")
-    output = {"program": program, "program_id": program_id, "attempts": attempts}
+    output = {"program": program, "program_id": program_id, "attempts": attempts, "writer": writer}
     self._attempt_record("rewrite" if was_rewrite else "program", {"intent": intent}, output, attempt_id)
     return output
 

@@ -363,7 +363,7 @@ class Handler(BaseHTTPRequestHandler):
       problems = validate_intent(intent)
       if problems:
         raise PipelineError(400, "intent: " + "; ".join(problems))
-      return self._json(200, pipeline.write(intent, body.get("confirm")))
+      return self._json(200, pipeline.write(intent, body.get("confirm"), body.get("writer", "fine_tuned")))
     if path == "/api/run":
       return self._json(200, {"run_id": pipeline.start_run(body.get("program_id"))})
     if path == "/api/answer":
@@ -472,7 +472,7 @@ def build_server(
     reader = IntentReader(model, model=reader_model)
     writer = ProgramWriter(model, model=writer_model)
     agent = RecoveryAgent(model, None, Tools(DESCRIPTOR_SET), model=recovery_model)
-    pipeline = Pipeline(backend, reader, writer, agent, fake=True)
+    pipeline = Pipeline(backend, reader, writer, agent, fake=True, untrained_model=reader_model)
   else:
     load_dotenv(ROOT / ".env")
     model = ChatClient()
@@ -487,6 +487,7 @@ def build_server(
     agent = RecoveryAgent(model, robot_stub, Tools(DESCRIPTOR_SET), model=recovery_model)
     pipeline = Pipeline(
       backend, reader, writer, agent, fake=False, robot_stub=robot_stub, sim_stub=sim_stub,
+      untrained_model=reader_model,
     )
   return DemoHTTPServer(port, pipeline, FrameWatcher(frames, fake=fake))
 

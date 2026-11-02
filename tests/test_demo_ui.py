@@ -66,7 +66,7 @@ def typed_program(base, text="put all the cubes in the red box"):
   return reading, written
 
 
-def test_page_static_files_and_fourteen_scenes(demo):
+def test_page_static_files_and_fifteen_scenes(demo):
   base, _ = demo
   for path, content_type in (("/", "text/html"), ("/app.js", "text/javascript"),
                              ("/style.css", "text/css")):
@@ -74,7 +74,7 @@ def test_page_static_files_and_fourteen_scenes(demo):
     assert status == 200 and headers.get_content_type() == content_type and body
   _, _, body = get(base, "/api/scenes")
   scenes = json.loads(body)
-  assert len(scenes) == 14
+  assert len(scenes) == 15
   assert set(scenes[0]) == {"id", "label", "request"}
 
 
@@ -309,3 +309,17 @@ def test_app_run_endpoint_only_occurs_in_run_click_handler():
   assert source.count('jsonRequest("/api/run"') == 1
   handler = source.index('$("#run-btn").addEventListener("click"')
   assert source.index('jsonRequest("/api/run"') > handler
+
+
+def test_writer_switch_routes_to_the_untrained_model(demo):
+  base, server = demo
+  client = server.pipeline.writer.client
+  models = []
+  original = client.chat
+  client.chat = lambda messages, *a, **k: (models.append(k.get("model")), original(messages, *a, **k))[1]
+  _, reading = post(base, "/api/read", {"text": "put all the cubes in the red box"})
+  _, written = post(base, "/api/write", {"intent": reading["intent"], "confirm": True, "writer": "untrained"})
+  assert written["writer"] == "untrained" and models[-1] == "G0"
+  _, written = post(base, "/api/write", {"intent": reading["intent"], "confirm": True})
+  assert written["writer"] == "fine_tuned" and models[-1] == "G1b"
+  assert post_error(base, "/api/write", {"intent": reading["intent"], "confirm": True, "writer": "big"})[0] == 400

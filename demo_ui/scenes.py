@@ -33,7 +33,11 @@ HELD_OUT = (
   ("stacking", 100004),
   ("reach", 100007),
   ("mixed", 100043),
+  # Tower unload: the base model picks the bottom cube first and fails (0/3 plan tier, Isaac); the fine-tuned
+  # model unstacks top-first and passes (3/3, Isaac). learning_results.md.
+  ("stacking", 100007),
 )
+LABELS = {("stacking", 100007): "Tower unload · held-out"}
 
 
 @dataclass(frozen=True)
@@ -86,7 +90,7 @@ def _held_out() -> list[Preset]:
     task = families.generate(family, seed)
     output.append(Preset(
       id=f"{family}:{seed}",
-      label=f"{family.title()} · held-out",
+      label=LABELS.get((family, seed), f"{family.title()} · held-out"),
       request=task.intent["description"],
       intent=task.intent,
       placements=task.placements,

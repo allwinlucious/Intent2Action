@@ -505,3 +505,6 @@ body.panel-only .sidebar {
 }
 body.panel-only .sidebar-scroll { padding-bottom: 104px; }
 body.panel-only .play-control { position: fixed; }
+
+.writer-choice { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
+.writer-choice select { width: auto; }

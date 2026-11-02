@@ -383,12 +383,13 @@ async function writeProgram(button) {
   updateButtons();
   try {
     setStage("write", "active", "Writing a checked program");
-    const data = await busy(button, "Writing…", () => jsonRequest("/api/write", {intent, confirm: true}));
+    const data = await busy(button, "Writing…", () => jsonRequest("/api/write", {intent, confirm: true, writer: $("#writer-select").value}));
     state.intent = intent;
     state.confirmed = true;
     state.programId = data.program_id;
     renderProgram(data.program);
-    $("#program-meta").textContent = `${data.attempts} attempt${data.attempts === 1 ? "" : "s"}`;
+    const by = data.writer === "untrained" ? "untrained model" : "fine-tuned model";
+    $("#program-meta").textContent = `${by} · ${data.attempts} attempt${data.attempts === 1 ? "" : "s"}`;
     setStage("run", "active", "Program ready — press Run");
   } catch (error) { errorAt("#intent-error", error); setStage("write", "failed", error.message); }
   finally { updateButtons(); }
