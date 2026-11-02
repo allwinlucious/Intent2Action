@@ -124,17 +124,22 @@ function invalidateProgram() {
   updateButtons();
 }
 
+// The rules exactly as the robot will enforce them (from the intent JSON, never the model's paraphrase).
+function phrase(filter, {target = false} = {}) {
+  const f = filter || {};
+  const words = [f.size, f.color].filter(Boolean);
+  const noun = f.category || (target ? "target" : "object");
+  if (target) return `the ${[...words, noun].join(" ")}`;
+  return words.length ? `${words.join(" ")} ${noun}s` : `every ${noun}`;
+}
+
 function readableIntent(intent) {
-  if (intent.description) {
-    const sentence = intent.description.trim();
-    return `<p>${escapeHtml(sentence.charAt(0).toUpperCase() + sentence.slice(1))}${/[.!?]$/.test(sentence) ? "" : "."}</p>`;
-  }
   return (intent.rules || []).map((rule) => {
-    const select = Object.values(rule.select || {}).join(" · ") || "objects";
-    const target = Object.values(rule.target || {}).join(" · ") || "target";
-    const relation = rule.relation === "on" ? "on top of" : "inside";
-    return `<p>${escapeHtml(select)} <span>goes ${relation}</span> ${escapeHtml(target)}.</p>`;
-  }).join("");
+    const subject = phrase(rule.select);
+    const relation = rule.relation === "on" ? "onto" : "into";
+    const text = `${subject.charAt(0).toUpperCase()}${subject.slice(1)} → ${relation} ${phrase(rule.target, {target: true})}`;
+    return `<p>${escapeHtml(text)}</p>`;
+  }).join("") + (intent.others === "stay" ? '<p class="seen">Everything else stays where it is.</p>' : "");
 }
 
 function showReading(data, correction = "") {
@@ -142,7 +147,10 @@ function showReading(data, correction = "") {
   state.round = data.round || state.round + 1;
   state.confirmed = false;
   $("#understood-section").hidden = false;
-  $("#seen-text").textContent = data.seen;
+  const fromClip = state.fromClip;
+  $("#understood-heading").textContent = fromClip ? "Understood" : "Rules";
+  $("#seen-text").textContent = fromClip ? data.seen : "";
+  $("#seen-text").hidden = !fromClip;
   $("#round-label").textContent = `Round ${state.round}`;
   $("#intent-readable").innerHTML = readableIntent(data.intent);
   $("#intent-json").value = JSON.stringify(data.intent, null, 2);
@@ -152,7 +160,7 @@ function showReading(data, correction = "") {
   const note = data.note || "";
   $("#note-display").hidden = !note;
   $("#note-display").textContent = note;
-  $("#read-frames").innerHTML = (data.frames || []).map((src, index) => `<img src="${src}" alt="Sampled clip frame ${index + 1}" width="64" height="44">`).join("");
+  if (data.frames || !fromClip) $("#read-frames").innerHTML = (data.frames || []).map((src, index) => `<img src="${src}" alt="Sampled clip frame ${index + 1}" width="64" height="44">`).join("");
   if (correction) state.history.push(`round ${state.round}: ${correction}`);
   $("#intent-history").innerHTML = state.history.map((item) => `<div>${escapeHtml(item)}</div>`).join("");
   invalidateProgram();
@@ -349,6 +357,7 @@ async function readText() {
   try {
     const data = await busy(button, "Reading…", () => jsonRequest("/api/read", {text: $("#task-text").value}));
     state.history = [];
+    state.fromClip = false;
     showReading(data);
   } catch (error) { errorAt("#task-error", error); setStage("read", "failed", error.message); }
 }
@@ -359,6 +368,7 @@ async function readClip(blob, note, button) {
     const type = blob.type || "video/webm";
     const data = await busy(button, "Reading…", () => request(`/api/read_clip?note=${encodeURIComponent(note)}`, {method: "POST", headers: {"Content-Type": type}, body: blob}));
     state.history = [];
+    state.fromClip = true;
     showReading(data);
   } catch (error) { errorAt("#task-error", error); setStage("read", "failed", error.message); }
 }
