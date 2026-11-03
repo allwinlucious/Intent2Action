@@ -66,6 +66,9 @@ OBJECTS = {
     "blue_box": (_open_box(0.25, 0.21, 0.05, 0.01, 0.01), True, None, (0.15, 0.25, 0.8)),
     # Push demo: a carton wider than the gripper opens (0.075 m) in every direction, so it can only be pushed.
     "big_carton": (_box(0.12, 0.12, 0.08), False, 0.40, (0.66, 0.50, 0.33)),
+    # The owner's red gift box (11 x 9 x 4 cm) at its proportions, scaled so its longest side (7 cm) fits the
+    # gripper; it is grasped across the 5.7 cm side.
+    "red_gift": (_box(0.07, 0.0573, 0.0255), False, 0.08, (0.72, 0.12, 0.12)),
     # A painted area: 2 mm thick, spawned 1.9 mm into the table so it is flush and a pushed carton slides over it.
     "target_zone": (_box(0.16, 0.16, 0.002), True, None, (0.20, 0.65, 0.30)),
 }
@@ -84,6 +87,7 @@ ATTRIBUTES = {
     "red_box": ("box", "red"),
     "blue_box": ("box", "blue"),
     "big_carton": ("carton", "brown"),
+    "red_gift": ("gift", "red"),
     "target_zone": ("zone", "green"),
 }
 # Static/dynamic friction where not build_catalog.py's default 0.5/0.4: the peg
