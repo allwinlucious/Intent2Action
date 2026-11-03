@@ -68,8 +68,8 @@ python learn/glimmer_job.py train --data G1d --run G1d
 *   **DPO:** `learn/dpo_data.py` then `learn/dpo_train.py`.
 *   **GRPO:** `learn/grpo_data.py` then `learn/grpo_train.py`.
 *   **The trained adapters:**
-    [G1b](https://huggingface.co/mewbot97/show-once-glimmer-programs) and
-    [G1d](https://huggingface.co/mewbot97/show-once-glimmer-recovery).
+    [G1b](https://huggingface.co/mewbot97/Intent2Action-glimmer-programs) and
+    [G1d](https://huggingface.co/mewbot97/Intent2Action-glimmer-recovery).
 
 ## 4. Held-out evaluation (planning simulator, 3 runs)
 

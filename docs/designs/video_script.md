@@ -97,7 +97,7 @@ recorded for the video. Shots marked *(to measure)* are filmed only if the measu
 ## 2:45–3:00 · Close
 
 *   **Visual:** the panel with ✓, then the repository link.
-*   **Narration:** "Show once, verify, approve, run. This isn't certified safety; a real cell still needs its own
+*   **Narration:** "Show it once, verify, approve, run. This isn't certified safety; a real cell still needs its own
     safety layer. But the model never moves anything on its own say-so."
 
 ## Shots and their status

@@ -1,8 +1,8 @@
-# intent-to-motion
+# Intent2Action
 
-[![CI](https://github.com/allwinlucious/intent-to-motion/actions/workflows/ci.yml/badge.svg)](https://github.com/allwinlucious/intent-to-motion/actions/workflows/ci.yml)
-[![Model: program writer](https://img.shields.io/badge/%F0%9F%A4%97%20model-program%20writer%20(G1b)-yellow)](https://huggingface.co/mewbot97/show-once-glimmer-programs)
-[![Model: recovery agent](https://img.shields.io/badge/%F0%9F%A4%97%20model-recovery%20agent%20(G1d)-yellow)](https://huggingface.co/mewbot97/show-once-glimmer-recovery)
+[![CI](https://github.com/allwinlucious/Intent2Action/actions/workflows/ci.yml/badge.svg)](https://github.com/allwinlucious/Intent2Action/actions/workflows/ci.yml)
+[![Model: program writer](https://img.shields.io/badge/%F0%9F%A4%97%20model-program%20writer%20(G1b)-yellow)](https://huggingface.co/mewbot97/Intent2Action-glimmer-programs)
+[![Model: recovery agent](https://img.shields.io/badge/%F0%9F%A4%97%20model-recovery%20agent%20(G1d)-yellow)](https://huggingface.co/mewbot97/Intent2Action-glimmer-recovery)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 **Show a robot a task once, as a short video, a sentence, or both. A fine-tuned open model turns it into explicit
@@ -50,9 +50,9 @@ cluster.
     limitations: [docs/designs/learning_results.md](docs/designs/learning_results.md).
 
 **Trained adapters on Hugging Face**, Apache-2.0, for `meta-models/Muse-Glimmer-30B`:
-*   [mewbot97/show-once-glimmer-recovery](https://huggingface.co/mewbot97/show-once-glimmer-recovery) (G1d): writes
+*   [mewbot97/Intent2Action-glimmer-recovery](https://huggingface.co/mewbot97/Intent2Action-glimmer-recovery) (G1d): writes
     programs and handles recovery. This is the model the demo uses.
-*   [mewbot97/show-once-glimmer-programs](https://huggingface.co/mewbot97/show-once-glimmer-programs) (G1b): the best
+*   [mewbot97/Intent2Action-glimmer-programs](https://huggingface.co/mewbot97/Intent2Action-glimmer-programs) (G1b): the best
     program writer.
 
 ## How it works
@@ -84,7 +84,7 @@ demo clip / sentence ──► reader (Glimmer, images + text; speech via Muse V
 ## Quick start (no GPU, no simulator)
 
 ```bash
-git clone https://github.com/allwinlucious/intent-to-motion && cd intent-to-motion
+git clone https://github.com/allwinlucious/Intent2Action && cd Intent2Action
 make setup          # .venv with requirements-dev.txt (Python 3.12)
 make test           # 334 unit tests, about 1 min
 make ui-fake        # demo panel with a fake robot and model: http://127.0.0.1:8765

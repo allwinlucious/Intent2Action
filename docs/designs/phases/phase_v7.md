@@ -219,7 +219,7 @@ rest. Use system fonts only, since there is no network.
         *   the page never calls `/api/run` except from the Run button's click handler. This is a code check:
             grep `app.js`.
 *   **Top bar:**
-    *   the title "Show once";
+    *   the title "Intent2Action";
     *   status chips from `/api/status`: robot, model, sim view;
     *   a Stop button, red, enabled during a run;
     *   a Reset button, which reloads the current scene.
