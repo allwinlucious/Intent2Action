@@ -33,13 +33,14 @@ def _cylinder(radius: float, height: float) -> trimesh.Trimesh:
   return mesh
 
 
-def _textured_box(x: float, y: float, z: float, faces_dir: Path) -> trimesh.Trimesh:
+def _textured_box(x: float, y: float, z: float, faces_dir: Path, top_name: str = "top.png",
+                  front_name: str = "front.png") -> trimesh.Trimesh:
   """A box (bottom-centre origin) with one UV region per face on a texture sheet composed from photos of the real
   object: faces_dir/top.png (seen from above, image top = +y) and front.png (the -y face). The back mirrors the
   front, the ends reuse a crop of it, the bottom is the face's plain colour."""
   from PIL import Image
-  top = Image.open(faces_dir / "top.png").convert("RGB")
-  front = Image.open(faces_dir / "front.png").convert("RGB")
+  top = Image.open(faces_dir / top_name).convert("RGB")
+  front = Image.open(faces_dir / front_name).convert("RGB")
   ppm = top.width / x  # pixels per metre on the sheet
   size = lambda a, b: (max(1, round(a * ppm)), max(1, round(b * ppm)))  # noqa: E731
   tw, th = size(x, y)
@@ -84,6 +85,15 @@ def _textured_box(x: float, y: float, z: float, faces_dir: Path) -> trimesh.Trim
   return mesh
 
 
+def _lidded_box(base, lid, faces_dir: Path) -> trimesh.Trimesh:
+  """A closed box with a slip-on lid as one solid: the base (x, y, height below the lid) and the lid (x, y,
+  height) stacked, each textured from its own photo faces (base_front.png; top.png and lid_side.png)."""
+  lower = _textured_box(*base, faces_dir, top_name="top.png", front_name="base_front.png")
+  upper = _textured_box(*lid, faces_dir, top_name="top.png", front_name="lid_side.png")
+  upper.apply_translation((0.0, 0.0, base[2]))
+  return trimesh.util.concatenate([lower, upper])
+
+
 def _hole_block() -> trimesh.Trimesh:
   block = _box(0.08, 0.08, 0.05)
   hole = trimesh.creation.cylinder(radius=0.011, height=0.04 + HOLE_OVERSHOOT_M)
@@ -120,6 +130,11 @@ OBJECTS = {
     # The owner's red gift box (11 x 9 x 4 cm) at its proportions, scaled so its longest side (7 cm) fits the
     # gripper; it is grasped across the 5.7 cm side.
     "red_gift": (_textured_box(0.07, 0.0573, 0.0255, OUT_DIR / "red_gift"), False, 0.08, (0.72, 0.12, 0.12)),
+    # The owner's green box at the same scale: base 12.5 x 8.5, lid 13 x 9 x 2, closed height 8 cm; the lid's skirt
+    # covers the base's top 2 cm, so the base shows 381.82 cm below the lid.
+    "green_gift": (_lidded_box((0.0795, 0.0541, 0.0382),
+                               (0.0827, 0.0573, 0.0127), OUT_DIR / "green_gift"),
+                   False, 0.15, (0.12, 0.2, 0.17)),
     # The owner's second gift box (white, reindeer and sleigh), the same size.
     "white_gift": (_textured_box(0.07, 0.0573, 0.0255, OUT_DIR / "white_gift"), False, 0.08, (0.92, 0.92, 0.92)),
     # A painted area: 2 mm thick, spawned 1.9 mm into the table so it is flush and a pushed carton slides over it.
@@ -142,6 +157,7 @@ ATTRIBUTES = {
     "big_carton": ("carton", "brown"),
     "red_gift": ("gift", "red"),
     "white_gift": ("gift", "white"),
+    "green_gift": ("gift", "green"),
     "target_zone": ("zone", "green"),
 }
 # Static/dynamic friction where not build_catalog.py's default 0.5/0.4: the peg
