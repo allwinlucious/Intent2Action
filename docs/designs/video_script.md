@@ -108,3 +108,18 @@ recorded for the video. Shots marked *(to measure)* are filmed only if the measu
 | 5 | Charts | To build from the results |
 | 6 | Push finale with approval | Physics proven; needs approval for model-issued motions and the live agent |
 | 7 | "What didn't work" table | To build from the results |
+
+## Wording for verification (use in the narration)
+
+*   "Verification is built in, not optional: every program is checked and dry-run before the robot moves, and the
+    agent cannot skip it."
+*   "Deterministic checks first: the result is verified against the simulator's ground truth, not graded by the
+    model itself."
+*   "A retry budget, then a person: recovery is limited, and every change to the plan needs a human sign-off."
+*   "The gates cost a little time on purpose: accuracy over speed."
+
+## Narration in demo clips (optional)
+
+A spoken instruction in a demo clip ("only the red ones") can be transcribed with Muse Voice Transcribe
+(`muse-voice-transcribe-1.0`, Meta Model API) and passed to the reader as the clip's note. The reader already takes a
+note (phase V3), so this is one API call before `read_clip`.
