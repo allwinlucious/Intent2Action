@@ -44,7 +44,7 @@ def _bind(stage, path: str, mat: OmniPBR, strength=UsdShade.Tokens.strongerThanD
 def _print_top(stage, path: str, dims, image: Path) -> None:
   """A printed top (assets/objects/<name>/top.png) as a textured quad just above the object's top face: visual only
   (no collision API), a child of the object so it moves with it. Image left-right runs along x, top along +y."""
-  hx, hy, z = dims[0] / 2, dims[1] / 2, dims[2] + 0.0003
+  hx, hy, z = dims[0] / 2, dims[1] / 2, dims[2] + 0.001  # clear of the top face: no depth fighting
   quad = UsdGeom.Mesh.Define(stage, f"{path}/top_print")
   quad.CreatePointsAttr([Gf.Vec3f(-hx, -hy, z), Gf.Vec3f(hx, -hy, z), Gf.Vec3f(hx, hy, z), Gf.Vec3f(-hx, hy, z)])
   quad.CreateFaceVertexCountsAttr([4])
