@@ -219,6 +219,7 @@ function lineDiff(oldSource, newSource) {
 }
 
 function showApproval(data) {
+  if (data.tool) return showMoveApproval(data);
   state.pendingPatch = data.patch;
   setStage("run", "active", "Waiting for you");
   $("#program-section").hidden = false;
@@ -233,6 +234,25 @@ function showApproval(data) {
       clearWaiting();
       if (!approved) state.pendingPatch = null;
       addLog("PATCH", approved ? "Approved by operator" : "Declined by operator", "", "full");
+    } catch (error) { errorAt("#program-error", error); }
+  };
+  $("#approve-patch").addEventListener("click", () => submit(true));
+  $("#decline-patch").addEventListener("click", () => submit(false));
+  revealWaiting();
+}
+
+function showMoveApproval(data) {
+  setStage("run", "active", "Waiting for you");
+  $("#program-section").hidden = false;
+  $("#waiting-block").hidden = false;
+  $("#waiting-label").hidden = false;
+  const call = `${data.tool}(${escapeHtml(JSON.stringify(data.args || {}))})`;
+  $("#waiting-content").innerHTML = `<p class="waiting-reason">${escapeHtml(data.reason)}</p><div class="diff"><div class="diff-line add">→ ${call}</div></div><div class="waiting-form"><label class="sr-only" for="decline-note">Optional note</label><input id="decline-note" name="decline-note" autocomplete="off" placeholder="Optional note…"><button class="outline-button" type="button" id="decline-patch">Decline</button><button class="outline-button" type="button" id="approve-patch">Approve move</button></div>`;
+  const submit = async (approved) => {
+    try {
+      await jsonRequest("/api/approve", {run_id: data.run_id, question_id: data.question_id, approved, note: $("#decline-note").value});
+      clearWaiting();
+      addLog("MOVE", `${data.tool}: ${approved ? "approved" : "declined"} by operator`, "", "full");
     } catch (error) { errorAt("#program-error", error); }
   };
   $("#approve-patch").addEventListener("click", () => submit(true));

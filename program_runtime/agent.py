@@ -204,6 +204,14 @@ def recovery_messages(context: dict) -> list[dict]:
   ]
 
 
+# Robot tools the agent may call without a person's approval: they only read or plan, or stop the robot. Every
+# other tool moves the robot or changes its state (tools added later too) and needs approval when a gate is set.
+UNGATED_TOOLS = frozenset({
+  "check_collisions", "compute_fk", "compute_ik", "get_operation", "get_state", "get_wrench", "is_gripping",
+  "list_objects", "plan_grasp", "plan_only", "wait_operation", "stop",
+})
+
+
 class RecoveryAgent:
   """Climbs the budgeted recovery ladder, optionally using robot tools first."""
 
@@ -212,6 +220,8 @@ class RecoveryAgent:
     self.stub = stub
     self.tools = tools
     self.model = model
+    # approve_tool(name, arguments) -> (approved, note): asked before every gated tool call; None runs them.
+    self.approve_tool = None
 
   def _specs(self) -> list[dict]:
     return tool_specs(self.tools)
@@ -227,6 +237,10 @@ class RecoveryAgent:
       return f"invalid arguments: {error}"
     if name not in names:
       return f"unknown tool: {name}"
+    if self.approve_tool is not None and name not in UNGATED_TOOLS:
+      approved, note = self.approve_tool(name, arguments)
+      if not approved:
+        return "declined by the operator" + (f": {note}" if note else "")
     result, status = server.invoke(self.tools, self.stub, name, arguments)
     text = "\n".join(item.text for item in result.content if hasattr(item, "text"))
     return text if status == "OK" else f"ERROR {status}: {text}"

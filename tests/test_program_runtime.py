@@ -1,4 +1,5 @@
 from dataclasses import replace
+from types import SimpleNamespace
 import json
 import math
 from pathlib import Path
@@ -493,3 +494,18 @@ def test_obj_equality_is_by_id():
 def test_decision_without_its_payload_is_invalid(decision):
   from program_runtime.agent import _parse_decision
   assert _parse_decision(decision)["reason"].startswith("invalid decision")
+
+
+def test_recovery_tool_gate_asks_before_moves_only(monkeypatch):
+  from mcp_server import server
+  from program_runtime.agent import RecoveryAgent, UNGATED_TOOLS
+  ran, asked = [], []
+  monkeypatch.setattr(server, "invoke", lambda tools, stub, name, args: (ran.append(name), (SimpleNamespace(content=[]), "OK"))[1])
+  agent = RecoveryAgent(None, None, None)
+  agent.approve_tool = lambda name, args: (asked.append(name), (name != "move_compliant", "too fast"))[1]
+  call = lambda name: {"function": {"name": name, "arguments": "{}"}}
+  names = {"list_objects", "move_to_pose", "move_compliant", "stop"}
+  assert agent._tool_text(call("list_objects"), names) == "" and asked == []
+  assert agent._tool_text(call("move_compliant"), names) == "declined by the operator: too fast"
+  assert agent._tool_text(call("move_to_pose"), names) == "" and asked == ["move_compliant", "move_to_pose"]
+  assert ran == ["list_objects", "move_to_pose"] and "stop" in UNGATED_TOOLS and "move_to_pose" not in UNGATED_TOOLS

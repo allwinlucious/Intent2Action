@@ -424,21 +424,25 @@ class Pipeline:
       return ""
     return "" if value is STOP_SENTINEL else str(value)
 
-  def _approve(self, state: RunState, patch: str, reason: str) -> tuple[bool, str]:
+  def _approve(self, state: RunState, patch: str | None, reason: str, tool: str | None = None,
+               args: dict | None = None) -> tuple[bool, str]:
+    """Waits for the operator on a recovery patch, or (with `tool`) on a robot move the model wants to make."""
     pending = Pending("approval", state.id, uuid.uuid4().hex)
     with self.lock:
       if state.cancel.is_set():
         return False, ""
       self.pending = pending
-    self._append(state, "approval", {
-      "patch": patch, "reason": reason, "run_id": state.id, "question_id": pending.question_id,
-    })
+    payload = {"patch": patch, "reason": reason, "run_id": state.id, "question_id": pending.question_id}
+    if tool is not None:
+      payload.update(tool=tool, args=args or {})
+    self._append(state, "approval", payload)
     value = pending.response.get()
     if value is STOP_SENTINEL:
       return False, ""
     approved, note = value
+    kind = "move" if tool is not None else "patch"
     self._attempt_record(
-      "patch approval" if approved else "patch decline",
+      f"{kind} approval" if approved else f"{kind} decline",
       {"run_id": state.id, "question_id": pending.question_id},
       {"approved": approved, "note": note},
       state.attempt_id,
@@ -454,6 +458,10 @@ class Pipeline:
       self._stage(state, "run", "start")
       if not self.fake:
         before = self.truth(self.sim_stub)
+      if self.agent is not None and hasattr(self.agent, "approve_tool"):
+        # Robot moves the recovery agent issues itself pass the same gate as patches (one run at a time).
+        self.agent.approve_tool = lambda name, args: self._approve(
+            state, None, "The model wants to move the robot", tool=name, args=args)
       runtime_result = self.runner(
         state.program,
         self.api,
