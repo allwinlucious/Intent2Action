@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import urllib.error
 import urllib.request
 import uuid
 
@@ -24,15 +25,20 @@ class TranscribeError(Exception):
 
 
 def wav_from_clip(clip: Path, out: Path) -> bool:
-  """Writes the clip's audio as 16 kHz mono WAV; False if the clip has no audio track."""
-  result = subprocess.run(
-      [imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-v", "error", "-i", str(clip), "-vn", "-ac", "1", "-ar", "16000",
-       "-t", str(MAX_SECONDS), "-f", "wav", str(out)], capture_output=True, text=True, timeout=120)
-  if result.returncode != 0:
-    if "does not contain any stream" in result.stderr or "Output file is empty" in result.stderr:
+  """Writes the clip's audio as 16 kHz mono WAV; False if the clip has no audio stream."""
+  ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+  try:
+    probe = subprocess.run([ffmpeg, "-hide_banner", "-i", str(clip)], capture_output=True, text=True, timeout=60)
+    if " Audio: " not in probe.stderr:  # ffmpeg lists every stream on input; no audio stream, nothing to send
       return False
+    result = subprocess.run(
+        [ffmpeg, "-y", "-v", "error", "-i", str(clip), "-vn", "-ac", "1", "-ar", "16000", "-t", str(MAX_SECONDS),
+         "-f", "wav", str(out)], capture_output=True, text=True, timeout=120)
+  except (OSError, subprocess.TimeoutExpired) as error:
+    raise TranscribeError(f"could not extract audio: {error}") from error
+  if result.returncode != 0:
     raise TranscribeError(f"could not extract audio: {result.stderr.strip()[-300:]}")
-  return out.stat().st_size > 44  # a bare WAV header means no samples
+  return out.exists() and out.stat().st_size > 44  # a bare WAV header means no samples
 
 
 def multipart(fields: list[tuple[str, str, str, bytes]]) -> tuple[bytes, str]:
@@ -65,6 +71,9 @@ def transcribe(clip, key: str | None = None, base: str | None = None, timeout: f
   try:
     with urllib.request.urlopen(call, timeout=timeout) as response:
       text = response.read().decode("utf-8", "replace")
+  except urllib.error.HTTPError as error:
+    raise TranscribeError(f"transcription failed: HTTP {error.code}: {error.read()[:300].decode('utf-8', 'replace')}") \
+        from error
   except Exception as error:  # pylint: disable=broad-except
     raise TranscribeError(f"transcription failed: {str(error)[:300]}") from error
   return " ".join(line.split(":", 1)[1] if line.startswith("unknown:") else line
