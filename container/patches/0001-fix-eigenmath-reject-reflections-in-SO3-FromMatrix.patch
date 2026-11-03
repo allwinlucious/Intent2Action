@@ -1,0 +1,258 @@
+From b2f93361a97e6e9fff50a7773d102f6551ade522 Mon Sep 17 00:00:00 2001
+From: Allwin Lucious <allwinlucious@gmail.com>
+Date: Thu, 24 Sep 2026 20:00:00 +0200
+Subject: [PATCH] fix(eigenmath): reject reflections in SO3::FromMatrix
+
+SO3::FromMatrix and SO3::FromMatrixRealtimeSafe only verified that the
+quaternion derived from the input matrix is normalized. Eigen's
+matrix-to-quaternion conversion assumes a proper rotation, and for some
+reflections (orthogonal matrices with determinant -1) it still yields a
+unit quaternion. Such inputs were accepted and silently turned into a
+different transform, e.g. -P for the cyclic permutation matrix P.
+
+OrthogonalizeRotationMatrix (U * V^T from the SVD) preserves the sign of
+the determinant, so orthogonalization does not guard against this either.
+
+Reject matrices whose (orthogonalized) determinant is negative in both
+factories, with a dedicated error message in FromMatrix. This is the C++
+counterpart of the Python check_rotation_matrix handedness gap (#5).
+
+Adds so3_test covering reflections with and without orthogonalization,
+proper rotations, and noisy rotations that still need orthogonalizing.
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+---
+ intrinsic_sdk/intrinsic/eigenmath/BUILD       | 16 ++-
+ intrinsic_sdk/intrinsic/eigenmath/so3.h       | 49 +++++----
+ intrinsic_sdk/intrinsic/eigenmath/so3_test.cc | 99 +++++++++++++++++++
+ 3 files changed, 145 insertions(+), 19 deletions(-)
+ create mode 100644 intrinsic_sdk/intrinsic/eigenmath/so3_test.cc
+
+diff --git a/intrinsic_sdk/intrinsic/eigenmath/BUILD b/intrinsic_sdk/intrinsic/eigenmath/BUILD
+index a6d3a4b..4218bd4 100644
+--- a/intrinsic_sdk/intrinsic/eigenmath/BUILD
++++ b/intrinsic_sdk/intrinsic/eigenmath/BUILD
+@@ -12,7 +12,7 @@
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
+ 
+-load("//bazel:cc_macros.bzl", "cc_library")
++load("//bazel:cc_macros.bzl", "cc_library", "cc_test")
+ 
+ package(default_visibility = ["//visibility:public"])
+ 
+@@ -120,6 +120,20 @@ cc_library(
+     ],
+ )
+ 
++cc_test(
++    name = "so3_test",
++    srcs = ["so3_test.cc"],
++    deps = [
++        ":eigenmath",
++        ":so3",
++        "//intrinsic_control/intrinsic/icon/utils:realtime_status_or",
++        "@abseil-cpp//absl/status",
++        "@abseil-cpp//absl/status:statusor",
++        "@com_gitlab_libeigen_eigen//:eigen",
++        "@com_google_googletest//:gtest_main",
++    ],
++)
++
+ cc_library(
+     name = "clamp",
+     hdrs = [
+diff --git a/intrinsic_sdk/intrinsic/eigenmath/so3.h b/intrinsic_sdk/intrinsic/eigenmath/so3.h
+index 8b4b491..d0f2c8e 100644
+--- a/intrinsic_sdk/intrinsic/eigenmath/so3.h
++++ b/intrinsic_sdk/intrinsic/eigenmath/so3.h
+@@ -65,19 +65,19 @@ class SO3 {
+   // through a singular value decomposition.
+   // An error is returned if either
+   // - do_orthogonalize is true, but the derived rotation after
+-  //   orthogonalization is not valid, or
+-  // - do_orthogonalize is false and the given matrix is not orthogonal.
++  //   orthogonalization is not valid,
++  // - do_orthogonalize is false and the given matrix is not orthogonal, or
++  // - the (orthogonalized) matrix is a reflection, i.e. its determinant is -1.
+   template <int OtherOptions = kDefaultOptions>
+   static icon::RealtimeStatusOr<SO3> FromMatrixRealtimeSafe(
+       const Matrix3<Scalar>& matrix,
+       bool do_orthogonalize = true) INTRINSIC_CHECK_REALTIME_SAFE {
+-    Quaternion<OtherOptions> quaternion;
++    Matrix3<Scalar> rotation_matrix = matrix;
+     if (do_orthogonalize) {
+-      quaternion = OrthogonalizeRotationMatrix(matrix);
+-    } else {
+-      quaternion = matrix;
++      rotation_matrix = OrthogonalizeRotationMatrix(matrix);
+     }
+-    if (!IsNormalizedQuaternion(quaternion)) {
++    const Quaternion<OtherOptions> quaternion(rotation_matrix);
++    if (IsReflection(rotation_matrix) || !IsNormalizedQuaternion(quaternion)) {
+       return icon::InvalidArgumentError(
+           "Cannot create rotation from given matrix.");
+     }
+@@ -90,23 +90,29 @@ class SO3 {
+   // through a singular value decomposition.
+   // An error is returned if either
+   // - do_orthogonalize is true, but the derived rotation after
+-  //   orthogonalization is not valid, or
+-  // - do_orthogonalize is false and the given matrix is not orthogonal.
++  //   orthogonalization is not valid,
++  // - do_orthogonalize is false and the given matrix is not orthogonal, or
++  // - the (orthogonalized) matrix is a reflection, i.e. its determinant is -1.
+   template <int OtherOptions = kDefaultOptions>
+   static absl::StatusOr<SO3> FromMatrix(const Matrix3<Scalar>& matrix,
+                                         bool do_orthogonalize = true) {
+-    Quaternion<OtherOptions> quaternion;
++    Matrix3<Scalar> rotation_matrix = matrix;
+     if (do_orthogonalize) {
+-      quaternion = OrthogonalizeRotationMatrix(matrix);
+-    } else {
+-      quaternion = matrix;
++      rotation_matrix = OrthogonalizeRotationMatrix(matrix);
++    }
++    const Quaternion<OtherOptions> quaternion(rotation_matrix);
++    const Eigen::IOFormat inline_format(
++        Eigen::StreamPrecision, Eigen::DontAlignCols,
++        /*_coeffSeparator=*/", ", /*_rowSeparator=*/", ",
++        /*_rowPrefix=*/"[", /*_rowSuffix=*/"]",
++        /*_matPrefix=*/"[", /*_matSuffix=*/"].");
++    if (IsReflection(rotation_matrix)) {
++      return intrinsic::InvalidArgumentErrorBuilder()
++             << "Cannot create rotation from matrix with negative determinant "
++                "(a reflection): "
++             << matrix.format(inline_format);
+     }
+     if (!IsNormalizedQuaternion(quaternion)) {
+-      const Eigen::IOFormat inline_format(
+-          Eigen::StreamPrecision, Eigen::DontAlignCols,
+-          /*_coeffSeparator=*/", ", /*_rowSeparator=*/", ",
+-          /*_rowPrefix=*/"[", /*_rowSuffix=*/"]",
+-          /*_matPrefix=*/"[", /*_matSuffix=*/"].");
+       return intrinsic::InvalidArgumentErrorBuilder()
+              << "Cannot create rotation from matrix: "
+              << matrix.format(inline_format);
+@@ -326,6 +332,13 @@ class SO3 {
+ 
+   enum UnsafeCtorSignal { kUnsafeCtor };
+ 
++  // Eigen's matrix-to-quaternion conversion assumes a proper rotation. For some
++  // reflections (determinant -1) it still yields a unit quaternion, so the
++  // normalization check alone cannot reject them.
++  static bool IsReflection(const Matrix3<Scalar>& matrix) {
++    return matrix.determinant() < Scalar(0);
++  }
++
+   // Used to more efficiently construct an SO3 object when the invariants are
+   // already guaranteed to hold by construction.
+   template <int OtherOptions = kDefaultOptions>
+diff --git a/intrinsic_sdk/intrinsic/eigenmath/so3_test.cc b/intrinsic_sdk/intrinsic/eigenmath/so3_test.cc
+new file mode 100644
+index 0000000..96c0a47
+--- /dev/null
++++ b/intrinsic_sdk/intrinsic/eigenmath/so3_test.cc
+@@ -0,0 +1,99 @@
++// Copyright 2026 Intrinsic Innovation LLC
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//     https://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++#include "intrinsic/eigenmath/so3.h"
++
++#include <gmock/gmock.h>
++#include <gtest/gtest.h>
++
++#include "Eigen/Geometry"
++#include "absl/status/status.h"
++#include "absl/status/statusor.h"
++#include "intrinsic/eigenmath/types.h"
++#include "intrinsic/icon/utils/realtime_status_or.h"
++
++namespace intrinsic {
++namespace eigenmath {
++namespace {
++
++using ::testing::HasSubstr;
++
++// -P for the cyclic permutation matrix P. Eigen converts this reflection into
++// a unit quaternion, so it slips past a pure normalization check.
++Matrix3d NegatedCyclicPermutation() {
++  Matrix3d matrix;
++  matrix << 0, 0, -1, -1, 0, 0, 0, -1, 0;
++  return matrix;
++}
++
++Matrix3d ProperRotation() {
++  return Eigen::AngleAxisd(0.7, Vector3d(1, 2, 3).normalized())
++      .toRotationMatrix();
++}
++
++class SO3FromMatrixReflectionTest : public ::testing::TestWithParam<Matrix3d> {
++};
++
++TEST_P(SO3FromMatrixReflectionTest, FromMatrixRejectsReflection) {
++  for (const bool do_orthogonalize : {true, false}) {
++    const absl::StatusOr<SO3d> rotation =
++        SO3d::FromMatrix(GetParam(), do_orthogonalize);
++    ASSERT_FALSE(rotation.ok()) << "do_orthogonalize=" << do_orthogonalize;
++    EXPECT_EQ(rotation.status().code(), absl::StatusCode::kInvalidArgument);
++    EXPECT_THAT(rotation.status().message(), HasSubstr("reflection"));
++  }
++}
++
++TEST_P(SO3FromMatrixReflectionTest, FromMatrixRealtimeSafeRejectsReflection) {
++  for (const bool do_orthogonalize : {true, false}) {
++    const icon::RealtimeStatusOr<SO3d> rotation =
++        SO3d::FromMatrixRealtimeSafe(GetParam(), do_orthogonalize);
++    ASSERT_FALSE(rotation.ok()) << "do_orthogonalize=" << do_orthogonalize;
++    EXPECT_EQ(rotation.status().code(), absl::StatusCode::kInvalidArgument);
++  }
++}
++
++INSTANTIATE_TEST_SUITE_P(
++    Reflections, SO3FromMatrixReflectionTest,
++    ::testing::Values(
++        NegatedCyclicPermutation(), Matrix3d(Vector3d(-1, 1, 1).asDiagonal()),
++        Matrix3d(-Matrix3d::Identity()), Matrix3d(-ProperRotation()),
++        Matrix3d(ProperRotation() * Vector3d(1, 1, -1).asDiagonal())));
++
++TEST(SO3FromMatrixTest, FromMatrixAcceptsProperRotation) {
++  for (const bool do_orthogonalize : {true, false}) {
++    const absl::StatusOr<SO3d> rotation =
++        SO3d::FromMatrix(ProperRotation(), do_orthogonalize);
++    ASSERT_TRUE(rotation.ok()) << rotation.status();
++    EXPECT_TRUE(rotation->matrix().isApprox(ProperRotation(), 1e-12));
++
++    const icon::RealtimeStatusOr<SO3d> realtime_rotation =
++        SO3d::FromMatrixRealtimeSafe(ProperRotation(), do_orthogonalize);
++    ASSERT_TRUE(realtime_rotation.ok()) << realtime_rotation.status();
++    EXPECT_TRUE(
++        (*realtime_rotation).matrix().isApprox(ProperRotation(), 1e-12));
++  }
++}
++
++TEST(SO3FromMatrixTest, FromMatrixOrthogonalizesNoisyRotation) {
++  Matrix3d noisy = ProperRotation();
++  noisy(0, 1) += 1e-4;
++  const absl::StatusOr<SO3d> rotation = SO3d::FromMatrix(noisy);
++  ASSERT_TRUE(rotation.ok()) << rotation.status();
++  EXPECT_TRUE(rotation->matrix().isApprox(ProperRotation(), 1e-3));
++}
++
++}  // namespace
++}  // namespace eigenmath
++}  // namespace intrinsic
+-- 
+2.43.0
+

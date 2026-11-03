@@ -20,6 +20,13 @@ python3 -m venv .venv-ml && .venv-ml/bin/pip install -r requirements-ml.txt   # 
 
 ## 1. The robot stack
 
+*   **Intrinsic Core:** this project builds against the public commit
+    [`895281d`](https://github.com/intrinsic-ai/intrinsic-core/commit/895281d62b950ca46d21885906796848692b9638)
+    (`make vendor` and CI use it).
+*   The author's local build also carried one upstream-style fix, `eigenmath`'s `SO3::FromMatrix` rejecting
+    reflections. It is not required by this project; it is in `container/patches/` (`git am` it in the Intrinsic
+    Core checkout to build the identical stack).
+
 ```bash
 container/build_intrinsic.sh && container/stage_intrinsic.sh             # Intrinsic Core from source
 sg docker -c "docker build -f container/Dockerfile -t intrinsic-core:dev ."

@@ -27,7 +27,7 @@ for m in "${MODULES[@]}"; do
 done
 for m in "${MODULES[@]}"; do
   module="intrinsic.icon.$(echo "${m%.py}" | tr / .)"
-  PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$VENDOR:$PROJECT_DIR/gen" "$PROJECT_DIR/.venv/bin/python" -c "import $module" \
+  PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$VENDOR:$PROJECT_DIR/gen" "${PYTHON:-$PROJECT_DIR/.venv/bin/python}" -c "import $module" \
     || { echo "import $module failed"; exit 1; }
 done
 echo "vendored ${#MODULES[@]} modules into $VENDOR"

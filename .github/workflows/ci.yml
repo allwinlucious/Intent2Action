@@ -17,6 +17,17 @@ jobs:
           cache-dependency-path: requirements-dev.txt
       - name: Install
         run: pip install -r requirements-dev.txt
+      # The robot service uses Intrinsic Core's ICON Python client; vendor it from the public source at the commit
+      # this project builds against (container/stage_vendor.sh, as for the container image).
+      - name: Intrinsic Core (ICON Python client)
+        uses: actions/checkout@v4
+        with:
+          repository: intrinsic-ai/intrinsic-core
+          ref: 895281d62b950ca46d21885906796848692b9638
+          path: intrinsic-core
+          sparse-checkout: intrinsic_control/intrinsic/icon
+      - name: Vendor the ICON client
+        run: INTRINSIC_DIR=$PWD/intrinsic-core PYTHON=python container/stage_vendor.sh
       - name: Unit tests (no Docker, simulator or GPU)
         run: python -m pytest tests -q
 

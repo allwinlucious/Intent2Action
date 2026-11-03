@@ -13,3 +13,4 @@ runs/
 sim/run.log
 *.reviewer.log
 .env
+.cache/
