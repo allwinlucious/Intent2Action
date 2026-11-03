@@ -120,6 +120,8 @@ OBJECTS = {
     # The owner's red gift box (11 x 9 x 4 cm) at its proportions, scaled so its longest side (7 cm) fits the
     # gripper; it is grasped across the 5.7 cm side.
     "red_gift": (_textured_box(0.07, 0.0573, 0.0255, OUT_DIR / "red_gift"), False, 0.08, (0.72, 0.12, 0.12)),
+    # The owner's second gift box (white, reindeer and sleigh), the same size.
+    "white_gift": (_textured_box(0.07, 0.0573, 0.0255, OUT_DIR / "white_gift"), False, 0.08, (0.92, 0.92, 0.92)),
     # A painted area: 2 mm thick, spawned 1.9 mm into the table so it is flush and a pushed carton slides over it.
     "target_zone": (_box(0.16, 0.16, 0.002), True, None, (0.20, 0.65, 0.30)),
 }
@@ -139,6 +141,7 @@ ATTRIBUTES = {
     "blue_box": ("box", "blue"),
     "big_carton": ("carton", "brown"),
     "red_gift": ("gift", "red"),
+    "white_gift": ("gift", "white"),
     "target_zone": ("zone", "green"),
 }
 # Static/dynamic friction where not build_catalog.py's default 0.5/0.4: the peg

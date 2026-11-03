@@ -1,0 +1,13 @@
+category: gift
+collision: convexHull
+color:
+- 0.92
+- 0.92
+- 0.92
+color_name: white
+dims:
+- 0.07
+- 0.0573
+- 0.0255
+mass: 0.08
+static: false
