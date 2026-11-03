@@ -25,6 +25,7 @@ LOOKS = "/World/Looks"
 FINISH = {"cube": (None, 0.28, 0.0), "box": (None, 0.55, 0.0), "carton": (None, 0.7, 0.0),
           "table": ((0.78, 0.79, 0.81), 0.3, 1.0)}
 FLOOR_COLOR = (0.03, 0.03, 0.035)
+RESOLUTION = (1920, 1080)
 EYE, TARGET = [1.6, 1.05, 1.05], [0.32, 0.0, 0.3]  # closer and lower: the whole arm, the work area large in frame
 
 

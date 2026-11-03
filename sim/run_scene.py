@@ -267,6 +267,7 @@ def _save_viewer_frame(force: bool = False) -> None:
     from sim import pretty  # pylint: disable=g-import-not-at-top
 
     set_camera_view(eye=pretty.EYE, target=pretty.TARGET)
+    get_active_viewport().set_texture_resolution(pretty.RESOLUTION)  # video frames at 1080p, not the window's size
   path = os.path.join(GUI_FRAMES, f"frame_{_frame_state['index']:05d}.png")
   capture_viewport_to_file(get_active_viewport(), path)
   _frame_state["index"] += 1
