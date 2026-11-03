@@ -509,3 +509,22 @@ def test_recovery_tool_gate_asks_before_moves_only(monkeypatch):
   assert agent._tool_text(call("move_compliant"), names) == "declined by the operator: too fast"
   assert agent._tool_text(call("move_to_pose"), names) == "" and asked == ["move_compliant", "move_to_pose"]
   assert ran == ["list_objects", "move_to_pose"] and "stop" in UNGATED_TOOLS and "move_to_pose" not in UNGATED_TOOLS
+
+
+def test_chat_transcript_records_calls_and_hashes_images(tmp_path, monkeypatch):
+  import io
+  from program_runtime import agent
+  reply = {"choices": [{"message": {"role": "assistant", "content": "ok"}}], "usage": {"total_tokens": 3}}
+  monkeypatch.setattr(agent.urllib.request, "urlopen", lambda *a, **k: io.BytesIO(json.dumps(reply).encode()))
+  path = tmp_path / "runs" / "transcript.jsonl"
+  monkeypatch.setenv("LLM_TRANSCRIPT", str(path))
+  client = agent.ChatClient(base_url="http://x/v1", api_key="k", model="G1d")
+  image = {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,QUJD"}}
+  assert client.chat([{"role": "user", "content": [image, {"type": "text", "text": "hi"}]}])["content"] == "ok"
+  record = json.loads(path.read_text())
+  assert record["endpoint"] == "G1d" and record["reply"]["content"] == "ok" and record["usage"]["total_tokens"] == 3
+  stored = record["request"]["messages"][0]["content"][0]["image_url"]["url"]
+  assert "sha256" in stored and "QUJD" not in json.dumps(record)
+  monkeypatch.delenv("LLM_TRANSCRIPT")
+  client.chat([{"role": "user", "content": "again"}])
+  assert len(path.read_text().splitlines()) == 1

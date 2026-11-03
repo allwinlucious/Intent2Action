@@ -8,7 +8,7 @@ The scene is a demo preset id or any task `family:seed`. The program is a file, 
 for that task (logs/eval/<VERSION>_programs.jsonl), so a take shows exactly what was measured. The take resets the
 scene, homes the arm, runs the program through the runtime (check, dry run, execution; no recovery agent), and
 encodes the frames Isaac saved meanwhile (one per 1/30 s of sim time in --pretty mode) to
-C:\\isaac-sim-work\\videos\\<name>.mp4, plus <name>.jsonl with the run's events.
+C:\\isaac-sim-work\\videos\\<name>.mp4, and the run's events to demo_runs/<name>.events.jsonl (committed).
 """
 
 import argparse
@@ -22,6 +22,7 @@ sys.path[:0] = [str(ROOT), str(ROOT / "gen"), str(ROOT / "learn"), str(ROOT / "t
 
 FRAMES = Path("/mnt/c/isaac-sim-work/viewer_frames")
 VIDEOS = Path("/mnt/c/isaac-sim-work/videos")
+PROOF = ROOT / "demo_runs"
 FPS = 30
 SETTLE_S = 2.0  # still frames before and after the run
 
@@ -88,7 +89,8 @@ def main() -> int:
   time.sleep(SETTLE_S)
   first = _newest_index() + 1
   VIDEOS.mkdir(parents=True, exist_ok=True)
-  events = (VIDEOS / f"{args.name}.jsonl").open("w")
+  PROOF.mkdir(parents=True, exist_ok=True)
+  events = (PROOF / f"{args.name}.events.jsonl").open("w")  # in the repo: what the robot was told and did
   result = run(program, RobotAPI(GrpcBackend(args.address)),
                log=lambda event: events.write(json.dumps(event, separators=(",", ":")) + "\n"))
   events.close()
@@ -97,6 +99,7 @@ def main() -> int:
   out = VIDEOS / f"{args.name}.mp4"
   frames = encode(first, last, out)
   print(f"{'OK' if result.ok else 'FAILED: ' + str(result.error)[:200]}")
+  (PROOF / f"{args.name}.program.py").write_text(program)
   print(f"{out}: {frames} frames, {frames / FPS:.1f} s at {FPS} fps (intent: {intent.get('description', '')})")
   return 0
 

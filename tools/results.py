@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 LOGS, RESULTS = ROOT / "logs", ROOT / "results"
 PATTERNS = (
     "expert/heldout_all.jsonl", "expert/train_all_sorting.jsonl", "expert/recovery_best.jsonl",
-    "eval/requests.jsonl", "eval/*_programs*.jsonl", "eval/*_episodes*.jsonl", "eval/*.rewards.jsonl",
+    "eval/requests.jsonl", "eval/*_replies.jsonl", "eval/*_programs*.jsonl", "eval/*_episodes*.jsonl", "eval/*.rewards.jsonl",
     "eval/PHYS_labels.jsonl",
     "sft/G1b/*.json*", "sft/G1d/*.json*",
 )

@@ -1,10 +1,12 @@
 """Program writing and recovery clients for OpenAI-compatible chat endpoints."""
 
+import hashlib
 import json
 import math
 import os
 from pathlib import Path
 import re
+import time
 import urllib.request
 
 from .api import FakeBackend, Obj, RobotAPI
@@ -60,9 +62,36 @@ class ChatClient:
       method="POST",
     )
     # LLM_TIMEOUT_S: a self-hosted server that answers one request at a time needs longer than a hosted endpoint.
+    started = time.time()
     with urllib.request.urlopen(request, timeout=float(os.environ.get("LLM_TIMEOUT_S", "120"))) as response:
       result = json.loads(response.read())
+    if os.environ.get("LLM_TRANSCRIPT"):
+      _transcribe(os.environ["LLM_TRANSCRIPT"], body, result, started)
     return result["choices"][0]["message"]
+
+
+def _without_images(value):
+  """Messages for the transcript: an inline image becomes its SHA-256 and size (frames would bloat the log)."""
+  if isinstance(value, dict):
+    url = value.get("url")
+    if isinstance(url, str) and url.startswith("data:"):
+      data = url.split(",", 1)[-1].encode()
+      return {"url": f"data:<{len(data)} bytes, sha256 {hashlib.sha256(data).hexdigest()}>"}
+    return {key: _without_images(item) for key, item in value.items()}
+  if isinstance(value, list):
+    return [_without_images(item) for item in value]
+  return value
+
+
+def _transcribe(path: str, body: dict, result: dict, started: float) -> None:
+  """LLM_TRANSCRIPT: one JSON line per model call (request, raw reply, usage), the proof of what a model produced."""
+  record = {"time": started, "seconds": round(time.time() - started, 2), "endpoint": body.get("model"),
+            "request": _without_images({key: value for key, value in body.items() if key != "tools"}),
+            "tools": [tool.get("function", {}).get("name") for tool in body.get("tools") or []],
+            "reply": result.get("choices", [{}])[0].get("message"), "usage": result.get("usage")}
+  Path(path).parent.mkdir(parents=True, exist_ok=True)
+  with open(path, "a") as out:
+    out.write(json.dumps(record) + "\n")
 
 
 def _api_reference() -> str:
