@@ -33,6 +33,57 @@ def _cylinder(radius: float, height: float) -> trimesh.Trimesh:
   return mesh
 
 
+def _textured_box(x: float, y: float, z: float, faces_dir: Path) -> trimesh.Trimesh:
+  """A box (bottom-centre origin) with one UV region per face on a texture sheet composed from photos of the real
+  object: faces_dir/top.png (seen from above, image top = +y) and front.png (the -y face). The back mirrors the
+  front, the ends reuse a crop of it, the bottom is the face's plain colour."""
+  from PIL import Image
+  top = Image.open(faces_dir / "top.png").convert("RGB")
+  front = Image.open(faces_dir / "front.png").convert("RGB")
+  ppm = top.width / x  # pixels per metre on the sheet
+  size = lambda a, b: (max(1, round(a * ppm)), max(1, round(b * ppm)))  # noqa: E731
+  tw, th = size(x, y)
+  fw, fh = size(x, z)
+  ew, _ = size(y, z)
+  # The side's red, matched to the top's (the photo's side is in shadow).
+  scale = np.median(np.asarray(top.resize((50, 40))).reshape(-1, 3), 0) / np.median(np.asarray(front.resize((50, 20))).reshape(-1, 3), 0)
+  front = Image.fromarray(np.clip(np.asarray(front.resize((fw, fh))) * scale, 0, 255).astype(np.uint8))
+  plain = tuple(int(c) for c in np.median(np.asarray(front).reshape(-1, 3), 0))
+  rects = {"top": (0, 0, tw, th), "bottom": (tw, 0, tw, th), "front": (0, th, fw, fh), "back": (fw, th, fw, fh),
+           "left": (2 * fw, th, ew, fh), "right": (2 * fw + ew, th, ew, fh)}
+  sheet = Image.new("RGB", (max(2 * tw, 2 * fw + 2 * ew), th + fh), plain)
+  sheet.paste(top.resize((tw, th)), (0, 0))
+  sheet.paste(front, (0, th))
+  sheet.paste(front.transpose(Image.Transpose.FLIP_LEFT_RIGHT), (fw, th))
+  end = front.crop((0, 0, ew, fh))
+  sheet.paste(end, (2 * fw, th))
+  sheet.paste(end.transpose(Image.Transpose.FLIP_LEFT_RIGHT), (2 * fw + ew, th))
+  hx, hy = x / 2, y / 2
+  # Each face: corners counter-clockwise seen from outside, as the image's bottom-left, bottom-right, top-right, top-left.
+  corners = {
+      "top": [(-hx, -hy, z), (hx, -hy, z), (hx, hy, z), (-hx, hy, z)],
+      "bottom": [(-hx, hy, 0), (hx, hy, 0), (hx, -hy, 0), (-hx, -hy, 0)],
+      "front": [(-hx, -hy, 0), (hx, -hy, 0), (hx, -hy, z), (-hx, -hy, z)],
+      "back": [(hx, hy, 0), (-hx, hy, 0), (-hx, hy, z), (hx, hy, z)],
+      "left": [(-hx, hy, 0), (-hx, -hy, 0), (-hx, -hy, z), (-hx, hy, z)],
+      "right": [(hx, -hy, 0), (hx, hy, 0), (hx, hy, z), (hx, -hy, z)],
+  }
+  W, H = sheet.size
+  vertices, uv, triangles = [], [], []
+  for face, points in corners.items():
+    left, upper, width, height = rects[face]
+    inset = 2  # pixels: no bleeding from the neighbouring face
+    u0, u1 = (left + inset) / W, (left + width - inset) / W
+    v0, v1 = 1 - (upper + height - inset) / H, 1 - (upper + inset) / H  # UV v runs up, image rows run down
+    base = len(vertices)
+    vertices += points
+    uv += [(u0, v0), (u1, v0), (u1, v1), (u0, v1)]
+    triangles += [(base, base + 1, base + 2), (base, base + 2, base + 3)]
+  mesh = trimesh.Trimesh(vertices, triangles, process=False)
+  mesh.visual = trimesh.visual.TextureVisuals(uv=np.array(uv), image=sheet)
+  return mesh
+
+
 def _hole_block() -> trimesh.Trimesh:
   block = _box(0.08, 0.08, 0.05)
   hole = trimesh.creation.cylinder(radius=0.011, height=0.04 + HOLE_OVERSHOOT_M)
@@ -68,7 +119,7 @@ OBJECTS = {
     "big_carton": (_box(0.12, 0.12, 0.08), False, 0.40, (0.66, 0.50, 0.33)),
     # The owner's red gift box (11 x 9 x 4 cm) at its proportions, scaled so its longest side (7 cm) fits the
     # gripper; it is grasped across the 5.7 cm side.
-    "red_gift": (_box(0.07, 0.0573, 0.0255), False, 0.08, (0.72, 0.12, 0.12)),
+    "red_gift": (_textured_box(0.07, 0.0573, 0.0255, OUT_DIR / "red_gift"), False, 0.08, (0.72, 0.12, 0.12)),
     # A painted area: 2 mm thick, spawned 1.9 mm into the table so it is flush and a pushed carton slides over it.
     "target_zone": (_box(0.16, 0.16, 0.002), True, None, (0.20, 0.65, 0.30)),
 }
@@ -118,11 +169,15 @@ def _container_parts(x: float, y: float, z: float, wall: float, floor: float) ->
 def main() -> int:
   failures = 0
   for name, (mesh, static, mass, color) in OBJECTS.items():
-    assert mesh.is_watertight, f"{name} is not watertight"
+    closed = mesh.copy()
+    closed.merge_vertices(merge_tex=True, merge_norm=True)  # a textured mesh has one vertex per face corner
+    assert closed.is_watertight, f"{name} is not watertight"
     out = OUT_DIR / name
     out.mkdir(parents=True, exist_ok=True)
     glb = out / "mesh.glb"
     glb.write_bytes(mesh.export(file_type="glb"))
+    if isinstance(mesh.visual, trimesh.visual.TextureVisuals):  # sim/tools/build_catalog.py binds it as the look
+      mesh.visual.material.image.save(out / "texture.png")
     # PhysX allows concave triangle meshes only on static bodies.
     description = {
         "static": static,
@@ -156,7 +211,7 @@ def main() -> int:
     failures += not ok
     print(
         f"{'OK  ' if ok else 'FAIL'} {name}: bounds {bounds.round(4).tolist()},"
-        f" {len(mesh.faces)} faces, watertight {mesh.is_watertight}"
+        f" {len(mesh.faces)} faces, watertight {closed.is_watertight}"
     )
   return 1 if failures else 0
 

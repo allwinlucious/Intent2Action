@@ -55,6 +55,26 @@ def write_model(directory: Path) -> None:
   # Rendered as the flat triangles PhysX collides with, not a subdivision surface.
   geom.CreateSubdivisionSchemeAttr(UsdGeom.Tokens.none)
   geom.CreateDisplayColorAttr([Gf.Vec3f(*description["color"])])
+  uv = getattr(mesh.visual, "uv", None)
+  if (directory / "texture.png").is_file() and uv is not None and len(uv) == len(mesh.vertices):
+    # A textured catalog object (tools/build_catalog_meshes.py): per-vertex UVs and a preview-surface look.
+    UsdGeom.PrimvarsAPI(geom).CreatePrimvar("st", Sdf.ValueTypeNames.TexCoord2fArray, UsdGeom.Tokens.vertex).Set(
+        Vt.Vec2fArray.FromNumpy(uv.astype("f4")))
+    look = UsdShade.Material.Define(stage, "/Object/look")
+    surface = UsdShade.Shader.Define(stage, "/Object/look/surface")
+    surface.CreateIdAttr("UsdPreviewSurface")
+    surface.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(0.55)
+    reader = UsdShade.Shader.Define(stage, "/Object/look/st")
+    reader.CreateIdAttr("UsdPrimvarReader_float2")
+    reader.CreateInput("varname", Sdf.ValueTypeNames.Token).Set("st")
+    image = UsdShade.Shader.Define(stage, "/Object/look/texture")
+    image.CreateIdAttr("UsdUVTexture")
+    image.CreateInput("file", Sdf.ValueTypeNames.Asset).Set("./texture.png")
+    image.CreateInput("st", Sdf.ValueTypeNames.Float2).ConnectToSource(reader.ConnectableAPI(), "result")
+    surface.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).ConnectToSource(
+        image.CreateOutput("rgb", Sdf.ValueTypeNames.Float3))
+    look.CreateSurfaceOutput().ConnectToSource(surface.ConnectableAPI(), "surface")
+    UsdShade.MaterialBindingAPI.Apply(geom.GetPrim()).Bind(look)
   if not description.get("collides", True):  # paint only (a floor marking): no physics at all
     stage.GetRootLayer().Save()
     print(f"CATALOG {directory.name}: {len(mesh.faces)} faces, visual only", flush=True)

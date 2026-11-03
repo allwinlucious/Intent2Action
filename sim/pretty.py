@@ -37,25 +37,9 @@ def _material(name: str, color, roughness: float, metallic: float = 0.0) -> Omni
   return mat
 
 
-def _bind(stage, path: str, mat: OmniPBR, strength=UsdShade.Tokens.strongerThanDescendants) -> None:
-  UsdShade.MaterialBindingAPI.Apply(stage.GetPrimAtPath(path)).Bind(mat.material, strength)
-
-
-def _print_top(stage, path: str, dims, image: Path) -> None:
-  """A printed top (assets/objects/<name>/top.png) as a textured quad just above the object's top face: visual only
-  (no collision API), a child of the object so it moves with it. Image left-right runs along x, top along +y."""
-  hx, hy, z = dims[0] / 2, dims[1] / 2, dims[2] + 0.001  # clear of the top face: no depth fighting
-  quad = UsdGeom.Mesh.Define(stage, f"{path}/top_print")
-  quad.CreatePointsAttr([Gf.Vec3f(-hx, -hy, z), Gf.Vec3f(hx, -hy, z), Gf.Vec3f(hx, hy, z), Gf.Vec3f(-hx, hy, z)])
-  quad.CreateFaceVertexCountsAttr([4])
-  quad.CreateFaceVertexIndicesAttr([0, 1, 2, 3])
-  quad.CreateNormalsAttr([Gf.Vec3f(0, 0, 1)] * 4)
-  quad.CreateSubdivisionSchemeAttr(UsdGeom.Tokens.none)
-  UsdGeom.PrimvarsAPI(quad).CreatePrimvar("st", Sdf.ValueTypeNames.TexCoord2fArray, UsdGeom.Tokens.vertex).Set(
-      [Gf.Vec2f(0, 0), Gf.Vec2f(1, 0), Gf.Vec2f(1, 1), Gf.Vec2f(0, 1)])
-  mat = OmniPBR(f"{LOOKS}/print_{image.parent.name}", name=f"print_{image.parent.name}", texture_path=str(image))
-  mat.set_reflection_roughness(0.6)
-  _bind(stage, f"{path}/top_print", mat)
+def _bind(stage, path: str, mat: OmniPBR) -> None:
+  UsdShade.MaterialBindingAPI.Apply(stage.GetPrimAtPath(path)).Bind(
+      mat.material, UsdShade.Tokens.strongerThanDescendants)
 
 
 def apply(stage, asset_root: str) -> None:
@@ -107,9 +91,6 @@ def bind_objects(stage) -> None:
       continue
     description = yaml.safe_load(entry.read_text())
     color, roughness, metallic = FINISH.get(description.get("category", ""), (None, 0.5, 0.0))
-    top = CATALOG_ROOT / str(catalog) / "top.png"
-    # With a printed top the body's colour must not override the print's own material below it.
-    strength = UsdShade.Tokens.weakerThanDescendants if top.is_file() else UsdShade.Tokens.strongerThanDescendants
-    _bind(stage, path, _material(f"look_{catalog}", color or description["color"], roughness, metallic), strength)
-    if top.is_file():
-      _print_top(stage, path, description["dims"], top)
+    if (CATALOG_ROOT / str(catalog) / "texture.png").is_file():
+      continue  # a textured model keeps its own look (sim/tools/build_catalog.py)
+    _bind(stage, path, _material(f"look_{catalog}", color or description["color"], roughness, metallic))
