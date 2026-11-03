@@ -20,7 +20,6 @@ counterpart of the Python check_rotation_matrix handedness gap (#5).
 Adds so3_test covering reflections with and without orthogonalization,
 proper rotations, and noisy rotations that still need orthogonalizing.
 
-Co-authored-by: Cursor <cursoragent@cursor.com>
 ---
  intrinsic_sdk/intrinsic/eigenmath/BUILD       | 16 ++-
  intrinsic_sdk/intrinsic/eigenmath/so3.h       | 49 +++++----
