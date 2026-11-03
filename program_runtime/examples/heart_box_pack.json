@@ -1,0 +1,1 @@
+{"description": "the small heart box goes into the open heart box, then the lid goes on", "rules": [{"select": {"category": "gift", "color": "mauve"}, "relation": "in", "target": {"category": "box"}}, {"select": {"category": "lid"}, "relation": "on", "target": {"category": "box"}}], "others": "stay"}

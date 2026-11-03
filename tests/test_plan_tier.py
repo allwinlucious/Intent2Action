@@ -182,6 +182,8 @@ def test_drop_table_cube_box_floor_and_highest_support():
   assert plan_tier.drop(_pose(z=0.4), cube_dims, [cube]) == (0.05, "cube")
   box = ("box", _pose(), (0.25, 0.21, 0.05), 0.01)
   assert plan_tier.drop(_pose(z=0.4), cube_dims, [box]) == (0.01, "box")
+  heart = ("heart", _pose(), (0.056, 0.0547, 0.0547), 0.0013)
+  assert plan_tier.drop(_pose(z=0.4), (0.0573, 0.0573, 0.0159), [heart]) == (0.0547, "heart")  # a lid on the rim
   high = ("high", _pose(z=0.1), cube_dims, None)
   z, support = plan_tier.drop(_pose(z=0.4), cube_dims, [cube, high])
   assert z == pytest.approx(0.15)

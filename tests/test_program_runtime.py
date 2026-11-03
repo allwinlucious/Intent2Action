@@ -528,3 +528,14 @@ def test_chat_transcript_records_calls_and_hashes_images(tmp_path, monkeypatch):
   monkeypatch.delenv("LLM_TRANSCRIPT")
   client.chat([{"role": "user", "content": "again"}])
   assert len(path.read_text().splitlines()) == 1
+
+
+def test_heart_box_pack_program_dry_runs():
+  from program_runtime.api import FakeBackend, Obj, RobotAPI
+  from program_runtime.runtime import run
+  objects = [Obj(id="box", category="box", color="grey", size="small", x=0.5, y=0.0, z=0.0, yaw=0.0, sx=0.056, sy=0.0547, sz=0.0547, attached=False),
+             Obj(id="gift", category="gift", color="mauve", size="small", x=0.4, y=0.1, z=0.0, yaw=0.0, sx=0.0382, sy=0.0382, sz=0.0382, attached=False),
+             Obj(id="lid", category="lid", color="mauve", size="small", x=0.4, y=-0.1, z=0.0, yaw=0.0, sx=0.0573, sy=0.0573, sz=0.0159, attached=False)]
+  program = (Path(__file__).parents[1] / "program_runtime/examples/heart_box_pack.py").read_text()
+  result = run(program, RobotAPI(FakeBackend(objects)))
+  assert result.ok, result.error

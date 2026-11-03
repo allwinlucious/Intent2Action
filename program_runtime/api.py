@@ -233,10 +233,15 @@ class FakeBackend:
       slot = next((candidate for candidate in slots if all(
         math.hypot(candidate[0] - other.x, candidate[1] - other.y) >= 0.03 for other in occupied
       )), None)
+      if _covers(obj, target):  # a lid rests on the walls
+        slot, z = (target.x, target.y), target.z + target.sz
+      elif not slots and not occupied and obj.sx < target.sx and obj.sy < target.sy:  # one small object, dropped in
+        slot, z = (target.x, target.y), target.z + 0.01
+      else:
+        z = target.z + 0.01
       if slot is None:
         raise RobotFailure("place", "box is full")
       x, y = slot
-      z = target.z + 0.01
     else:
       z = target.z + target.sz
     self.objects[object_id] = replace(obj, x=x, y=y, z=z, attached=False)
@@ -253,6 +258,11 @@ def _inside_values(obj: Obj, box: Obj) -> bool:
     abs(local_x) <= box.sx / 2 and abs(local_y) <= box.sy / 2
     and box.z <= obj.z <= box.z + box.sz
   )
+
+
+def _covers(obj: Obj, box: Obj) -> bool:
+  """A lid: at least as wide as the box on both axes, so it rests on the walls instead of going in."""
+  return min(obj.sx, obj.sy) >= max(box.sx, box.sy) - 0.005
 
 
 def _on_top_values(obj: Obj, target: Obj) -> bool:
@@ -314,7 +324,7 @@ class RobotAPI:
       failure.call = call
       raise
     if not self._postcondition("place", (obj, target)):
-      expected = "inside" if target.category == "box" else "on_top"
+      expected = "inside" if target.category == "box" and not _covers(obj, target) else "on_top"
       raise RobotFailure("postcondition", f"after {call}: expected {expected}", call)
 
   def _postcondition(self, name: str, args: tuple) -> bool:
@@ -322,7 +332,9 @@ class RobotAPI:
       return self.held(args[0])
     if name == "place":
       obj, target = args
-      return self.inside(obj, target) if target.category == "box" else self.on_top(obj, target)
+      if target.category == "box" and not _covers(obj, target):
+        return self.inside(obj, target)
+      return self.on_top(obj, target)
     return True
 
   def held(self, obj: Obj) -> bool:

@@ -1,0 +1,13 @@
+category: lid
+collision: convexHull
+color:
+- 0.68
+- 0.62
+- 0.59
+color_name: mauve
+dims:
+- 0.0573
+- 0.0573
+- 0.0159
+mass: 0.03
+static: false

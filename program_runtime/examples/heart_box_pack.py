@@ -1,0 +1,8 @@
+box = find(category="box")
+gift = find(category="gift", color="mauve")
+lid = find(category="lid")
+pick(gift)
+place(gift, box)
+pick(lid)
+place(lid, box)
+verify(lambda: inside(gift, box) and on_top(lid, box), "the gift is not in the closed box")

@@ -1,0 +1,16 @@
+category: box
+collision: none
+color:
+- 0.93
+- 0.93
+- 0.94
+color_name: grey
+container:
+  floor: 0.0013
+  wall: 0.0013
+dims:
+- 0.056
+- 0.0547
+- 0.0547
+mass: null
+static: true

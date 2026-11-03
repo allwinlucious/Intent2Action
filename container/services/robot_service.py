@@ -1141,13 +1141,18 @@ class RobotService(api_grpc.RobotServiceServicer):
           if catalog is not None and o.parent.name == "root" and o.name not in (target_id, object_id):
             others.append((world.pose(o.name), grasp.catalog_dims(catalog)))
         taken = place.occupied(target_pose, target_dims, others)
-        clearances = place.BOX_RELEASE_CLEARANCES_M if container else (place.RELEASE_CLEARANCE_M,)
-        spots, poses = [], []
+        spots, poses, on_rim = [], [], False
         for turn in place.finger_turns(held_dims, place.yaw(held_pose), place.yaw(tcp), place.yaw(target_pose)):
           turned_tcp, turned_held = place.turned(tcp, held_pose, turn)
           footprint = place.held_footprint(held_dims, place.yaw(turned_held), place.yaw(turned_tcp),
                                            place.yaw(target_pose))
           turn_spots = place.candidates(target_pose, target_dims, container, footprint, taken)[:PLACE_CANDIDATES]
+          clearances = place.BOX_RELEASE_CLEARANCES_M if container else (place.RELEASE_CLEARANCE_M,)
+          if container and not turn_spots:  # the open fingers do not fit in: a lid, or a drop from above the walls
+            held_half = place.half_extents(held_dims, place.yaw(turned_held) - place.yaw(target_pose))
+            turn_spots = place.rim_spots(target_pose, target_dims, container, held_half, taken)
+            clearances = (place.RELEASE_CLEARANCE_M,)
+            on_rim = on_rim or (bool(turn_spots) and place.covers(held_half, target_dims, container))
           spots += turn_spots
           poses += [(place.release_pose(turned_tcp, turned_held, spot, c), spot) for spot in turn_spots
                     for c in clearances]
@@ -1196,7 +1201,7 @@ class RobotService(api_grpc.RobotServiceServicer):
                     object_id, target_id, error.code.name, self.r.clock.now() - start, error.message)
         raise
       took = self.r.clock.now() - start
-      message = (f"placed {object_id} {'in' if container else 'on'} {target_id} at ({object_pose.x:.3f}, "
+      message = (f"placed {object_id} {'in' if container and not on_rim else 'on'} {target_id} at ({object_pose.x:.3f}, "
                  f"{object_pose.y:.3f}) in {took:.1f} s of sim time")
       self.r.ops.finish(op, api.PlaceResult(object_id=object_id, target_id=target_id, place=release,
                                             object_pose=object_pose, duration_s=took), message)

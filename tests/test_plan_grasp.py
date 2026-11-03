@@ -174,7 +174,7 @@ def test_unknown_catalog_is_not_found(tmp_path):
   assert e.value.code == grpc.StatusCode.NOT_FOUND
 
 
-@pytest.mark.parametrize("dims, depth", [(CUBE, 0.02), (np.array([0.05, 0.05, 0.025]), 0.015)])
+@pytest.mark.parametrize("dims, depth", [(CUBE, 0.02), (np.array([0.05, 0.05, 0.025]), 0.01)])
 def test_depth(dims, depth):
   tool = _top_down(dims)
   np.testing.assert_allclose(grasp.deepened(tool, dims)[:3, 3], [0, 0, dims[2] - depth], atol=1e-12)

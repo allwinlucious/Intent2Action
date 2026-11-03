@@ -134,3 +134,19 @@ def test_aligned_fingers_fit_six_cubes():
     spot = place.candidates(box, dims, container, footprint, taken)[0]
     placed.append(api.Pose(x=spot[0], y=spot[1], z=spot[2], qw=1.0))
   assert len(placed) == 6
+
+
+HEART_BOX, HEART_CONTAINER = (0.056, 0.0547, 0.0547), {"wall": 0.0013, "floor": 0.0013}
+
+
+def test_rim_spots_drop_in_and_lid():
+  box = _pose(0.5, 0.0, 0.0)
+  small = place.held_footprint((0.0382, 0.0382, 0.0382), 0.0, 0.0, 0.0)
+  assert place.candidates(box, HEART_BOX, HEART_CONTAINER, small, []) == []  # the open fingers do not fit in
+  top = [(0.5, 0.0, HEART_BOX[2])]
+  assert place.rim_spots(box, HEART_BOX, HEART_CONTAINER, (0.0191, 0.0191), []) == pytest.approx(top)
+  assert place.rim_spots(box, HEART_BOX, HEART_CONTAINER, (0.0191, 0.0191), [(0, 0, 0.0191, 0.0191)]) == []
+  assert place.covers((0.02865, 0.02865), HEART_BOX, HEART_CONTAINER)  # the lid
+  assert place.rim_spots(box, HEART_BOX, HEART_CONTAINER, (0.02865, 0.02865), [(0, 0, 0.0191, 0.0191)]) == \
+      pytest.approx(top)
+  assert place.rim_spots(box, HEART_BOX, HEART_CONTAINER, (0.0275, 0.02), []) == []  # neither fits nor covers

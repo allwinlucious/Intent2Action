@@ -74,7 +74,10 @@ def drop(pose, dims, supports: list[Support]) -> tuple[float, str]:
     local_y = -math.sin(yaw) * dx + math.cos(yaw) * dy
     if abs(local_x) > support_dims[0] / 2 or abs(local_y) > support_dims[1] / 2:
       continue
-    top = sz + (container_floor_m if container_floor_m is not None else support_dims[2])
+    # A container's floor, unless the object is wider than its opening (a lid): then it rests on the walls.
+    # shortcut: the wall is taken as the floor thickness and yaw is ignored (true of every catalog box today).
+    lid = container_floor_m is not None and all(d >= s - 2 * container_floor_m for d, s in zip(dims[:2], support_dims[:2]))
+    top = sz + (container_floor_m if container_floor_m is not None and not lid else support_dims[2])
     if top > best_z:
       best_z, best_name = top, name
   return best_z, best_name

@@ -1,0 +1,13 @@
+category: gift
+collision: convexHull
+color:
+- 0.68
+- 0.62
+- 0.59
+color_name: mauve
+dims:
+- 0.0382
+- 0.0382
+- 0.0382
+mass: 0.04
+static: false

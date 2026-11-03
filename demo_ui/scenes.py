@@ -99,7 +99,20 @@ def _held_out() -> list[Preset]:
   return output
 
 
-PRESETS = tuple([*_scripted(), *_held_out()])
+def _heart_box() -> Preset:
+  """The owner's heart boxes (7:11 scale): the small one into the open box, then the lid on."""
+  return Preset(
+    id="heart_box:0",
+    label="Heart box · pack and close",
+    request="put the small heart box into the open box and close the lid",
+    intent=json.loads((EXAMPLES / "heart_box_pack.json").read_text()),
+    placements=(families.Placement("heart_box", 0.50, -0.12, 0.0, 0.0),
+                families.Placement("small_heart_gift", 0.42, 0.10, 0.0, 0.2),
+                families.Placement("heart_lid", 0.60, 0.08, 0.0, -0.1)),
+  )
+
+
+PRESETS = tuple([*_scripted(), _heart_box(), *_held_out()])
 BY_ID = {preset.id: preset for preset in PRESETS}
 
 

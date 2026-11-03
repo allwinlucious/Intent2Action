@@ -34,7 +34,7 @@ def _cylinder(radius: float, height: float) -> trimesh.Trimesh:
 
 
 def _textured_box(x: float, y: float, z: float, faces_dir: Path, top_name: str = "top.png",
-                  front_name: str = "front.png") -> trimesh.Trimesh:
+                  front_name: str = "front.png", back_name: str | None = None) -> trimesh.Trimesh:
   """A box (bottom-centre origin) with one UV region per face on a texture sheet composed from photos of the real
   object: faces_dir/top.png (seen from above, image top = +y) and front.png (the -y face). The back mirrors the
   front, the ends reuse a crop of it, the bottom is the face's plain colour."""
@@ -55,7 +55,9 @@ def _textured_box(x: float, y: float, z: float, faces_dir: Path, top_name: str =
   sheet = Image.new("RGB", (max(2 * tw, 2 * fw + 2 * ew), th + fh), plain)
   sheet.paste(top.resize((tw, th)), (0, 0))
   sheet.paste(front, (0, th))
-  sheet.paste(front.transpose(Image.Transpose.FLIP_LEFT_RIGHT), (fw, th))
+  back = Image.open(faces_dir / back_name).convert("RGB").resize((fw, fh)) if back_name else \
+      front.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+  sheet.paste(back, (fw, th))
   end = front.crop((0, 0, ew, fh))
   sheet.paste(end, (2 * fw, th))
   sheet.paste(end.transpose(Image.Transpose.FLIP_LEFT_RIGHT), (2 * fw + ew, th))
@@ -92,6 +94,21 @@ def _lidded_box(base, lid, faces_dir: Path) -> trimesh.Trimesh:
   upper = _textured_box(*lid, faces_dir, top_name="top.png", front_name="lid_side.png")
   upper.apply_translation((0.0, 0.0, base[2]))
   return trimesh.util.concatenate([lower, upper])
+
+
+def _textured_open_box(x: float, y: float, z: float, wall: float, floor: float, faces_dir: Path) -> trimesh.Trimesh:
+  """An open box (bottom-centre origin) from five textured slabs: walls with chevron.png outside and white.png inside
+  and on their top edge, a white floor. Overlapping closed slabs: a static body collides with the exact triangles."""
+  def slab(length, height, angle, dx, dy):
+    part = _textured_box(length, wall, height, faces_dir, top_name="white.png", front_name="chevron.png",
+                         back_name="white.png")  # front (-y) outward before the turn
+    part.apply_transform(trimesh.transformations.rotation_matrix(angle, (0, 0, 1)))
+    part.apply_translation((dx, dy, 0.0))
+    return part
+  parts = [_textured_box(x, y, floor, faces_dir, top_name="white.png", front_name="chevron.png"),
+           slab(x, z, 0.0, 0.0, -(y - wall) / 2), slab(x, z, np.pi, 0.0, (y - wall) / 2),
+           slab(y - 2 * wall, z, -np.pi / 2, -(x - wall) / 2, 0.0), slab(y - 2 * wall, z, np.pi / 2, (x - wall) / 2, 0.0)]
+  return trimesh.util.concatenate(parts)
 
 
 def _hole_block() -> trimesh.Trimesh:
@@ -135,6 +152,15 @@ OBJECTS = {
     "green_gift": (_lidded_box((0.0795, 0.0541, 0.0382),
                                (0.0827, 0.0573, 0.0127), OUT_DIR / "green_gift"),
                    False, 0.15, (0.12, 0.2, 0.17)),
+    # The owner's heart box at the same scale: an open base 8.8 x 8.6 x 8.6 cm (2 mm walls; static, a container),
+    # its removable lid 9 x 9 x 2.5 cm, and the small heart box (the same design, 6 cm closed) that goes inside.
+    "heart_box": (_textured_open_box(0.056, 0.0547, 0.0547, 0.0013, 0.0013,
+                                     OUT_DIR / "heart_box"), True, None, (0.93, 0.93, 0.94)),
+    "heart_lid": (_textured_box(0.0573, 0.0573, 0.0159, OUT_DIR / "heart_lid"),
+                  False, 0.03, (0.68, 0.62, 0.59)),
+    "small_heart_gift": (_lidded_box((0.0374, 0.0365, 0.0276),
+                                     (0.0382, 0.0382, 0.0106),
+                                     OUT_DIR / "small_heart_gift"), False, 0.04, (0.68, 0.62, 0.59)),
     # The owner's second gift box (white, reindeer and sleigh), the same size.
     "white_gift": (_textured_box(0.07, 0.0573, 0.0255, OUT_DIR / "white_gift"), False, 0.08, (0.92, 0.92, 0.92)),
     # A painted area: 2 mm thick, spawned 1.9 mm into the table so it is flush and a pushed carton slides over it.
@@ -158,6 +184,9 @@ ATTRIBUTES = {
     "red_gift": ("gift", "red"),
     "white_gift": ("gift", "white"),
     "green_gift": ("gift", "green"),
+    "heart_box": ("box", "grey"),
+    "heart_lid": ("lid", "mauve"),
+    "small_heart_gift": ("gift", "mauve"),
     "target_zone": ("zone", "green"),
 }
 # Static/dynamic friction where not build_catalog.py's default 0.5/0.4: the peg
@@ -165,8 +194,11 @@ ATTRIBUTES = {
 FRICTION = {"peg": (0.3, 0.25), "hole_block": (0.3, 0.25), "big_carton": (0.35, 0.3)}
 # Paint only: no collision in Isaac (a pushed object must slide over the zone's edge, not snag on it).
 NO_COLLISION = {"target_zone"}
+# Built from overlapping closed slabs (static: Isaac collides with the exact triangles, the planner with
+# collision_parts), so the merged surface is not one closed shell.
+SLAB_BUILT = {"heart_box"}
 # name: (wall, floor) thickness (m) of the open boxes.
-CONTAINERS = {"red_box": (0.01, 0.01), "blue_box": (0.01, 0.01)}
+CONTAINERS = {"red_box": (0.01, 0.01), "blue_box": (0.01, 0.01), "heart_box": (0.0013, 0.0013)}
 
 
 def _container_parts(x: float, y: float, z: float, wall: float, floor: float) -> list[trimesh.Trimesh]:
@@ -190,7 +222,7 @@ def main() -> int:
   for name, (mesh, static, mass, color) in OBJECTS.items():
     closed = mesh.copy()
     closed.merge_vertices(merge_tex=True, merge_norm=True)  # a textured mesh has one vertex per face corner
-    assert closed.is_watertight, f"{name} is not watertight"
+    assert closed.is_watertight or name in SLAB_BUILT, f"{name} is not watertight"
     out = OUT_DIR / name
     out.mkdir(parents=True, exist_ok=True)
     glb = out / "mesh.glb"

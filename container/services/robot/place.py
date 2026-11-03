@@ -79,6 +79,25 @@ def candidates(target_pose: api.Pose, target_dims, container: dict | None, footp
   return [(target_pose.x + c * x - s * y, target_pose.y + s * x + c * y, z) for x, y in free]
 
 
+def covers(held_half: tuple[float, float], target_dims, container: dict) -> bool:
+  """Whether a held object (half extents in the box frame) is wider than the box opening on both axes: a lid."""
+  return (held_half[0] >= target_dims[0] / 2 - container["wall"]
+          and held_half[1] >= target_dims[1] / 2 - container["wall"])
+
+
+def rim_spots(target_pose: api.Pose, target_dims, container: dict, held_half: tuple[float, float],
+              taken) -> list[Spot]:
+  """The box's top centre, for a held object that the open fingers cannot lower into the box (candidates() is
+  empty): one that covers the opening (a lid) rests on the walls; one that fits the opening is released just
+  above the walls and drops in, if the box is empty."""
+  # shortcut: a lid ignores what is in the box (assumes the contents are lower than the walls); check heights
+  # when tall contents become possible.
+  if covers(held_half, target_dims, container):
+    return [(target_pose.x, target_pose.y, target_pose.z + target_dims[2])]
+  fits = all(h <= d / 2 - container["wall"] - EDGE_MARGIN_M for h, d in zip(held_half, target_dims))
+  return [(target_pose.x, target_pose.y, target_pose.z + target_dims[2])] if fits and not taken else []
+
+
 def release_pose(tcp: api.Pose, held_pose: api.Pose, spot: Spot, clearance: float = RELEASE_CLEARANCE_M) -> api.Pose:
   """`tcp` moved so the held object's bottom centre is `clearance` above the spot."""
   pose = api.Pose()
