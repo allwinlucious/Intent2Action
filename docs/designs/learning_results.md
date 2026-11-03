@@ -35,6 +35,41 @@ Limitations (scope set by the time available):
 - The G4 physics labels were made before the support-collision fix.
 - Plus the open items listed at the end of the code-review corrections below.
 
+## Hosted models through the same pipeline (2026-11-03)
+
+Muse Spark 1.3 and Muse Wonder (Meta Model API) wrote programs for the same 250 held-out requests:
+*   the product's writer prompt, temperature 0, one attempt;
+*   graded 3 times in the plan tier;
+*   their programs also run on the same 50 Isaac tasks.
+
+API spend: $10.
+
+| | plan tier, 250 × 3 | Isaac physics, 50 |
+|---|---|---|
+| Glimmer, base (G0) | 61 % [56–67] | 34/50 |
+| Muse Spark 1.3 | 71 % [67–76] | 37/50 |
+| Muse Wonder | 76 % [72–81] | 37/50 |
+| **fine-tuned Glimmer (G1d)** | **83 % [79–87]** | **42/50** |
+
+**Paired differences** (bootstrap over the same tasks):
+*   G1d − Wonder: **+6.8 points [+2.7, +10.9]**;
+*   G1d − Spark 1.3: **+11.5 points [+6.8, +16.3]**.
+
+**Where the large models lose:**
+*   cluster: Wonder 46 %, ours 61 %;
+*   the unseen `mixed` family: Wonder 63 %, ours 83 %.
+
+Both depend on robot-specific experience: which cube in a tight cluster the fingers can actually reach. Wonder writes
+correct, readable programs (sort red, then blue) but picks a cube wedged between others. The fine-tuned model takes
+the outermost cube of the cluster first, the strategy the expert data taught it.
+
+**Example (the video's side-by-side): `mixed:100002`.**
+*   Wonder and Spark fail all 3 plan-tier runs and in Isaac (Wonder: "no feasible grasp found" on the second red
+    cube).
+*   G1d passes 3/3 and in Isaac.
+
+`mixed` was never trained.
+
 ## One model for writing and recovery (2026-11-02)
 
 The demo used two adapters: G1b writes the program and G1d recovers. The question was whether one adapter can do

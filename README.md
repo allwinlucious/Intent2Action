@@ -27,6 +27,21 @@ from experience").
 | Isaac Sim physics, 50 held-out tasks | 34/50 | **42/50** |
 | Live recovery: failed runs rescued, 20 tasks | 4/20 | **9/20** |
 
+Compared with hosted Meta models through the same pipeline (same prompt, temperature 0, one attempt):
+
+| | plan tier, 250 × 3 | Isaac physics, 50 |
+|---|---|---|
+| Muse Spark 1.3 | 71% [67–76] | 37/50 |
+| Muse Wonder | 76% [72–81] | 37/50 |
+| **fine-tuned Glimmer 30B (G1d)** | **83% [79–87]** | **42/50** |
+
+The fine-tuned open model beats both:
+*   +6.8 points over Wonder (paired 95% [+2.7, +10.9]);
+*   +11.5 over Spark 1.3.
+
+The large models write correct programs but do not know what this robot can grasp, for example a cube wedged in a
+cluster.
+
 *   Intervals are 95% bootstrap over tasks.
 *   The best program writer, G1b, reaches 86% [82–89].
 *   References: the best fixed strategy per task family reaches 84%; an oracle that picks the best strategy per

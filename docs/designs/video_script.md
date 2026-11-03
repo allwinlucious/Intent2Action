@@ -48,7 +48,7 @@ recorded for the video. Shots marked *(to measure)* are filmed only if the measu
 *   **Narration:** "We fine-tuned a small open model on what the robot actually achieved in simulation: learning
     from experience. It learned which order works for which kind of task."
 
-## 1:25–1:50 · Small beats big *(to measure)*
+## 1:25–1:50 · Small beats big (measured 2026-11-03)
 
 *   **Visual:** the same scene twice:
     *   the large hosted model (Muse Spark Open) writes a program that fails, and the log shows why;
@@ -56,10 +56,13 @@ recorded for the video. Shots marked *(to measure)* are filmed only if the measu
 
     Then a bar chart over all 250 tasks: base model, fine-tuned model, large model.
 *   **Data:**
-    *   a task where the large model fails all 3 runs and ours passes all 3, confirmed in Isaac;
-    *   the large model's overall score (X%) next to 83%.
+    *   the task: `mixed:100002` (sorting, an unseen family). Muse Wonder fails all 3 runs and in Isaac ("no
+        feasible grasp found": it picks a cube wedged in the cluster). Ours passes 3/3 and in Isaac, taking the
+        outermost cube first;
+    *   the bar chart: base Glimmer 61%, Muse Spark 1.3 71%, Muse Wonder 76%, ours **83%**;
+    *   Isaac: 34, 37, 37, **42** of 50.
 *   **Narration:** "A model a hundred times larger still fails here, because it has never seen what this robot can
-    actually do. Experience beats size on this task." On the overall numbers: "On average it scores X%."
+    actually do. Experience beats size on this task." On the overall numbers: "Across 250 tasks it scores 76%; ours 83%."
 *   **If the measurement does not support it** (the large model wins everywhere), replace the shot with the
     honest comparison bar chart and the line "a small model gets within N points of one a hundred times its
     size".
