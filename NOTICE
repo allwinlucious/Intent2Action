@@ -1,0 +1,17 @@
+intent-to-motion
+Copyright 2026 Allwin
+
+Licensed under the Apache License, Version 2.0 (LICENSE).
+
+This project builds on the following third-party work. Each part keeps its own licence.
+
+* Intrinsic Core (https://github.com/intrinsic-ai/intrinsic-core), Apache-2.0: the world model, motion planner,
+  real-time control (ICON) and grasp planning services the robot stack runs. Built from source into one container;
+  the generated gRPC stubs in gen/intrinsic/ come from its protos.
+* NVIDIA Isaac Sim 5.1: the physics simulator. It is not redistributed; install it separately under NVIDIA's terms.
+* Franka Panda robot model (franka_description by Franka Emika GmbH, via Isaac Sim), Apache-2.0: see
+  assets/robots/franka/LICENSE.md.
+* tinygltf (third_party/tinygltf), MIT.
+* Muse Glimmer 30B (meta-models/Muse-Glimmer-30B), Apache-2.0: the base model of the published adapters. The
+  fine-tuning recipe and evaluation path follow the Meta model cookbook (Apache-2.0).
+* Muse Spark and Muse Wonder (Meta Model API), Muse Voice Transcribe: used as hosted services; their terms apply.

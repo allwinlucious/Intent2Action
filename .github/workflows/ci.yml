@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Install
+        run: pip install -r requirements-dev.txt
+      - name: Unit tests (no Docker, simulator or GPU)
+        run: python -m pytest tests -q
+
+  results:
+    # The published numbers rebuild from the committed data in results/.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Install
+        run: pip install -r requirements-dev.txt
+      - name: Rebuild the results tables
+        run: |
+          python tools/results.py restore
+          python learn/eval_table.py --repeat 3 G0 G1b G1d | tee table.md
+          python tools/results.py isaac | tee isaac.txt
+      - name: Check the headline numbers
+        run: |
+          grep -E '^\| all \| 61 % \[56–67\] \| 86 % \[82–89\] \| 83 % \[79–87\]' table.md
+          grep -E 'G1d  Isaac physics: 42/50' isaac.txt
