@@ -11,6 +11,7 @@ default 130).
 """
 
 import argparse
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -45,16 +46,25 @@ def cost(model: str, usage: dict) -> float:
   return (usage.get("prompt_tokens", 0) * price_in + usage.get("completion_tokens", 0) * price_out) / 1e6
 
 
+def _ledger(update=None) -> float:
+  """Reads (and with `update`, changes) the spend ledger under a file lock: several runs share it."""
+  with open(LEDGER.with_suffix(".lock"), "w") as lock:
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    ledger = json.loads(LEDGER.read_text()) if LEDGER.exists() else {"total_usd": 0.0, "by_model": {}}
+    if update:
+      model, amount = update
+      ledger["total_usd"] += amount
+      ledger["by_model"][model] = ledger["by_model"].get(model, 0.0) + amount
+      LEDGER.write_text(json.dumps(ledger, indent=1))
+    return ledger["total_usd"]
+
+
 def _spent() -> float:
-  return json.loads(LEDGER.read_text())["total_usd"] if LEDGER.exists() else 0.0
+  return _ledger()
 
 
 def _record(model: str, amount: float) -> float:
-  ledger = json.loads(LEDGER.read_text()) if LEDGER.exists() else {"total_usd": 0.0, "by_model": {}}
-  ledger["total_usd"] += amount
-  ledger["by_model"][model] = ledger["by_model"].get(model, 0.0) + amount
-  LEDGER.write_text(json.dumps(ledger, indent=1))
-  return ledger["total_usd"]
+  return _ledger((model, amount))
 
 
 def main() -> None:
