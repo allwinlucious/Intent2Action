@@ -157,7 +157,7 @@ function showReading(data, correction = "") {
   $("#intent-json").hidden = true;
   $("#intent-readable").hidden = false;
   $("#edit-intent-btn").textContent = "Edit JSON";
-  const note = data.note || "";
+  const note = [data.note, data.heard ? `Heard: “${data.heard}”` : ""].filter(Boolean).join(" · ");
   $("#note-display").hidden = !note;
   $("#note-display").textContent = note;
   if (data.frames || !fromClip) $("#read-frames").innerHTML = (data.frames || []).map((src, index) => `<img src="${src}" alt="Sampled clip frame ${index + 1}" width="64" height="44">`).join("");

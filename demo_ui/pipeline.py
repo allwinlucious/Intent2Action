@@ -3,6 +3,7 @@
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import json
+import logging
 from pathlib import Path
 import queue
 import threading
@@ -19,6 +20,8 @@ from program_runtime.rules import validate_intent
 from program_runtime.runtime import run as runtime_run
 
 from .scenes import BY_ID, PRESETS, Preset, fake_objects
+
+LOG = logging.getLogger("demo_ui")
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -68,10 +71,13 @@ class Pipeline:
       checker=check_intent,
       runner=runtime_run,
       untrained_model: str | None = None,
+      transcriber=None,
   ):
     self.backend = backend
     # The writer for the side-by-side comparison: the same endpoint, the base model without the fine-tuning.
     self.untrained_model = untrained_model
+    # Speech in a clip (a spoken instruction) -> text, added to the clip's note; None: frames and typed note only.
+    self.transcriber = transcriber
     self.api = RobotAPI(backend)
     self.reader = reader
     self.writer = writer
@@ -108,6 +114,16 @@ class Pipeline:
   def _identifier() -> str:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return f"{stamp}-{uuid.uuid4().hex[:8]}"
+
+  def _heard(self, path: Path) -> str:
+    """The clip's speech as text; a failure is logged and the clip is read from frames and the typed note."""
+    if self.transcriber is None:
+      return ""
+    try:
+      return self.transcriber(path)
+    except Exception as error:  # pylint: disable=broad-except
+      LOG.warning("transcription failed for %s: %s", path.name, error)
+      return ""
 
   @staticmethod
   def _reading_output(reading) -> dict:
@@ -239,7 +255,9 @@ class Pipeline:
       self.trail_events = []
       self._stage_trail("read", "start")
     try:
-      reading = self._model_call(lambda: self.reader.read_clip(path, note=note or None))
+      heard = self._heard(path)
+      combined = "; ".join(part for part in (note, heard) if part)[:1000]
+      reading = self._model_call(lambda: self.reader.read_clip(path, note=combined or None))
     except Exception as error:
       with self.lock:
         self._stage_trail("read", "failed", str(error))
@@ -255,9 +273,9 @@ class Pipeline:
               for value in reading.frames]
     output = {
       **self._reading_output(reading), "round": 1, "attempt_id": attempt_id,
-      "note": note or "", "frames": frames,
+      "note": note or "", "heard": heard, "frames": frames,
     }
-    self._attempt_record("reading", {"clip": path.name, "note": note}, output, attempt_id)
+    self._attempt_record("reading", {"clip": path.name, "note": note, "heard": heard}, output, attempt_id)
     return output
 
   def clarify(self, correction: str) -> dict:

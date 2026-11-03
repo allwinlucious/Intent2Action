@@ -323,3 +323,34 @@ def test_writer_switch_routes_to_the_untrained_model(demo):
   _, written = post(base, "/api/write", {"intent": reading["intent"], "confirm": True})
   assert written["writer"] == "fine_tuned" and models[-1] == "G1d"
   assert post_error(base, "/api/write", {"intent": reading["intent"], "confirm": True, "writer": "big"})[0] == 400
+
+
+def _silent_clip(path):
+  writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"MJPG"), 10, (64, 48))
+  for value in range(10):
+    writer.write(np.full((48, 64, 3), value * 20, dtype=np.uint8))
+  writer.release()
+  return path
+
+
+def test_clip_speech_joins_the_note_and_a_failure_does_not_block(demo, tmp_path):
+  _, server = demo
+  pipeline, seen = server.pipeline, []
+  original = pipeline.reader.read_clip
+  pipeline.reader.read_clip = lambda path, **k: (seen.append(k.get("note")), original(path, **k))[1]
+  clip = _silent_clip(tmp_path / "clip.avi")
+  pipeline.transcriber = lambda path: "only the red ones"
+  output = pipeline.read_clip(clip, "into the blue box")
+  assert output["heard"] == "only the red ones" and seen[-1] == "into the blue box; only the red ones"
+  pipeline.transcriber = lambda path: (_ for _ in ()).throw(RuntimeError("asr down"))
+  output = pipeline.read_clip(clip, None)
+  assert output["heard"] == "" and seen[-1] is None
+
+
+def test_transcribe_returns_empty_for_a_clip_without_audio(tmp_path, monkeypatch):
+  from program_runtime import transcribe as module
+  monkeypatch.setattr(module.urllib.request, "urlopen", lambda *a, **k: pytest.fail("no audio: no API call"))
+  assert module.transcribe(_silent_clip(tmp_path / "silent.avi"), key="test") == ""
+  body, content_type = module.multipart([("request", "", "application/json", b"{}"), ("audio", "a.wav", "audio/wav", b"RIFF")])
+  boundary = content_type.split("boundary=")[1]
+  assert body.count(f"--{boundary}".encode()) == 3 and b'name="audio"; filename="a.wav"' in body

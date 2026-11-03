@@ -21,6 +21,7 @@ import numpy as np
 from mcp_server.server import DESCRIPTOR_SET, Tools
 from program_runtime.agent import ChatClient, ProgramWriter, RecoveryAgent
 from program_runtime.api import FakeBackend, GrpcBackend
+from program_runtime.transcribe import transcribe
 from program_runtime.reader import IntentReader
 from program_runtime.rules import validate_intent
 
@@ -488,6 +489,7 @@ def build_server(
     pipeline = Pipeline(
       backend, reader, writer, agent, fake=False, robot_stub=robot_stub, sim_stub=sim_stub,
       untrained_model=reader_model,
+      transcriber=transcribe if os.environ.get("META_API_KEY") else None,
     )
   return DemoHTTPServer(port, pipeline, FrameWatcher(frames, fake=fake))
 
