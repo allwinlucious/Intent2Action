@@ -78,6 +78,8 @@ def main() -> int:
   source.add_argument("--from-eval", metavar="VERSION")
   parser.add_argument("--name", required=True)
   parser.add_argument("--address", default="127.0.0.1:18100")
+  parser.add_argument("--recover", metavar="MODEL", help="a model version as the recovery agent (LLM_BASE_URL)")
+  parser.add_argument("--answer", help="the operator's reply if the recovery agent asks (logged as such)")
   args = parser.parse_args()
 
   import families
@@ -94,8 +96,37 @@ def main() -> int:
   VIDEOS.mkdir(parents=True, exist_ok=True)
   PROOF.mkdir(parents=True, exist_ok=True)
   events = (PROOF / f"{args.name}.events.jsonl").open("w")  # in the repo: what the robot was told and did
-  result = run(program, RobotAPI(GrpcBackend(args.address)),
-               log=lambda event: events.write(json.dumps(event, separators=(",", ":")) + "\n"))
+
+  def log(event: dict) -> None:
+    events.write(json.dumps(event, separators=(",", ":")) + "\n")
+    events.flush()
+
+  hooks = {}
+  if args.recover:
+    # The operator's part is scripted for a recorded take: the reply to a question, and approval of every patch
+    # and every robot move the agent asks for; each is logged with what was approved.
+    import grpc
+    from mcp_server.server import DESCRIPTOR_SET, Tools
+    from program_runtime.agent import ChatClient, RecoveryAgent
+    from robot_service import robot_service_pb2_grpc as api_grpc
+    agent = RecoveryAgent(ChatClient(model=args.recover), api_grpc.RobotServiceStub(grpc.insecure_channel(args.address)),
+                          Tools(DESCRIPTOR_SET), model=args.recover)
+
+    def approve_tool(name, arguments):
+      log({"type": "operator", "approved_tool": name, "arguments": arguments})
+      return True, ""
+
+    def ask(question):
+      log({"type": "operator", "question": question, "answer": args.answer})
+      return args.answer or ""
+
+    def approve(patch, reason):
+      log({"type": "operator", "approved_patch": patch, "reason": reason})
+      return True, ""
+
+    agent.approve_tool = approve_tool
+    hooks = {"agent": agent, "ask": ask, "approve": approve}
+  result = run(program, RobotAPI(GrpcBackend(args.address)), log=log, **hooks)
   events.close()
   time.sleep(SETTLE_S)
   last = _newest_index()

@@ -1,0 +1,32 @@
+{"t":1793800551.7509754,"kind":"check","problems":[]}
+{"t":1793800551.7584658,"kind":"dry_run","ok":true,"error":null}
+{"t":1793800551.7586792,"kind":"line","line":1}
+{"t":1793800551.7587059,"kind":"call","fn":"find","args":["category=zone","color=green"]}
+{"t":1793800551.7638295,"kind":"result","fn":"find","ok":true,"message":""}
+{"t":1793800551.7638547,"kind":"line","line":2}
+{"t":1793800551.7638624,"kind":"line","line":3}
+{"t":1793800551.7638714,"kind":"call","fn":"find_all","args":["category=carton"]}
+{"t":1793800551.768955,"kind":"result","fn":"find_all","ok":true,"message":""}
+{"t":1793800551.7689817,"kind":"call","fn":"on_top","args":["obj_50","obj_33"]}
+{"t":1793800551.7735488,"kind":"result","fn":"on_top","ok":true,"message":""}
+{"t":1793800551.7735724,"kind":"line","line":4}
+{"t":1793800551.7735803,"kind":"line","line":6}
+{"t":1793800551.773585,"kind":"line","line":7}
+{"t":1793800551.7735891,"kind":"line","line":8}
+{"t":1793800551.7735922,"kind":"line","line":10}
+{"t":1793800551.7735953,"kind":"line","line":11}
+{"t":1793800551.7736025,"kind":"call","fn":"pick","args":["obj_50"]}
+{"t":1793800551.7787495,"kind":"result","fn":"pick","ok":false,"message":"operations/Pick-3: object wider than the gripper opening (0.075 m) in every horizontal direction"}
+{"t":1793800551.7787874,"kind":"failure","failure_kind":"grasp","message":"operations/Pick-3: object wider than the gripper opening (0.075 m) in every horizontal direction","call":"pick(obj_50)","line":11}
+{"t":1793800551.7787993,"kind":"handoff","n":1}
+{"t":1793800576.7839363,"kind":"decision","rung":"ask_user","reason":"pick(obj_50) failed: the carton is 0.12 x 0.12 m, narrowest side 0.12 m, and the gripper opens 0.075 m, so there is no grasp; retrying or another order cannot help","patch":null,"question":"I can't pick up the carton: it is wider than the gripper opens. I could push it onto the green zone with force-limited moves instead. Should I try?"}
+{"type":"operator","question":"I can't pick up the carton: it is wider than the gripper opens. I could push it onto the green zone with force-limited moves instead. Should I try?","answer":"can you get it done somehow?"}
+{"type":"operator","approved_tool":"release","arguments":{}}
+{"type":"operator","approved_tool":"move_to_pose","arguments":{"pose":{"x":0.5011,"y":0.305,"z":0.15,"qx":0.7243,"qy":0.6895,"qz":-0.0,"qw":-0.0},"motion":"ANY","tool":"TCP"}}
+{"type":"operator","approved_tool":"move_to_pose","arguments":{"pose":{"x":0.5011,"y":0.305,"z":0.02,"qx":0.7243,"qy":0.6895,"qz":-0.0,"qw":-0.0},"motion":"LINEAR","tool":"TCP"}}
+{"type":"operator","approved_tool":"move_to_pose","arguments":{"pose":{"x":0.5011,"y":0.305,"z":0.13,"qx":0.7243,"qy":0.6895,"qz":-0.0,"qw":-0.0},"motion":"ANY","tool":"TCP"}}
+{"type":"operator","approved_tool":"move_to_contact","arguments":{"dx":-0.0011,"dy":-1.0,"dz":0.0,"max_force":10.0,"speed":0.01}}
+{"type":"operator","approved_tool":"move_to_pose","arguments":{"pose":{"x":0.5011,"y":0.305,"z":0.13,"qx":0.7243,"qy":0.6895,"qz":-0.0,"qw":-0.0},"motion":"ANY","tool":"TCP"}}
+{"type":"operator","approved_tool":"move_to_pose","arguments":{"pose":{"x":0.5011,"y":0.305,"z":0.15,"qx":0.7243,"qy":0.6895,"qz":-0.0,"qw":-0.0},"motion":"ANY","tool":"TCP"}}
+{"t":1793800964.6605108,"kind":"decision","rung":"ask_user","reason":"move_to_contact failed: the top_first order was wrong; the most_free_first order would have a better chance","patch":null,"question":"I could try the most_free_first order instead: first push the carton onto the table (4 cm), then onto the green zone (35 cm). Should I try?"}
+{"t":1793800964.6605732,"kind":"done","ok":false,"error":"grasp: operations/Pick-3: object wider than the gripper opening (0.075 m) in every horizontal direction (line 11)","handoffs":1,"patches":0}

@@ -178,6 +178,19 @@ def agreement(version: str) -> None:
       print(f"  physics-only failure {key}: {(value.get('error') or '')[:160]}")
 
 
+def reuse(version: str, source: str) -> None:
+  """Seeds <version>'s Isaac episodes with <source>'s where both versions wrote the identical program for the task
+  (marked reused_from): `run` then resumes and runs only the tasks whose programs differ."""
+  programs = {(v["family"], v["seed"]): v["program"] for v in read_jsonl(LOGS / f"{version}_programs.jsonl")}
+  out = LOGS / f"{version}_isaac_episodes.jsonl"
+  have = {(v["family"], v["seed"], v["sample"]) for v in read_jsonl(out)}
+  reused = [{**v, "reused_from": source} for v in read_jsonl(LOGS / f"{source}_isaac_episodes.jsonl")
+            if programs.get((v["family"], v["seed"])) == v["program"] and (v["family"], v["seed"], v["sample"]) not in have]
+  with out.open("a") as handle:
+    handle.writelines(json.dumps(v) + "\n" for v in reused)
+  print(f"{version}: {len(reused)} Isaac episodes reused from {source} (identical programs)", flush=True)
+
+
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
   sub = parser.add_subparsers(dest="command", required=True)
@@ -187,6 +200,9 @@ if __name__ == "__main__":
   p = sub.add_parser("agreement")
   p.add_argument("--version", required=True)
   sub.add_parser("label")
+  p = sub.add_parser("reuse")
+  p.add_argument("--version", required=True)
+  p.add_argument("--from", dest="source", required=True)
   p = sub.add_parser("video")
   p.add_argument("--tasks", nargs="+", required=True, help="family:seed ...")
   p.add_argument("--versions", nargs="+", required=True)
@@ -197,5 +213,7 @@ if __name__ == "__main__":
     agreement(args.version)
   elif args.command == "label":
     label()
+  elif args.command == "reuse":
+    reuse(args.version, args.source)
   else:
     video(args.tasks, args.versions)

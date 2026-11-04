@@ -112,7 +112,21 @@ def _heart_box() -> Preset:
   )
 
 
-PRESETS = tuple([*_scripted(), _heart_box(), *_held_out()])
+def _carton() -> Preset:
+  """A carton wider than the gripper opens, to go onto the painted zone (tests/e2e/push_check.py's layout)."""
+  return Preset(
+    id="carton:0",
+    label="Carton onto the zone · too wide to grasp",
+    request="put the carton on the green zone",
+    intent={"description": "the carton goes on the green zone",
+            "rules": [{"select": {"category": "carton"}, "relation": "on", "target": {"category": "zone", "color": "green"}}],
+            "others": "stay"},
+    placements=(families.Placement("big_carton", 0.50, 0.22, 0.0, 0.0),
+                families.Placement("target_zone", 0.50, -0.15, -0.0019, 0.0)),
+  )
+
+
+PRESETS = tuple([*_scripted(), _heart_box(), _carton(), *_held_out()])
 BY_ID = {preset.id: preset for preset in PRESETS}
 
 

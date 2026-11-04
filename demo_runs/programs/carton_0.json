@@ -1,0 +1,22 @@
+{
+ "scene": "carton:0",
+ "request": "put the carton on the green zone",
+ "intent": {
+  "description": "the carton goes on the green zone",
+  "rules": [
+   {
+    "select": {
+     "category": "carton"
+    },
+    "relation": "on",
+    "target": {
+     "category": "zone",
+     "color": "green"
+    }
+   }
+  ],
+  "others": "stay"
+ },
+ "program": "zone = find(category=\"zone\", color=\"green\")\nwhile True:\n  todo = [(o, zone) for o in find_all(category=\"carton\") if not on_top(o, zone)]\n  if not todo:\n    break\n  p = todo[0]\n  held_now = [q for q in todo if q[0].attached]\n  if held_now:\n    p = held_now[0]\n  if not p[0].attached:\n    pick(p[0])\n  place(p[0], p[1])\nverify(lambda: all(on_top(o, zone) for o in find_all(category=\"carton\")), \"a carton is not on the green zone\")\n",
+ "attempts": 1
+}
