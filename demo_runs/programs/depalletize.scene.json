@@ -1,0 +1,69 @@
+{
+ "placements": [
+  {
+   "catalog": "red_cube",
+   "x": 0.455,
+   "y": 0.0875,
+   "z": 0.0,
+   "yaw": 0.0
+  },
+  {
+   "catalog": "red_cube",
+   "x": 0.455,
+   "y": 0.1525,
+   "z": 0.0,
+   "yaw": 0.0
+  },
+  {
+   "catalog": "red_cube",
+   "x": 0.52,
+   "y": 0.0875,
+   "z": 0.0,
+   "yaw": 0.0
+  },
+  {
+   "catalog": "red_cube",
+   "x": 0.52,
+   "y": 0.1525,
+   "z": 0.0,
+   "yaw": 0.0
+  },
+  {
+   "catalog": "red_cube",
+   "x": 0.585,
+   "y": 0.0875,
+   "z": 0.0,
+   "yaw": 0.0
+  },
+  {
+   "catalog": "red_cube",
+   "x": 0.585,
+   "y": 0.1525,
+   "z": 0.0,
+   "yaw": 0.0
+  },
+  {
+   "catalog": "red_box",
+   "x": 0.4,
+   "y": -0.22,
+   "z": 0.0,
+   "yaw": 0.0
+  }
+ ],
+ "intent": {
+  "description": "unload the layer: every cube goes into the red box",
+  "rules": [
+   {
+    "select": {
+     "category": "cube"
+    },
+    "relation": "in",
+    "target": {
+     "category": "box",
+     "color": "red"
+    }
+   }
+  ],
+  "others": "stay"
+ }
+}

@@ -1,0 +1,13 @@
+{"t":1793758264.8526156,"kind":"check","problems":[]}
+{"t":1793758264.8644998,"kind":"dry_run","ok":true,"error":null}
+{"t":1793758264.86464,"kind":"line","line":1}
+{"t":1793758264.864661,"kind":"call","fn":"find","args":["category=box","color=blue"]}
+{"t":1793758264.8728747,"kind":"result","fn":"find","ok":true,"message":""}
+{"t":1793758264.872893,"kind":"line","line":2}
+{"t":1793758264.8729038,"kind":"call","fn":"find_all","args":["category=cube"]}
+{"t":1793758264.8809083,"kind":"result","fn":"find_all","ok":true,"message":""}
+{"t":1793758264.880925,"kind":"line","line":3}
+{"t":1793758264.8809352,"kind":"call","fn":"pick","args":["obj_44"]}
+{"t":1793758265.25916,"kind":"result","fn":"pick","ok":false,"message":"operations/Pick-34: no feasible grasp found (see grasp_planner.log): goal status 6, MoveIt error code 99999"}
+{"t":1793758265.2592087,"kind":"failure","failure_kind":"grasp","message":"operations/Pick-34: no feasible grasp found (see grasp_planner.log): goal status 6, MoveIt error code 99999","call":"pick(obj_44)","line":3}
+{"t":1793758265.2593172,"kind":"done","ok":false,"error":"grasp: operations/Pick-34: no feasible grasp found (see grasp_planner.log): goal status 6, MoveIt error code 99999 (line 3)","handoffs":0,"patches":0}

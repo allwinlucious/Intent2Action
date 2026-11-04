@@ -1,0 +1,34 @@
+{"t":1793758471.5648103,"kind":"check","problems":[]}
+{"t":1793758471.58147,"kind":"dry_run","ok":true,"error":null}
+{"t":1793758471.5817616,"kind":"line","line":1}
+{"t":1793758471.5818167,"kind":"call","fn":"find","args":["category=box","color=red"]}
+{"t":1793758471.5914989,"kind":"result","fn":"find","ok":true,"message":""}
+{"t":1793758471.591531,"kind":"line","line":2}
+{"t":1793758471.5915425,"kind":"line","line":3}
+{"t":1793758471.5915534,"kind":"call","fn":"find_all","args":["category=cube"]}
+{"t":1793758471.6008432,"kind":"result","fn":"find_all","ok":true,"message":""}
+{"t":1793758471.6008644,"kind":"call","fn":"inside","args":["obj_17","obj_91"]}
+{"t":1793758471.6099505,"kind":"result","fn":"inside","ok":true,"message":""}
+{"t":1793758471.6099722,"kind":"call","fn":"inside","args":["obj_51","obj_91"]}
+{"t":1793758471.618748,"kind":"result","fn":"inside","ok":true,"message":""}
+{"t":1793758471.6187692,"kind":"call","fn":"inside","args":["obj_66","obj_91"]}
+{"t":1793758471.6274836,"kind":"result","fn":"inside","ok":true,"message":""}
+{"t":1793758471.6275058,"kind":"call","fn":"inside","args":["obj_69","obj_91"]}
+{"t":1793758471.6367183,"kind":"result","fn":"inside","ok":true,"message":""}
+{"t":1793758471.6367402,"kind":"call","fn":"inside","args":["obj_74","obj_91"]}
+{"t":1793758471.6467934,"kind":"result","fn":"inside","ok":true,"message":""}
+{"t":1793758471.6468153,"kind":"call","fn":"inside","args":["obj_77","obj_91"]}
+{"t":1793758471.6568315,"kind":"result","fn":"inside","ok":true,"message":""}
+{"t":1793758471.6568494,"kind":"line","line":4}
+{"t":1793758471.656856,"kind":"line","line":6}
+{"t":1793758471.656862,"kind":"line","line":7}
+{"t":1793758471.6568687,"kind":"line","line":8}
+{"t":1793758471.656874,"kind":"line","line":9}
+{"t":1793758471.656885,"kind":"line","line":10}
+{"t":1793758471.6568906,"kind":"line","line":11}
+{"t":1793758471.6568935,"kind":"line","line":13}
+{"t":1793758471.6568956,"kind":"line","line":14}
+{"t":1793758471.656903,"kind":"call","fn":"pick","args":["obj_69"]}
+{"t":1793758472.0374205,"kind":"result","fn":"pick","ok":false,"message":"operations/Pick-50: no feasible grasp found (see grasp_planner.log): goal status 6, MoveIt error code 99999"}
+{"t":1793758472.0374694,"kind":"failure","failure_kind":"grasp","message":"operations/Pick-50: no feasible grasp found (see grasp_planner.log): goal status 6, MoveIt error code 99999","call":"pick(obj_69)","line":14}
+{"t":1793758472.0375073,"kind":"done","ok":false,"error":"grasp: operations/Pick-50: no feasible grasp found (see grasp_planner.log): goal status 6, MoveIt error code 99999 (line 14)","handoffs":0,"patches":0}

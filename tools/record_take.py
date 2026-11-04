@@ -33,6 +33,9 @@ def _task(scene: str):
   if scene in BY_ID:
     preset = BY_ID[scene]
     return preset.placements, preset.intent
+  if scene.endswith(".json"):  # a scene saved as {"placements": [...], "intent": {...}}
+    value = json.loads(Path(scene).read_text())
+    return [families.Placement(**p) for p in value["placements"]], value["intent"]
   family, seed = scene.split(":")
   task = families.generate(family, int(seed))
   return task.placements, task.intent
