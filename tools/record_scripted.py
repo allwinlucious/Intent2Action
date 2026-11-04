@@ -86,8 +86,9 @@ def _release_peg():
   cuj._gripper("Release")
   cuj._call(cuj._robot, "DetachObject", api.ObjectRequest(id=p5b._id[p5b.PEG]))
   cuj._call(cuj._robot, "SetPayload", api.SetPayloadRequest(mass=0.0))
-  tcp = cuj._state().tool_pose
-  cuj._move("MoveToPose", pose=cuj._at(tcp, tcp.x, tcp.y, tcp.z + 0.1), motion=api.LINEAR)
+  # After a jam the peg still touches the block and the fingers, so no lift can be planned: take it away first.
+  cuj._call(cuj._sim, "RemoveObject", api.ObjectRequest(id=p5b._id[p5b.PEG]))
+  time.sleep(1.0)
   cuj._move("Home")
 
 
@@ -108,12 +109,13 @@ def fail_peg_jam():
 def fail_box_full():
   """Eight cubes for a box that takes six: it packs six, then finds no free spot."""
   import families
-  spots = [(0.36 + 0.08 * (i % 4), 0.04 + 0.09 * (i // 4)) for i in range(8)]
+  spots = [(0.34 + 0.10 * (i % 4), 0.06 + 0.11 * (i // 4)) for i in range(8)]
   cubes = [families.Placement(("red_cube", "blue_cube", "green_cube")[i % 3], x, y, 0.0, 0.1 * i)
            for i, (x, y) in enumerate(spots)]
   first, result = _program([*cubes, families.Placement("red_box", 0.42, -0.22, 0.0, 0.0)],
                            'box = find(category="box", color="red")\nfor cube in find_all(category="cube"):\n'
-                           '  pick(cube)\n  place(cube, box)\n')
+                           '  pick(cube)\n  place(cube, box)\n'
+                           'verify(lambda: all(inside(c, box) for c in find_all(category="cube")), "a cube is not in the box")\n')
   return first, f"FAILED as scripted: {result}" if result != "OK" else "OK (did not fail)"
 
 
