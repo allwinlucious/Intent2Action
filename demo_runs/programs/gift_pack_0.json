@@ -1,0 +1,33 @@
+{
+ "scene": "gift_stack:0",
+ "intent": {
+  "description": "the small heart gift goes into the grey box, then the lid goes on the grey box",
+  "rules": [
+   {
+    "select": {
+     "category": "gift",
+     "color": "mauve"
+    },
+    "relation": "in",
+    "target": {
+     "category": "box",
+     "color": "grey"
+    }
+   },
+   {
+    "select": {
+     "category": "lid"
+    },
+    "relation": "on",
+    "target": {
+     "category": "box",
+     "color": "grey"
+    }
+   }
+  ],
+  "others": "stay"
+ },
+ "program": "box = find(category=\"box\", color=\"grey\")\nwhile True:\n  todo = [(o, box) for o in find_all(category=\"gift\", color=\"mauve\") if not inside(o, box)] + [(o, box) for o in find_all(category=\"lid\") if not on_top(o, box)]\n  if not todo:\n    break\n  p = todo[0]\n  held_now = [q for q in todo if q[0].attached]\n  if held_now:\n    p = held_now[0]\n  if not p[0].attached:\n    pick(p[0])\n  place(p[0], p[1])\nverify(lambda: all(inside(o, box) for o in find_all(category=\"gift\", color=\"mauve\")) and all(on_top(o, box) for o in find_all(category=\"lid\")), \"a mauve gift is not in the grey box or a lid is not on the grey box\")\n",
+ "attempts": 2,
+ "source": "rules from the clip reading (12 frames + corrections), the pack-and-close part"
+}

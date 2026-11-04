@@ -1,0 +1,22 @@
+{
+ "clip": "IMG_3749.MOV",
+ "frames": 6,
+ "seen": "The person stacks a white box onto the dark green patterned box, with the red boxes remaining stacked together and the other items left in place.",
+ "intent": {
+  "description": "a white box is placed on the green box",
+  "rules": [
+   {
+    "select": {
+     "category": "box",
+     "color": "white"
+    },
+    "relation": "on",
+    "target": {
+     "category": "box",
+     "color": "green"
+    }
+   }
+  ],
+  "others": "stay"
+ }
+}

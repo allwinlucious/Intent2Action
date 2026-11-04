@@ -145,7 +145,29 @@ def _gift_stack() -> Preset:
   )
 
 
-PRESETS = tuple([*_scripted(), _heart_box(), _carton(), _gift_stack(), *_held_out()])
+def _gift_pack() -> Preset:
+  """The pack-and-close part of the owner's clip, next to the red gifts already stacked and the green gift."""
+  h = 0.0255  # red_gift height
+  return Preset(
+    id="gift_pack:0",
+    label="Gifts · pack and close (reds stacked)",
+    request="put the small heart box into the grey box and close the lid",
+    intent={"description": "the small heart gift goes into the grey box, then the lid goes on",
+            "rules": [{"select": {"category": "gift", "color": "mauve"}, "relation": "in",
+                       "target": {"category": "box", "color": "grey"}},
+                      {"select": {"category": "lid"}, "relation": "on", "target": {"category": "box", "color": "grey"}}],
+            "others": "stay"},
+    placements=(families.Placement("red_gift", 0.50, 0.12, 0.0, 0.0),
+                families.Placement("red_gift", 0.50, 0.12, h, 0.0),
+                families.Placement("red_gift", 0.50, 0.12, 2 * h, 0.0),
+                families.Placement("green_gift", 0.50, -0.02, 0.0, 0.0),
+                families.Placement("heart_box", 0.40, -0.20, 0.0, 0.0),
+                families.Placement("small_heart_gift", 0.58, -0.20, 0.0, 0.2),
+                families.Placement("heart_lid", 0.66, 0.06, 0.0, -0.1)),
+  )
+
+
+PRESETS = tuple([*_scripted(), _heart_box(), _carton(), _gift_stack(), _gift_pack(), *_held_out()])
 BY_ID = {preset.id: preset for preset in PRESETS}
 
 

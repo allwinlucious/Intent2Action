@@ -1,0 +1,42 @@
+{
+ "intent": {
+  "description": "red gifts are stacked, mauve gift goes into grey box, lid goes on grey box, grey box goes on green gift",
+  "rules": [
+   {
+    "select": {
+     "category": "gift",
+     "color": "mauve"
+    },
+    "relation": "in",
+    "target": {
+     "category": "box",
+     "color": "grey"
+    }
+   },
+   {
+    "select": {
+     "category": "lid"
+    },
+    "relation": "on",
+    "target": {
+     "category": "box",
+     "color": "grey"
+    }
+   },
+   {
+    "select": {
+     "category": "box",
+     "color": "grey"
+    },
+    "relation": "on",
+    "target": {
+     "category": "gift",
+     "color": "green"
+    }
+   }
+  ],
+  "others": "stay"
+ },
+ "program": "box = find(category=\"box\", color=\"grey\")\ngift = find(category=\"gift\", color=\"green\")\nwhile True:\n  todo = [(o, box) for o in find_all(category=\"gift\", color=\"mauve\") if not inside(o, box)] + [(box, gift) if not on_top(box, gift) else None for _ in [0]] + [(o, box) for o in find_all(category=\"lid\") if not on_top(o, box)]\n  if not todo:\n    break\n  p = todo[0]\n  if p is None:\n    continue\n  held_now = [q for q in todo if q[0].attached]\n  if held_now:\n    p = held_now[0]\n  if not p[0].attached:\n    pick(p[0])\n  place(p[0], p[1])\nverify(lambda: all(inside(o, box) for o in find_all(category=\"gift\", color=\"mauve\")) and all(on_top(o, box) for o in find_all(category=\"lid\")) and on_top(box, gift), \"a mauve gift is not in the grey box or a lid is not on the grey box or the grey box is not on the green gift\")\n",
+ "note": "the red-stack rule removed: three identical red gifts cannot be told apart by the rule language"
+}

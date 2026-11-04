@@ -1,0 +1,145 @@
+{
+ "clip": "IMG_3749.MOV",
+ "frames": 12,
+ "first_seen": "A person stacks the red gift boxes on top of each other and then places white boxes on top of the dark green gift box, ending with a stack of red boxes and a stack of white boxes sitting on the green box.",
+ "first_rules": [
+  {
+   "select": {
+    "category": "box",
+    "color": "red"
+   },
+   "relation": "on",
+   "target": {
+    "category": "box",
+    "color": "red"
+   }
+  },
+  {
+   "select": {
+    "category": "box",
+    "color": "white"
+   },
+   "relation": "on",
+   "target": {
+    "category": "box",
+    "color": "green"
+   }
+  },
+  {
+   "select": {
+    "category": "box",
+    "color": "white"
+   },
+   "relation": "on",
+   "target": {
+    "category": "box",
+    "color": "white"
+   }
+  }
+ ],
+ "corrections": [
+  "the red ones are gifts, stacked into one tower; the small mauve heart gift goes inside the grey box, the lid goes on the grey box, and the grey box goes on the green gift",
+  "use these names: the red boxes are category gift, colour red; the small heart box is category gift, colour mauve; the chevron box is category box, colour grey; the lid is category lid; the dark green box is category gift, colour green"
+ ],
+ "second_rules": [
+  {
+   "select": {
+    "category": "box",
+    "color": "red"
+   },
+   "relation": "on",
+   "target": {
+    "category": "box",
+    "color": "red"
+   }
+  },
+  {
+   "select": {
+    "category": "box",
+    "color": "white",
+    "size": "small"
+   },
+   "relation": "in",
+   "target": {
+    "category": "box",
+    "color": "white",
+    "size": "medium"
+   }
+  },
+  {
+   "select": {
+    "category": "box",
+    "color": "white",
+    "size": "large"
+   },
+   "relation": "on",
+   "target": {
+    "category": "box",
+    "color": "white",
+    "size": "medium"
+   }
+  },
+  {
+   "select": {
+    "category": "box",
+    "color": "white",
+    "size": "medium"
+   },
+   "relation": "on",
+   "target": {
+    "category": "box",
+    "color": "green"
+   }
+  }
+ ],
+ "seen": "The red gift boxes are stacked into a tower, the mauve heart gift is placed inside the grey chevron box, the lid is placed on the grey box, and the closed grey box is placed on top of the dark green gift box.",
+ "intent": {
+  "description": "red gifts are stacked, mauve gift goes into grey box, lid goes on grey box, grey box goes on green gift",
+  "rules": [
+   {
+    "select": {
+     "category": "gift",
+     "color": "red"
+    },
+    "relation": "on",
+    "target": {
+     "category": "gift",
+     "color": "red"
+    }
+   },
+   {
+    "select": {
+     "category": "gift",
+     "color": "mauve"
+    },
+    "relation": "in",
+    "target": {
+     "category": "box",
+     "color": "grey"
+    }
+   },
+   {
+    "select": {
+     "category": "lid"
+    },
+    "relation": "on",
+    "target": {
+     "category": "box",
+     "color": "grey"
+    }
+   },
+   {
+    "select": {
+     "category": "box",
+     "color": "grey"
+    },
+    "relation": "on",
+    "target": {
+     "category": "gift",
+     "color": "green"
+    }
+   }
+  ],
+  "others": "stay"
+ }
+}

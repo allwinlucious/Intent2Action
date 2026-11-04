@@ -66,7 +66,7 @@ def typed_program(base, text="put all the cubes in the red box"):
   return reading, written
 
 
-def test_page_static_files_and_eighteen_scenes(demo):
+def test_page_static_files_and_nineteen_scenes(demo):
   base, _ = demo
   for path, content_type in (("/", "text/html"), ("/app.js", "text/javascript"),
                              ("/style.css", "text/css")):
@@ -74,7 +74,7 @@ def test_page_static_files_and_eighteen_scenes(demo):
     assert status == 200 and headers.get_content_type() == content_type and body
   _, _, body = get(base, "/api/scenes")
   scenes = json.loads(body)
-  assert len(scenes) == 18
+  assert len(scenes) == 19
   assert set(scenes[0]) == {"id", "label", "request"}
 
 

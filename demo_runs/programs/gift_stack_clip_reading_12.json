@@ -1,0 +1,44 @@
+{
+ "clip": "IMG_3749.MOV",
+ "frames": 12,
+ "seen": "A person stacks the red gift boxes on top of each other and then places white boxes on top of the dark green gift box, ending with a stack of red boxes and a stack of white boxes sitting on the green box.",
+ "intent": {
+  "description": "red boxes are stacked on each other and white boxes are placed on the green box",
+  "rules": [
+   {
+    "select": {
+     "category": "box",
+     "color": "red"
+    },
+    "relation": "on",
+    "target": {
+     "category": "box",
+     "color": "red"
+    }
+   },
+   {
+    "select": {
+     "category": "box",
+     "color": "white"
+    },
+    "relation": "on",
+    "target": {
+     "category": "box",
+     "color": "green"
+    }
+   },
+   {
+    "select": {
+     "category": "box",
+     "color": "white"
+    },
+    "relation": "on",
+    "target": {
+     "category": "box",
+     "color": "white"
+    }
+   }
+  ],
+  "others": "stay"
+ }
+}
