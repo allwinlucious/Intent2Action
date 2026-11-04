@@ -157,7 +157,7 @@ The physics labels for G4 were measured before this fix, so G4's stacking relabe
 
 ## Corrections after an independent code review (2026-11-01, evening)
 
-Three the reviewer reviewers (training, evaluation, robot code; read-only) found defects that change reported results:
+An independent code review (training, evaluation, robot code; read-only) found defects that change reported results:
 
 1. **GRPO runs G6, G7, G7b are invalid.** Generation never stopped at Glimmer's end-of-turn token `<|eot|>`; every
    rollout ran to the 700-token limit (G6: 100 % clipped), so the reward scored the program plus arbitrary

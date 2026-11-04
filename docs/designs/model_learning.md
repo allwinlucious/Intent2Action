@@ -51,7 +51,7 @@ Every run is scored automatically:
 
 | Metric | Definition |
 |---|---|
-| **Task success** | ground-truth check in Isaac (e.g. cube on plate), as `phase6_cuj1.py` does |
+| **Task success** | ground-truth check in Isaac (e.g. cube on plate), as the phase-6 CUJ 1 check did |
 | **Error-call rate** | calls that return a non-OK status / all calls |
 | **Invalid-argument rate** | calls rejected as `INVALID_ARGUMENT`, `NOT_FOUND`, or schema errors / all calls |
 | **Calls per success** | efficiency |
@@ -145,8 +145,7 @@ loopback hardware module, no Isaac):
 ### 5. Stage-2 data: sequences in the sim
 
 *   Physics-only Isaac runs the train tasks.
-*   Trajectories come from two sources: the **coding agent** (`coding-agent`,
-    already installed and logged in, run headless with this MCP server as
+*   Trajectories come from two sources: a **coding agent** (run headless with this MCP server as
     its only tool source; the teacher, about 3 runs per task) and the
     model's own rollouts after stage 1, keeping only successful, low-error
     episodes (rejection sampling). The agent's transcripts are converted to
@@ -226,7 +225,7 @@ one training or one sim run at a time on the 3080.
     comparison, slower), or Ollama for A and `transformers` for B/C?
 2.  **Qwen3 thinking mode:** on or off? On usually helps tool use but costs
     tokens and time per step.
-3.  **Teacher:** decided: the coding agent produces the stage-2 teacher
+3.  **Teacher:** decided: a coding agent produces the stage-2 teacher
     trajectories. Open: which model it uses as teacher.
 4.  **Action head output for free text:** is "the frozen model writes the
     text when the head says finished/cannot do" right, or should C be
@@ -245,5 +244,5 @@ one training or one sim run at a time on the 3080.
     long-range reasoning (e.g. computing a place pose from two objects); it
     learns only what the hidden state encodes. That is part of what the
     comparison measures.
-*   Stage-2 data from the frontier model carries the frontier model's habits (e.g. probing with
+*   Stage-2 data from a frontier model carries its habits (e.g. probing with
     `move_to_contact`), which may or may not suit a small model.

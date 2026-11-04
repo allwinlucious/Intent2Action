@@ -104,7 +104,6 @@ def video(tasks: list[str], versions: list[str]) -> None:
   import shutil
   import harness
   import imageio.v2 as imageio
-  import demo_gui
   import phase1_check as p1
   import phase3_cuj_check as cuj
   import phase3_hwm_check as hwm
@@ -132,16 +131,16 @@ def video(tasks: list[str], versions: list[str]) -> None:
       family, seed = spec.split(":")
       task = families.generate(family, int(seed))
       for version in versions:
-        first = len(list(demo_gui.FRAMES.glob("frame_*.png")))
+        first = len(list(harness.VIEWER_FRAMES.glob("frame_*.png")))
         episode = run_episode(task, programs[(version, family, int(seed))], sim_stub, robot_stub)
-        last = len(list(demo_gui.FRAMES.glob("frame_*.png")))
+        last = len(list(harness.VIEWER_FRAMES.glob("frame_*.png")))
         clips.append((f"{family}_{seed}_{version}", first, last, episode))
         print(f"{'OK  ' if episode.ok else 'FAIL'} {family} {seed} {version} {episode.error or ''}"[:200], flush=True)
         (out_dir / f"{family}_{seed}_{version}.json").write_text(json.dumps(record(episode), indent=1))
   finally:
     stack.stop_container()
     stack.stop_isaac()
-  frames = sorted(demo_gui.FRAMES.glob("frame_*.png"))
+  frames = sorted(harness.VIEWER_FRAMES.glob("frame_*.png"))
   for name, first, last, _ in clips:
     part = frames[first:last]
     if not part:

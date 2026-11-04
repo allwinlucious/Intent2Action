@@ -1,6 +1,6 @@
 # Robot platform: Intrinsic Core + Isaac Sim + MCP
 
-*   **Author:** mew (lead: an MCP client; review: a coding agent, a frontier hosted model)
+*   **Author:** Allwin
 *   **Status:** Approved by owner (plan v7, 2026-10-27); review stages 5–7 applied
 *   **Date:** 2026-10-27
 
@@ -38,7 +38,7 @@ connect them to Isaac Sim over ROS 2, and put one gRPC API
 
 ## Glossary
 
-*   **VLM**: vision-language model (here the frontier model). **MCP**: Model Context
+*   **VLM**: vision-language model. **MCP**: Model Context
     Protocol, a protocol through which an AI model calls external tools.
 *   **ICON**: Intrinsic's robot control service. It runs a fixed-rate
     control loop and executes *actions* (follow a trajectory, stop, move
@@ -75,10 +75,6 @@ connect them to Isaac Sim over ROS 2, and put one gRPC API
     library, whose Franka URDF we use. **ChArUco**: a checkerboard with
     markers used for camera calibration. **`JointTrajectoryPVA`**:
     Intrinsic's trajectory format (positions, velocities, accelerations).
-*   **design** (lead–review model): the development process for this
-    project. The *lead* (an MCP client, full context) writes designs; the
-    *review* (fresh a coding agent sessions with no history) review and
-    implement them.
 
 ## Goals
 
@@ -125,8 +121,8 @@ connect them to Isaac Sim over ROS 2, and put one gRPC API
 *   **G10.** An MCP server exposes every `RobotService` call except
     `GetPointCloud` as a tool, generated from the `RobotService` proto
     (names, descriptions and argument schemas come from the proto and its
-    comments). the frontier model completes CUJ 1 in ≥ 4 of 5 trials
-    (`tests/e2e/phase6_cuj1.py`; [phase_6.md](phases/phase_6.md)).
+    comments). An LLM driving only the MCP tools completes CUJ 1 in ≥ 4 of 5
+    trials ([phase_6.md](phases/phase_6.md)).
 
 ## Non-Goals
 
@@ -188,9 +184,9 @@ connect them to Isaac Sim over ROS 2, and put one gRPC API
 
 *   **Given**: Isaac runs the default scene (Franka, table, red cube, plate,
     D455 fixed above the table); calibration is done; the container is up;
-    the MCP server is registered with the frontier model.
-*   **When**: The user asks the frontier model: "put the red cube on the plate".
-*   **Then**: the frontier model calls `GetImage`, `DetectObjects`, `PlanGrasp`,
+    the MCP server is registered with an MCP client (an LLM).
+*   **When**: The user asks it: "put the red cube on the plate".
+*   **Then**: The LLM calls `GetImage`, `DetectObjects`, `PlanGrasp`,
     `MoveToPose`, `Grasp`, `MoveToPose`, `Release` in an order it chooses.
     The cube rests on the plate in Isaac (center within the plate's
     outline). Every call returns success or an error that says what
@@ -786,7 +782,6 @@ clones `world` into `init_world`, so the robot and flange IDs that
 *   ICON ROS 2 tutorial: `developer_resources/learn/tutorials/interactive_tutorials/icon/ros2_bridge_tutorial.md`.
 *   Gazebo camera reference: `intrinsic/simulation/gazebo/plugins/cameras/camera_service.cc`.
 *   Isaac Sim 5.1: `C:\isaac-sim` (`/mnt/c/isaac-sim`).
-*   Review reports: `docs/designs/reviews/`.
 
 ## Future Improvements
 
@@ -806,15 +801,12 @@ Each phase gets its own zero-decision plan in `docs/designs/phases/`,
 written when the phase starts (later phases depend on what earlier phases
 find). Process per phase:
 
-1.  The lead investigates and writes `docs/designs/phases/phase_<n>.md`
-    (target files, exact changes, tests, done criteria).
-2.  Review review (a coding agent, a frontier hosted model, fresh session, design
-    implementation-readiness, codebase-details and style personas).
-    Findings resolved in the plan.
-3.  Review workers (a coding agent, a frontier hosted model, fresh session each)
-    implement the plan.
-4.  The lead runs the done criteria; a review reviews the code diff.
-    Then commit.
+1.  Write `docs/designs/phases/phase_<n>.md` (target files, exact changes,
+    tests, done criteria).
+2.  Independent review for implementation readiness, codebase details and
+    style; findings resolved in the plan.
+3.  Implement the plan.
+4.  Run the done criteria; review the code diff. Then commit.
 
 | # | Phase | Plan | Done when |
 |---|---|---|---|
@@ -846,4 +838,3 @@ find). Process per phase:
 
 --------------------------------------------------------------------------------
 
-*Drafted with design*

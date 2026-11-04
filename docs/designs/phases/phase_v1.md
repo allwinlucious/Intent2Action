@@ -259,9 +259,9 @@ Stop the container and Isaac at the end. Logs go to `logs/pickplace_check_*.log`
 
 What was done, the test output, the files changed, and anything the plan did not cover.
 
-## Addendum A (after the review review, 2026-10-29)
+## Addendum A (after the independent review, 2026-10-29)
 
-Reviews: `docs/designs/reviews/phase_v1/`. This addendum **supersedes** the sections it names.
+This addendum **supersedes** the sections it names.
 
 ### A.1 Files changed (explicit list)
 

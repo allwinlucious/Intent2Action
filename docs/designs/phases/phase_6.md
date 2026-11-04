@@ -12,7 +12,7 @@ become tool descriptions. Requires phases 3, 4, 5c and 5b done (phase 5's
 |---|---|
 | `tools` (`tests/e2e/phase6_check.py`) | an MCP client (Python SDK) on the server lists exactly the tools of decision 3, each with a non-empty description and an input schema |
 | `calls` (same) | `get_state` returns joints; `move_to_pose` (`wait` true) to a reachable pose returns `done` and `state` `DONE`; `get_image` (RGB) returns an MCP image content block (PNG 1280×720); `move_to_pose` to an unreachable pose returns an MCP error result whose text contains the gRPC code and the server's message; `wait_operation` on a `wait=false` move returns it done |
-| `cuj1` (`tests/e2e/phase6_cuj1.py`) | 5 trials (`SimService.ResetScene` before each): an LLM CLI with only this MCP server's tools and the prompt "Put the red cube on the plate." finishes; success (from `SimService.GetTruePose`, whose poses are the objects' bottom-centre origins): horizontal distance cube↔plate ≤ 0.065 m (the 0.05 m cube lies fully on the 0.09 m-radius plate) and cube z − plate z ∈ [0.007, 0.022] (plate is 0.012 m thick). ≥ 4/5 (G10). Every tool call in the transcript appears in `logs/mcp_server.log` |
+| `cuj1` (a phase-6 script, since removed) | 5 trials (`SimService.ResetScene` before each): an LLM CLI with only this MCP server's tools and the prompt "Put the red cube on the plate." finishes; success (from `SimService.GetTruePose`, whose poses are the objects' bottom-centre origins): horizontal distance cube↔plate ≤ 0.065 m (the 0.05 m cube lies fully on the 0.09 m-radius plate) and cube z − plate z ∈ [0.007, 0.022] (plate is 0.012 m thick). ≥ 4/5 (G10). Every tool call in the transcript appears in `logs/mcp_server.log` |
 | `unit` | `pytest tests/test_mcp_server.py` passes |
 
 ## Decisions
@@ -96,11 +96,11 @@ become tool descriptions. Requires phases 3, 4, 5c and 5b done (phase 5's
     `robot`: command `.venv/bin/python`, args `mcp_server/server.py`,
     so an MCP client in this repo sees it; `mcp_server/README.md` (Create)
     shows how to add it to other MCP clients.
-8.  **CUJ 1 run:** `tests/e2e/phase6_cuj1.py` starts Isaac and the
+8.  **CUJ 1 run:** a CUJ 1 script (since removed) starts Isaac and the
     container the way `tests/e2e/phase3_cuj_check.py:445-458` does
     (`hwm._Run().start_isaac/start_container`, `p1._wait_for_ports()`,
     `hwm._require_state("ENABLED", …)`, `cuj._wait_ready()`), then per
-    trial runs an LLM CLI (no
+    trial runs an LLM CLI with only this MCP server's tools and the prompt "Put the red cube on the plate." (no
     built-in tools, so the model cannot read the repo) with a 10-minute
     timeout, stores each stream in `logs/cuj1_trial_<n>.jsonl`, and checks
     the cube with `SimService.GetTruePose`.
@@ -118,7 +118,7 @@ become tool descriptions. Requires phases 3, 4, 5c and 5b done (phase 5's
     text, `GetImage` → image block.
 2.  Decisions 3, 5–7; `tests/e2e/phase6_check.py` (Create) until it
     passes.
-3.  `tests/e2e/phase6_cuj1.py` (Create) until ≥ 4/5. If below, record
+3.  a CUJ 1 script (since removed) (Create) until ≥ 4/5. If below, record
     each failed transcript's last tool calls and the cause in
     `phase_6_notes.md` and stop (the lead decides: tool descriptions,
     instructions, or API changes).

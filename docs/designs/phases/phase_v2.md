@@ -20,7 +20,6 @@ ladder. A rule checker scores the result against Isaac's ground truth, which pro
     `docs/designs/phases/phase_v2_notes.md`.
 *   **Code style:** 2-space indent; comments only for the why; standard library only beyond what `.venv`
     already has (no new dependencies).
-*   **Do not name** the event, its organiser or any agent tool in code, comments or docs.
 
 ## Done criteria
 
@@ -359,7 +358,7 @@ What was done, the test output, the files changed, and anything the plan did not
 
 ## Addendum A (after the review, 2026-10-31)
 
-Reviews: `docs/designs/reviews/phase_v2/`. This addendum **supersedes** the sections it names.
+This addendum **supersedes** the sections it names.
 
 ### A.1 `verify` takes a lambda (supersedes §3 `verify` and §6.5)
 

@@ -173,5 +173,5 @@ The loader's log after the restart shows delete-then-create working:
 *   `--after-restart` now waits for world, geometry, planner and ICON ports.
 *   Result: `phase0_smoke.py` 10/10, `phase1_check.py` 9/9 (fk_20 worst
     error 0.000000 mm / 0.000002°), `--after-restart` 9/9.
-*   Review code review of the phase 1 diff: pending (after WSL restart).
+*   Code review of the phase 1 diff: pending (after WSL restart).
 *   Phase 2 requirement (code review): `run_scene.py` must place the Franka base at the stage origin, because the loader creates `franka` at identity under `root`.

@@ -13,6 +13,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 LOG_DIR = ROOT / "logs"
+VIEWER_FRAMES = Path("/mnt/c/isaac-sim-work/viewer_frames")  # where Isaac writes the viewer frames (--gui)
 ISAAC_COMMAND = [
     "cmd.exe",
     "/c",

@@ -166,9 +166,8 @@ def check_stop() -> str:
 
 
 def _video(path: Path) -> None:
-  import demo_gui
   import imageio.v2 as imageio
-  frames = sorted(demo_gui.FRAMES.glob("frame_*.png"))
+  frames = sorted(harness.VIEWER_FRAMES.glob("frame_*.png"))
   with imageio.get_writer(path, fps=15, codec="libx264", quality=8, macro_block_size=8) as writer:
     for frame in frames:
       try:

@@ -30,7 +30,6 @@ switches adapters per request (`model` field).
 *   Make no design decisions beyond this plan. Record anything not covered in `phase_v3_notes.md` and stop that
     part.
 *   **Code style:** 2-space indent; comments only for the why.
-*   **Do not name** the event, its organiser or any agent tool in code, comments or docs.
 
 ## Done criteria
 

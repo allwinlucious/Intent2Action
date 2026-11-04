@@ -3,11 +3,18 @@
 [![CI](https://github.com/allwinlucious/Intent2Action/actions/workflows/ci.yml/badge.svg)](https://github.com/allwinlucious/Intent2Action/actions/workflows/ci.yml)
 [![Model: program writer](https://img.shields.io/badge/%F0%9F%A4%97%20model-program%20writer%20(G1b)-yellow)](https://huggingface.co/mewbot97/Intent2Action-glimmer-programs)
 [![Model: recovery agent](https://img.shields.io/badge/%F0%9F%A4%97%20model-recovery%20agent%20(G1d)-yellow)](https://huggingface.co/mewbot97/Intent2Action-glimmer-recovery)
+[![Model: push experience](https://img.shields.io/badge/%F0%9F%A4%97%20model-push%20experience%20(G1e)-yellow)](https://huggingface.co/mewbot97/Intent2Action-glimmer-push)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 **Show a robot a task once, as a short video, a sentence, or both. A fine-tuned open model turns it into explicit
 rules and a short, checkable robot program. A person approves, and an industrial robot stack executes it with
 collision-checked, force-limited motion.**
+
+<p align="center">
+  <img src="docs/media/gift_pack.gif" width="480" alt="The robot puts the small heart box into the grey box and closes the lid, in Isaac Sim">
+  <br><sub>Read from a phone clip of the task, corrected once at the confirm step; the fine-tuned model's program, run in
+  Isaac Sim physics (2× speed).</sub>
+</p>
 
 The model never moves the robot directly. It writes a program against a small robot API. The runtime checks and
 dry-runs the program before anything moves, executes it with a budgeted recovery ladder, and verifies the result
@@ -15,6 +22,19 @@ against ground truth. A person signs off at three gates:
 1.  confirm the intent;
 2.  press Run;
 3.  approve every recovery patch.
+
+## In action
+
+| Learning from experience: tower unload | Experience beats size |
+|---|---|
+| <img src="docs/media/tower_untrained_vs_finetuned.gif" width="400" alt="Untrained model pulls the bottom cube and fails; fine-tuned model unstacks top first"> | <img src="docs/media/experience_wonder_vs_ours.gif" width="400" alt="Muse Wonder finds no feasible grasp; the fine-tuned model peels the cluster from the outside"> |
+| Base Glimmer pulls the bottom cube and fails (left); the fine-tuned model unstacks top first (right). 3× speed. | `cluster:100003`: Muse Wonder's textbook loop finds no feasible grasp on its first pick (left); ours takes the outermost cube first (right). 3.5× speed. |
+| **A new skill: + push experience** | **Held-out tasks it passed in Isaac physics** |
+| <img src="docs/media/push_finale.gif" width="400" alt="The carton is too wide to grasp; the model asks, then pushes it onto the green zone"> | <img src="docs/media/success_grid.gif" width="400" alt="Sixteen successful held-out tasks"> |
+| The carton is wider than the gripper opens. G1e says so, asks, and after "can you get it done somehow?" pushes it onto the zone with force-limited moves; every move approved. 10× speed. | Sixteen tasks at once: cluster, mixed, packing, reach and stacking from the 42 Isaac successes, plus Glimmer's sort-by-colour and yellow-on-red and two scripted capability takes (peg in hole, gift tower). 6× speed. |
+
+Every take is recorded at 30 fps in real time (`tools/record_take.py`); the model calls behind them are logged in
+[`demo_runs/`](demo_runs).
 
 ## Results
 
@@ -95,7 +115,7 @@ demo clip / sentence ──► reader (Glimmer, images + text; speech via Muse V
 ```bash
 git clone https://github.com/allwinlucious/Intent2Action && cd Intent2Action
 make setup          # .venv with requirements-dev.txt (Python 3.12)
-make test           # 334 unit tests, about 1 min
+make test           # 346 unit tests, about 1 min
 make ui-fake        # demo panel with a fake robot and model: http://127.0.0.1:8765
 make tables         # rebuild the results tables from the published data in results/
 ```

@@ -104,9 +104,8 @@ def sim(gui: bool, recover: bool) -> int:
     stack.stop_isaac()
   if gui:
     import shutil
-    import demo_gui
     import imageio.v2 as imageio
-    frames = sorted(demo_gui.FRAMES.glob("frame_*.png"))
+    frames = sorted(harness.VIEWER_FRAMES.glob("frame_*.png"))
     if frames:
       with imageio.get_writer(OUT / f"video{'_recover' if recover else ''}.mp4", fps=15, codec="libx264", quality=8, macro_block_size=8) as writer:
         for frame in frames:

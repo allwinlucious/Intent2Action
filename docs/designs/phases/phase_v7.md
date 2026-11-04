@@ -51,7 +51,6 @@ The first step uses typed requests only (owner, 2026-11-02). Webcam and upload u
 *   Make no design decisions beyond this plan. Record anything not covered in `phase_v7_notes.md` and stop that
     part.
 *   **Code style:** 2-space indent in Python and JavaScript; comments only for the why.
-*   **Do not name** the event, its organiser or any agent tool in code, comments or the page.
 
 ## Done criteria
 
@@ -98,7 +97,7 @@ The first step uses typed requests only (owner, 2026-11-02). Webcam and upload u
 *   **Addresses:**
     *   `--address` is robot_service. The sim service is the same port unless `--sim-address` is given: look at
         how `tests/e2e/program_check.py` / `learn/families.py` reach SimService and do the same.
-    *   `--frames` defaults to `/mnt/c/isaac-sim-work/viewer_frames`, from `tests/e2e/demo_gui.py`.
+    *   `--frames` defaults to `/mnt/c/isaac-sim-work/viewer_frames`, from `tests/e2e/harness.py` (VIEWER_FRAMES).
 *   **The model** endpoint comes from the environment (`LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`). The server
     reads the repo's `.env` at start-up if it is present:
     *   `KEY=VALUE` lines;

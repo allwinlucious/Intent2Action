@@ -13,22 +13,15 @@ The MCP client starts it over stdio. Each tool call is logged to
 
 ## Registering it
 
-an MCP client in this repository picks it up from `.mcp.json`. For an MCP client
-elsewhere:
-
-```bash
-llm-cli mcp add robot -- /home/mew/untitled-project/.venv/bin/python /home/mew/untitled-project/mcp_server/server.py
-```
-
-Any other MCP client (...): add a stdio server with
-absolute paths:
+An MCP client started in this repository picks the server up from `.mcp.json`. Elsewhere, add a stdio server
+with absolute paths:
 
 ```json
 {
   "mcpServers": {
     "robot": {
-      "command": "/home/mew/untitled-project/.venv/bin/python",
-      "args": ["/home/mew/untitled-project/mcp_server/server.py"]
+      "command": "/path/to/Intent2Action/.venv/bin/python",
+      "args": ["/path/to/Intent2Action/mcp_server/server.py"]
     }
   }
 }

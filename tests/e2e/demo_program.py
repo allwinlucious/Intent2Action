@@ -11,8 +11,6 @@ import shutil
 import sys
 
 import imageio.v2 as imageio
-
-import demo_gui
 import harness
 import phase1_check as p1
 import phase3_cuj_check as cuj
@@ -29,7 +27,7 @@ LAYOUT = 1
 
 
 def _video() -> harness.Path | None:
-  frames = sorted(demo_gui.FRAMES.glob("frame_*.png"))
+  frames = sorted(harness.VIEWER_FRAMES.glob("frame_*.png"))
   if not frames:
     return None
   path = OUT / "program_demo.mp4"

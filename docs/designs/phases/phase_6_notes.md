@@ -9,7 +9,7 @@ the container does not use `gen/robot_service.desc`.
 |---|---|
 | `tools` (`tests/e2e/phase6_check.py`) | PASS. 30 tools, each with a description and an input schema |
 | `calls` (same) | PASS. `get_state` 7 joints; `move_to_pose` done 0.49 s; `get_image` PNG 1280×720; unreachable → error `NOT_FOUND: operations/MoveToPose-3: planning failed: IK solver couldn't find any …`; `wait=false` move → `wait_operation` done; 8 calls, 8 log lines |
-| `cuj1` (`tests/e2e/phase6_cuj1.py`) | PASS, **5/5** (below) |
+| `cuj1` (a phase-6 script, since removed) | PASS, **5/5** (below) |
 | `unit` | PASS. `pytest tests/test_mcp_server.py` 8 passed; `pytest tests/` 89 passed |
 | `phase3_cuj_check.py` | First run 7/8: `obstacle` failed with "1/20 path samples in collision" at [-0.317, -0.093, -0.063, -2.207, 0.175, 2.335, 0.673]. This is the known flake at the same spot ([phase_4_notes.md](phase_4_notes.md), "Open: obstacle check flakiness"). The second run passed 8/8 |
 
@@ -19,7 +19,7 @@ The outputs are in `logs/phase6_check.out`, `logs/phase6_cuj1.out`,
 
 ## CUJ 1 trials
 
-Each trial used `a frontier hosted model` with only the `robot` MCP server and no
+Each trial used a frontier hosted model with only the `robot` MCP server and no
 built-in tools.
 
 | Trial | Time | Tool calls | Cube from the plate centre | Cube z − plate z | Cost |
@@ -98,7 +98,7 @@ Observations for the lead. Nothing here blocks G10.
   status=OK|<gRPC code>|INVALID_ARGUMENTS|UNKNOWN_TOOL`, plus one start
   line.
 - **Decision 8 (CUJ 1).** The command is exactly as specified. A trial
-  passes when `llm-cli` exits 0, its `result` event is not an error, the
+  passes when the client exits 0, its `result` event is not an error, the
   cube is on the plate, and every transcript tool call (by name, counted)
   is in the log lines written during the trial.
 
@@ -112,6 +112,6 @@ Observations for the lead. Nothing here blocks G10.
 - `requirements-dev.txt` (Modify): `mcp==2.3.0`
 - `tests/test_mcp_server.py` (Create)
 - `tests/e2e/phase6_check.py` (Create)
-- `tests/e2e/phase6_cuj1.py` (Create)
+- a CUJ 1 script (since removed) (Create)
 - `docs/designs/robot_platform.md` (Modify): G10, `mcp_server` section
 - `docs/designs/phases/phase_6_notes.md` (Create)

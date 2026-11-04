@@ -11,6 +11,5 @@ __pycache__/
 .venv-ml
 runs/
 sim/run.log
-*.reviewer.log
 .env
 .cache/
