@@ -8,8 +8,9 @@
 
 <p align="center">
   <img src="docs/media/gift_pack.gif" width="480" alt="The robot puts the small heart box into the grey box and closes the lid, in Isaac Sim">
-  <br><sub>From a phone clip of a person packing a gift box: the model read the task, a person corrected it once, and the
-  robot ran the model's program in Isaac Sim physics (2× speed).</sub>
+  <br><sub>From a phone clip of a person packing gift boxes: Muse Glimmer read the task from 12 frames, a person corrected
+  the rules twice at the confirm step, and the fine-tuned model wrote the program for the pack-and-close part, run here in
+  Isaac Sim physics (2× speed).</sub>
 </p>
 
 Programming an industrial robot for a new task usually takes an integrator days. Intent2Action lets the person who
@@ -37,7 +38,8 @@ The model never steers the robot on its own.
 | <img src="docs/media/push_finale.gif" width="400" alt="The carton is too wide to grasp; the model asks, then pushes it onto the green zone"> | <img src="docs/media/success_grid.gif" width="400" alt="Sixteen successful tasks"> |
 | The carton is wider than the gripper opens. The model says so and asks; told "can you get it done somehow?", it pushes the carton onto the zone with the robot's force-limited moves, each move approved. It learned pushing on other objects and had never seen this carton. 10× speed. | Sixteen takes at once: fourteen tasks the models' programs solved in Isaac Sim physics, and two scripted capability takes (peg in hole, gift tower). 6× speed. |
 
-All takes are recorded at 30 fps in real time. The model calls behind them are logged in [`demo_runs/`](demo_runs).
+All takes are recorded at 30 fps in real time. The demo takes' model calls and robot events are logged in
+[`demo_runs/`](demo_runs); the grid's programs are the evaluation programs published in [`results/`](results).
 
 ## Try it
 
@@ -59,11 +61,13 @@ make ui-replay    # then open http://127.0.0.1:8765
 Every reply comes from `demo_runs/transcript.jsonl`, replayed exactly, so only recorded requests work. The robot here
 is a simple stand-in without physics.
 
-**2. With the real models**, on any GPU host with about 40 GB of memory and CUDA ≥ 13 (RunPod, Modal, a workstation):
+**2. With the real models**, on a GPU pod with about 40 GB of memory, CUDA ≥ 13 and a writable `/workspace` (for
+example a RunPod PyTorch pod):
 
 ```bash
-bash runpod/serve_from_hf.sh      # Muse Glimmer 30B + the trained adapters from Hugging Face, on port 8000
-LLM_BASE_URL=http://<gpu-host>:8000/v1 LLM_API_KEY=unused make ui-fake     # the panel, asking the real models
+bash runpod/serve_from_hf.sh                          # on the pod: Muse Glimmer 30B + the adapters from Hugging Face
+ssh -N -L 8000:127.0.0.1:8000 -p <port> root@<pod>    # on your machine: the server listens on the pod's localhost
+make ui-models                                        # the panel (simulated robot), asking the real models
 ```
 
 **3. Check the numbers:** `make test` (346 unit tests, about a minute) and `make tables` (rebuilds every result table
@@ -74,7 +78,7 @@ from the published data in [`results/`](results)).
 ## Results
 
 The base model is **Muse Glimmer 30B**, an open-weights model. We fine-tuned it with QLoRA on what the robot actually
-achieved in simulation: for 600 generated training tasks, every strategy was tried on a real motion planner, and the
+achieved in simulation: for 750 generated training tasks (150 per task type), every strategy was tried on a real motion planner, and the
 model learned from the ones that worked. All tasks below are held out: never seen in training, and one whole task
 type never trained at all.
 
@@ -170,7 +174,8 @@ phone clip / sentence ──► reader: Muse Glimmer (video frames + text; speec
     *   a build of Intrinsic Core packaged in one Docker container: build scripts, Dockerfile, generated protobuf
         stubs and a motion planner config;
     *   one early Isaac Sim pick-and-place script;
-    *   a plan document.
+    *   a plan document;
+    *   the vendored third-party library tinygltf (`third_party/tinygltf`).
 
     No robot service, models, learning or demo existed yet.
 *   **Built from 27 October to 4 November 2026** (every later commit):

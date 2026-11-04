@@ -487,7 +487,12 @@ def build_server(
 ) -> DemoHTTPServer:
   frames = Path(frames or "/mnt/c/isaac-sim-work/viewer_frames")
   if fake:
-    model = ReplayModel(replay, replay_default, Path(staged_program).read_text() if staged_program else None) if replay else FakeModel()
+    if replay:
+      model = ReplayModel(replay, replay_default, Path(staged_program).read_text() if staged_program else None)
+    elif os.environ.get("LLM_BASE_URL"):  # a simulated robot, real models (runpod/serve_from_hf.sh)
+      model = ChatClient(api_key=os.environ.get("LLM_API_KEY") or "unused", model=writer_model)
+    else:
+      model = FakeModel()
     backend = FakeBackend(fake_objects(PRESETS[0]))
     reader = IntentReader(model, model=reader_model)
     writer = ProgramWriter(model, model=writer_model)
