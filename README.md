@@ -43,50 +43,86 @@ All takes are recorded at 30 fps in real time. The demo takes' model calls and r
 
 ## Try it
 
-**1. In two minutes, no GPU: the demo panel, answering with the real recorded model replies.**
+### See it in Isaac Sim (the real thing)
 
-```bash
-git clone https://github.com/allwinlucious/Intent2Action && cd Intent2Action
-make setup        # .venv (Python 3.12)
-make ui-replay    # then open http://127.0.0.1:8765
-```
+The demo runs on the full stack: the robot software (Intrinsic Core) in Docker, the Franka arm in NVIDIA Isaac Sim
+physics, the trained models on a GPU, and the panel docked beside the live Isaac window.
 
-1.  Choose the scene **Heart box · pack and close**.
-2.  Type `put the small heart box into the open box and close the lid`. The model's recorded reading appears (it
-    misses the lid).
-3.  Correct it: `the small heart box is a gift, not a box: the mauve gift goes into the box, then the lid goes on the
-    box`.
-4.  Confirm: the fine-tuned model's recorded program appears. Press ▶.
+**Needs:**
+*   **A Windows PC** with an NVIDIA GPU, NVIDIA Isaac Sim 5.1 installed at `C:\isaac-sim`, and WSL2 (Ubuntu) with
+    mirrored networking and Docker;
+*   **a GPU for the models:** Modal (below) or any 40 GB GPU pod.
 
-Every reply comes from `demo_runs/transcript.jsonl`, replayed exactly, so only recorded requests work. The robot here
-is a simple stand-in without physics.
+**Steps:**
+1.  **Build the robot stack once** (Intrinsic Core from source, then the container; this takes a few hours):
 
-**2. With the real models, on [Modal](https://modal.com)** (one A100 80GB, scales to zero when idle):
+    ```bash
+    git clone https://github.com/allwinlucious/Intent2Action && cd Intent2Action
+    make setup
+    container/build_intrinsic.sh && container/stage_intrinsic.sh
+    sg docker -c "docker build -f container/Dockerfile -t intrinsic-core:dev ."
+    tools/sync_isaac.sh                      # copies the scene, config and objects to C:\isaac-sim-work for Isaac
+    ```
 
-```bash
-pip install modal && modal setup                      # once: a Modal account and token
-export I2A_API_KEY=$(openssl rand -hex 16)            # the endpoint is public, so callers need this key
-modal deploy learn/modal_serve.py                     # Muse Glimmer 30B + the adapters from Hugging Face; prints a URL
-LLM_BASE_URL=<printed URL>/v1 LLM_API_KEY=$I2A_API_KEY make ui-models    # the panel (simulated robot), real models
-modal app stop intent2action                          # when done
-```
+2.  **Serve the models on [Modal](https://modal.com)** (one A100 80GB, scales to zero when idle):
 
-The first start downloads the base model (about 56 GB) into a Modal volume and loads it, which takes 10–20 minutes;
-later starts reuse the volume. Wake it and wait until it lists the models before opening the panel:
+    ```bash
+    pip install modal && modal setup                      # once: a Modal account and token
+    export I2A_API_KEY=$(openssl rand -hex 16)            # the endpoint is public, so callers need this key
+    modal deploy learn/modal_serve.py                     # Muse Glimmer 30B + the adapters from Hugging Face; prints a URL
+    until curl -sfL -m 120 -H "Authorization: Bearer $I2A_API_KEY" <printed URL>/v1/models; do sleep 30; done
+    ```
 
-```bash
-until curl -sfL -m 120 -H "Authorization: Bearer $I2A_API_KEY" <printed URL>/v1/models; do sleep 30; done
-```
+    The first start downloads the base model (about 56 GB) into a Modal volume, which takes 10–20 minutes. Later
+    starts reuse it.
 
-*Or on any GPU pod* with about 40 GB, CUDA ≥ 13 and a writable `/workspace` (for example RunPod):
-`bash runpod/serve_from_hf.sh` on the pod, `ssh -N -L 8000:127.0.0.1:8000 -p <port> root@<pod>` on your machine, then
-`make ui-models`.
+    *Or on any GPU pod* with about 40 GB, CUDA ≥ 13 and a writable `/workspace` (for example RunPod): run
+    `bash runpod/serve_from_hf.sh` on the pod and `ssh -N -L 8000:127.0.0.1:8000 -p <port> root@<pod>` on your
+    machine. The URL is then `http://127.0.0.1:8000`.
 
-**3. Check the numbers:** `make test` (346 unit tests, about a minute) and `make tables` (rebuilds the main results
-tables, the planner and physics success rates, from the published data in [`results/`](results); the rest are in
-[learning_results.md](docs/designs/learning_results.md), with their source files).
+3.  **Start the stack.** This opens the Isaac window with the robot and starts the container:
 
-**4. The full stack**, with the robot software in Docker and Isaac Sim physics: [docs/REPRODUCE.md](docs/REPRODUCE.md).
+    ```bash
+    .venv/bin/python tests/e2e/demo_stack.py
+    ```
+
+4.  **Start the panel** in a second shell, then open `http://127.0.0.1:8765/?panel` beside the Isaac window:
+
+    ```bash
+    LLM_BASE_URL=<URL>/v1 LLM_API_KEY=$I2A_API_KEY LLM_MODEL=G1d .venv/bin/python -m demo_ui.server --port 8765
+    ```
+
+    *   **The scene:** choose one, for example **Heart box · pack and close**; it loads into Isaac.
+    *   **The task:** type it, or record or attach a clip.
+    *   **The rules:** check them, correct them if needed, then confirm.
+    *   **The program:** read it, then press ▶ Run. The robot does it in Isaac Sim.
+    *   **Recovery:** the model asks you before any fix or move of its own.
+5.  **Record a take of any logged program**, as the videos were made (1080p, 30 fps, real time):
+
+    ```bash
+    .venv/bin/python tools/record_take.py heart_box:0 --program demo_runs/heart_box_pack_glimmer.program.py --name mine
+    ```
+
+    The take is written to `C:\isaac-sim-work\videos\mine.mp4`. Step-by-step commands for every experiment are in
+    [docs/REPRODUCE.md](docs/REPRODUCE.md).
+
+### Without the simulator
+
+*   **A UI test, not the robot:** `make setup && make ui-replay`, then open `http://127.0.0.1:8765`. The panel's
+    reading, rules and program are the real recorded model outputs (`demo_runs/transcript.jsonl`, replayed exactly).
+    But the robot is a stand-in without physics, and the picture is a placeholder, not Isaac Sim.
+    *   To try it: choose **Heart box · pack and close** and type `put the small heart box into the open box and close
+        the lid`.
+    *   Then correct it with `the small heart box is a gift, not a box: the mauve gift goes into the box, then the lid
+        goes on the box`.
+    *   Only recorded requests can be replayed.
+*   **The same UI with the real models:** `LLM_BASE_URL=<URL>/v1 LLM_API_KEY=$I2A_API_KEY make ui-models`, after
+    step 2 above. It uses the real models but still a stand-in robot.
+*   **Check the numbers:**
+    *   `make test` runs 346 unit tests in about a minute.
+    *   `make tables` rebuilds the main results tables, the planner and physics success rates, from the published data
+        in [`results/`](results).
+    *   The other results are in [learning_results.md](docs/designs/learning_results.md), with their source files.
 
 ## Results
 
