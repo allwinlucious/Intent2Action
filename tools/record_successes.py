@@ -17,6 +17,20 @@ ROOT = Path(__file__).resolve().parents[1]
 GRID = Path("/mnt/c/isaac-sim-work/videos/grid")
 
 
+FAIL_GRID = Path("/mnt/c/isaac-sim-work/videos/grid_fail")
+
+
+def record_failure(name: str, take: Path, result: str) -> None:
+  """Copies a failed take into grid_fail/ (its index marks it usable for the failure grid)."""
+  import shutil
+  FAIL_GRID.mkdir(parents=True, exist_ok=True)
+  shutil.copy(take, FAIL_GRID / take.name)
+  path = FAIL_GRID / "index.json"
+  index = json.loads(path.read_text()) if path.exists() else {}
+  index[name] = {"ok": True, "result": result, "scripted": False}
+  path.write_text(json.dumps(index, indent=1))
+
+
 def main(version: str) -> None:
   GRID.mkdir(parents=True, exist_ok=True)
   index_path = GRID / "index.json"
@@ -36,6 +50,8 @@ def main(version: str) -> None:
     take = Path(f"/mnt/c/isaac-sim-work/videos/grid_{name}.mp4")
     if take.exists():
       take.replace(GRID / f"{name}.mp4")
+      if not ok:  # a physics failure this time: a copy for the failure grid
+        record_failure(name, GRID / f"{name}.mp4", f"{version} program, physics failure: {lines[0] if lines else ''}")
     index[name] = {"ok": ok, "result": lines[0] if lines else out.stderr[-300:], "intent": episode["intent"]}
     index_path.write_text(json.dumps(index, indent=1))
     print(f"{name}: {'OK' if ok else index[name]['result'][:160]}", flush=True)

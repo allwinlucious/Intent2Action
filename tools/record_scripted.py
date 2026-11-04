@@ -23,6 +23,7 @@ sys.path[:0] = [str(ROOT), str(ROOT / "gen"), str(ROOT / "learn"), str(ROOT / "t
 import record_take  # noqa: E402
 
 GRID = record_take.VIDEOS / "grid"
+FAIL_GRID = record_take.VIDEOS / "grid_fail"
 GIFTS = (("green_gift", 0.42, 0.12, 0.2), ("red_gift", 0.58, 0.16, -0.3), ("white_gift", 0.52, -0.12, 0.4))
 GIFT_TOWER = ('base = find(category="gift", color="green")\nred = find(category="gift", color="red")\n'
               'white = find(category="gift", color="white")\npick(red)\nplace(red, base)\npick(white)\n'
@@ -52,14 +53,7 @@ def peg_in_hole():
     result = f"OK: {p5b._insert_trial()[:200]}"
   except Exception as error:  # pylint: disable=broad-except
     result = f"FAILED: {str(error)[:200]}"
-  # Let go of the peg: a held, attached object blocks the next scene load.
-  from robot_service import robot_service_pb2 as api
-  cuj._gripper("Release")
-  cuj._call(cuj._robot, "DetachObject", api.ObjectRequest(id=p5b._id[p5b.PEG]))
-  cuj._call(cuj._robot, "SetPayload", api.SetPayloadRequest(mass=0.0))
-  tcp = cuj._state().tool_pose
-  cuj._move("MoveToPose", pose=cuj._at(tcp, tcp.x, tcp.y, tcp.z + 0.1), motion=api.LINEAR)
-  cuj._move("Home")
+  _release_peg()  # a held, attached object blocks the next scene load
   return first, result
 
 
@@ -85,6 +79,44 @@ def gift_tower():
   return _program([families.Placement(c, x, y, 0.0, yaw) for c, x, y, yaw in GIFTS], GIFT_TOWER)
 
 
+def _release_peg():
+  import phase3_cuj_check as cuj
+  import phase5b_check as p5b
+  from robot_service import robot_service_pb2 as api
+  cuj._gripper("Release")
+  cuj._call(cuj._robot, "DetachObject", api.ObjectRequest(id=p5b._id[p5b.PEG]))
+  cuj._call(cuj._robot, "SetPayload", api.SetPayloadRequest(mass=0.0))
+  tcp = cuj._state().tool_pose
+  cuj._move("MoveToPose", pose=cuj._at(tcp, tcp.x, tcp.y, tcp.z + 0.1), motion=api.LINEAR)
+  cuj._move("Home")
+
+
+def fail_peg_jam():
+  """The peg 2 cm off the hole: it lands on the block face, and the force limit stops the push (a safe failure)."""
+  import phase5b_check as p5b
+  import phase3_cuj_check as cuj
+  cuj._move("Home")
+  first = record_take._newest_index() + 1
+  try:
+    result = f"FAILED as scripted: {p5b.check_jam()[:200]}"
+  except Exception as error:  # pylint: disable=broad-except
+    result = f"FAILED as scripted (unexpected detail): {str(error)[:200]}"
+  _release_peg()
+  return first, result
+
+
+def fail_box_full():
+  """Eight cubes for a box that takes six: it packs six, then finds no free spot."""
+  import families
+  spots = [(0.36 + 0.08 * (i % 4), 0.04 + 0.09 * (i // 4)) for i in range(8)]
+  cubes = [families.Placement(("red_cube", "blue_cube", "green_cube")[i % 3], x, y, 0.0, 0.1 * i)
+           for i, (x, y) in enumerate(spots)]
+  first, result = _program([*cubes, families.Placement("red_box", 0.42, -0.22, 0.0, 0.0)],
+                           'box = find(category="box", color="red")\nfor cube in find_all(category="cube"):\n'
+                           '  pick(cube)\n  place(cube, box)\n')
+  return first, f"FAILED as scripted: {result}" if result != "OK" else "OK (did not fail)"
+
+
 def _model_take(scene: str):
   def take():
     placements, _ = record_take._task(scene)
@@ -95,17 +127,22 @@ def _model_take(scene: str):
 
 TAKES = {"peg_in_hole": peg_in_hole, "push": push, "gift_tower": gift_tower,
          **{name: _model_take(scene) for name, scene in MODEL_PROGRAMS.items()}}
+FAILURES = {"fail_peg_jam": fail_peg_jam, "fail_box_full": fail_box_full}  # recorded into grid_fail/
 
 
 def main(names) -> None:
-  GRID.mkdir(parents=True, exist_ok=True)
-  index_path = GRID / "index.json"
   for name in names:
-    first, result = TAKES[name]()
+    failure = name in FAILURES
+    grid = FAIL_GRID if failure else GRID
+    grid.mkdir(parents=True, exist_ok=True)
+    index_path = grid / "index.json"
+    first, result = (FAILURES if failure else TAKES)[name]()
     time.sleep(record_take.SETTLE_S)
-    frames = record_take.encode(first, record_take._newest_index(), GRID / f"{name}.mp4")
+    frames = record_take.encode(first, record_take._newest_index(), grid / f"{name}.mp4")
     index = json.loads(index_path.read_text()) if index_path.exists() else {}  # shared with record_successes.py
-    index[name] = {"ok": result.startswith("OK"), "result": result, "scripted": name not in MODEL_PROGRAMS}
+    # A failure take belongs in its grid when it failed (ok here means "usable for its grid").
+    index[name] = {"ok": result.startswith("FAILED as scripted") if failure else result.startswith("OK"),
+                   "result": result, "scripted": name not in MODEL_PROGRAMS}
     index_path.write_text(json.dumps(index, indent=1))
     print(f"{name}: {result[:160]} ({frames / record_take.FPS:.1f} s)", flush=True)
 
