@@ -165,6 +165,12 @@ OBJECTS = {
     "white_gift": (_textured_box(0.07, 0.0573, 0.0255, OUT_DIR / "white_gift"), False, 0.08, (0.92, 0.92, 0.92)),
     # A painted area: 2 mm thick, spawned 1.9 mm into the table so it is flush and a pushed carton slides over it.
     "target_zone": (_box(0.16, 0.16, 0.002), True, None, (0.20, 0.65, 0.30)),
+    # Objects wider than the gripper opens, and flat goal markers, for the push experience (learn/push_experience.py).
+    "wide_crate": (_box(0.14, 0.10, 0.07), False, 0.35, (0.15, 0.30, 0.70)),
+    "flat_tray": (_box(0.16, 0.12, 0.04), False, 0.25, (0.55, 0.55, 0.58)),
+    "tote": (_box(0.13, 0.13, 0.09), False, 0.40, (0.90, 0.75, 0.15)),
+    "pallet_mat": (_box(0.18, 0.15, 0.002), True, None, (0.20, 0.35, 0.75)),
+    "marker_pad": (_box(0.15, 0.15, 0.002), True, None, (0.85, 0.85, 0.85)),
 }
 # name: (category, colour word), the attributes list_objects reports (phase_ids.md decision 3).
 ATTRIBUTES = {
@@ -188,12 +194,18 @@ ATTRIBUTES = {
     "heart_lid": ("lid", "mauve"),
     "small_heart_gift": ("gift", "mauve"),
     "target_zone": ("zone", "green"),
+    "wide_crate": ("crate", "blue"),
+    "flat_tray": ("tray", "grey"),
+    "tote": ("tote", "yellow"),
+    "pallet_mat": ("mat", "blue"),
+    "marker_pad": ("pad", "white"),
 }
 # Static/dynamic friction where not build_catalog.py's default 0.5/0.4: the peg
 # must slide on the block's face to the hole (phase_5b.md, Addendum B2).
-FRICTION = {"peg": (0.3, 0.25), "hole_block": (0.3, 0.25), "big_carton": (0.35, 0.3)}
+FRICTION = {"peg": (0.3, 0.25), "hole_block": (0.3, 0.25), "big_carton": (0.35, 0.3), "wide_crate": (0.35, 0.3),
+            "flat_tray": (0.35, 0.3), "tote": (0.35, 0.3)}
 # Paint only: no collision in Isaac (a pushed object must slide over the zone's edge, not snag on it).
-NO_COLLISION = {"target_zone"}
+NO_COLLISION = {"target_zone", "pallet_mat", "marker_pad"}
 # Built from overlapping closed slabs (static: Isaac collides with the exact triangles, the planner with
 # collision_parts), so the merged surface is not one closed shell.
 SLAB_BUILT = {"heart_box"}

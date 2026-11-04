@@ -19,11 +19,26 @@ MAX_TOKENS = 4096  # Axolotl's sequence_len; --max-tokens for longer rows (recov
 
 
 def render(messages: list[dict], tools, tokenizer) -> dict:
-  prompt = tokenizer.apply_chat_template(messages[:-1], tools=tools or None, add_generation_prompt=True,
+  """Every assistant turn is trained (a tool-using recovery has several: the tool calls, then the decision); the
+  rest is context. Tool-call arguments go to the template as dicts, as learn/chat_server.py serves them."""
+  from chat_server import template_messages
+  messages = template_messages(messages)
+
+  def text(upto: int, generation: bool) -> str:
+    return tokenizer.apply_chat_template(messages[:upto], tools=tools or None, add_generation_prompt=generation,
                                          tokenize=False, reasoning_strength="low")
-  full = tokenizer.apply_chat_template(messages, tools=tools or None, tokenize=False, reasoning_strength="low")
-  assert full.startswith(prompt), "the template renders the prompt differently with the reply appended"
-  return {"segments": [{"label": False, "text": prompt}, {"label": True, "text": full[len(prompt):]}]}
+
+  segments, done = [], ""
+  for index, message in enumerate(messages):
+    if message["role"] != "assistant":
+      continue
+    prompt, full = text(index, True), text(index + 1, False)
+    assert prompt.startswith(done) and full.startswith(prompt), \
+      "the template renders earlier turns differently once later turns are appended"
+    segments += [{"label": False, "text": prompt[len(done):]}, {"label": True, "text": full[len(prompt):]}]
+    done = full
+  assert segments and messages[-1]["role"] == "assistant", "a row ends with an assistant turn"
+  return {"segments": segments}
 
 
 def render_file(source: Path, target: Path, tokenizer, max_tokens: int = MAX_TOKENS) -> dict:

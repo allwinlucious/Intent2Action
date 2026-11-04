@@ -1,0 +1,14 @@
+category: pad
+collides: false
+collision: none
+color:
+- 0.85
+- 0.85
+- 0.85
+color_name: white
+dims:
+- 0.15
+- 0.15
+- 0.002
+mass: null
+static: true

@@ -1,0 +1,14 @@
+category: mat
+collides: false
+collision: none
+color:
+- 0.2
+- 0.35
+- 0.75
+color_name: blue
+dims:
+- 0.18
+- 0.15
+- 0.002
+mass: null
+static: true

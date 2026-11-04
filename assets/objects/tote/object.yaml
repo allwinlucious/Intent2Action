@@ -1,0 +1,15 @@
+category: tote
+collision: convexHull
+color:
+- 0.9
+- 0.75
+- 0.15
+color_name: yellow
+dims:
+- 0.13
+- 0.13
+- 0.09
+friction_dynamic: 0.3
+friction_static: 0.35
+mass: 0.4
+static: false

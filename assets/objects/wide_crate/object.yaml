@@ -1,0 +1,15 @@
+category: crate
+collision: convexHull
+color:
+- 0.15
+- 0.3
+- 0.7
+color_name: blue
+dims:
+- 0.14
+- 0.1
+- 0.07
+friction_dynamic: 0.3
+friction_static: 0.35
+mass: 0.35
+static: false

@@ -1,0 +1,15 @@
+category: tray
+collision: convexHull
+color:
+- 0.55
+- 0.55
+- 0.58
+color_name: grey
+dims:
+- 0.16
+- 0.12
+- 0.04
+friction_dynamic: 0.3
+friction_static: 0.35
+mass: 0.25
+static: false
