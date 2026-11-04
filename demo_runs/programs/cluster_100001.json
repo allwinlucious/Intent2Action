@@ -1,0 +1,29 @@
+{
+ "scene": "cluster:100001",
+ "request": "every cube goes into the blue box",
+ "seen": "The instruction requires all cubes to be placed inside the blue box.",
+ "intent": {
+  "description": "every cube goes into the blue box",
+  "rules": [
+   {
+    "select": {
+     "category": "cube"
+    },
+    "relation": "in",
+    "target": {
+     "category": "box",
+     "color": "blue"
+    }
+   }
+  ],
+  "others": "stay"
+ },
+ "read_seconds": 4.4,
+ "programs": {
+  "G1d": {
+   "program": "box = find(category=\"box\", color=\"blue\")\nwhile True:\n  todo = [(o, box) for o in find_all(category=\"cube\") if not inside(o, box)]\n  if not todo:\n    break\n  todo_objects = [p[0] for p in todo]\n  cx = sum([o.x for o in todo_objects]) / len(todo_objects)\n  cy = sum([o.y for o in todo_objects]) / len(todo_objects)\n  p = max(todo, key=lambda p: (p[0].x - cx) * (p[0].x - cx) + (p[0].y - cy) * (p[0].y - cy))\n  held_now = [q for q in todo if q[0].attached]\n  if held_now:\n    p = held_now[0]\n  if not p[0].attached:\n    pick(p[0])\n  place(p[0], p[1])\nverify(lambda: all(inside(o, box) for o in find_all(category=\"cube\")), \"a cube is not in the blue box\")\n",
+   "attempts": 1,
+   "seconds": 11.9
+  }
+ }
+}

@@ -1,0 +1,29 @@
+{
+ "scene": "heart_box:0",
+ "request": "put the small heart box into the open box and close the lid",
+ "seen": "the small heart-shaped box is placed inside the open box and the lid is closed.",
+ "intent": {
+  "description": "the small heart box goes into the open box",
+  "rules": [
+   {
+    "select": {
+     "category": "box",
+     "size": "small"
+    },
+    "relation": "in",
+    "target": {
+     "category": "box"
+    }
+   }
+  ],
+  "others": "stay"
+ },
+ "read_seconds": 15.8,
+ "programs": {
+  "G1d": {
+   "program": "box = find(category=\"box\")\nwhile True:\n  todo = [(o, box) for o in find_all(category=\"box\", size=\"small\") if not inside(o, box)]\n  if not todo:\n    break\n  p = max(todo, key=lambda p: -((p[0].x - p[1].x) * (p[0].x - p[1].x) + (p[0].y - p[1].y) * (p[0].y - p[1].y)))\n  held_now = [q for q in todo if q[0].attached]\n  if held_now:\n    p = held_now[0]\n  if not p[0].attached:\n    pick(p[0])\n  place(p[0], p[1])\nverify(lambda: all(inside(o, box) for o in find_all(category=\"box\", size=\"small\")), \"a small box is not in the box\")\n",
+   "attempts": 1,
+   "seconds": 10.4
+  }
+ }
+}

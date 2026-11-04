@@ -1,0 +1,13 @@
+{"t":1793751494.2483776,"kind":"check","problems":[]}
+{"t":1793751494.25691,"kind":"dry_run","ok":true,"error":null}
+{"t":1793751494.257058,"kind":"line","line":1}
+{"t":1793751494.2570782,"kind":"call","fn":"find","args":["category=box","color=red"]}
+{"t":1793751494.2636235,"kind":"result","fn":"find","ok":true,"message":""}
+{"t":1793751494.2636416,"kind":"line","line":2}
+{"t":1793751494.2636523,"kind":"call","fn":"find_all","args":["category=cube"]}
+{"t":1793751494.269804,"kind":"result","fn":"find_all","ok":true,"message":""}
+{"t":1793751494.2698207,"kind":"line","line":3}
+{"t":1793751494.269831,"kind":"call","fn":"pick","args":["obj_25"]}
+{"t":1793751510.0314474,"kind":"result","fn":"pick","ok":false,"message":"operations/Pick-3: planning failed: Cannot generate a Cartesian linear path. Reason: Invalid initial joint configuration.;Configuration [0.834,0.8919,-0.3893,-1.9442,-0.9014,1.6044,0.3325] (in rad) is not valid. Reason: \n1 collision(s) detected:\n    Left object: obj_25.base_link \n    Right objects: obj_28.base_link\n.; Error occurred during planning in segment 0."}
+{"t":1793751510.0315447,"kind":"failure","failure_kind":"collision","message":"operations/Pick-3: planning failed: Cannot generate a Cartesian linear path. Reason: Invalid initial joint configuration.;Configuration [0.834,0.8919,-0.3893,-1.9442,-0.9014,1.6044,0.3325] (in rad) is not valid. Reason: \n1 collision(s) detected:\n    Left object: obj_25.base_link \n    Right objects: obj_28.base_link\n.; Error occurred during planning in segment 0.","call":"pick(obj_25)","line":3}
+{"t":1793751510.0315888,"kind":"done","ok":false,"error":"collision: operations/Pick-3: planning failed: Cannot generate a Cartesian linear path. Reason: Invalid initial joint configuration.;Configuration [0.834,0.8919,-0.3893,-1.9442,-0.9014,1.6044,0.3325] (in rad) is not valid. Reason: \n1 collision(s) detected:\n    Left object: obj_25.base_link \n    Right objects: obj_28.base_link\n.; Error occurred during planning in segment 0. (line 3)","handoffs":0,"patches":0}

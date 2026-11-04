@@ -1,0 +1,13 @@
+cube = find(category="cube", color="red")
+while True:
+  todo = [(o, cube) for o in find_all(category="cube", color="yellow") if not on_top(o, cube)]
+  if not todo:
+    break
+  p = max(todo, key=lambda p: -((p[0].x - p[1].x) * (p[0].x - p[1].x) + (p[0].y - p[1].y) * (p[0].y - p[1].y)))
+  held_now = [q for q in todo if q[0].attached]
+  if held_now:
+    p = held_now[0]
+  if not p[0].attached:
+    pick(p[0])
+  place(p[0], p[1])
+verify(lambda: all(on_top(o, cube) for o in find_all(category="cube", color="yellow")), "a yellow cube is not on the red cube")

@@ -1,0 +1,46 @@
+{
+ "scene": "mixed:100002",
+ "request": "sort by colour: red cubes into the red box, blue cubes into the blue box",
+ "seen": "The task is to sort cubes by colour into matching coloured boxes, with red cubes placed in the red box and blue cubes placed in the blue box.",
+ "intent": {
+  "description": "red cubes go into the red box and blue cubes go into the blue box",
+  "rules": [
+   {
+    "select": {
+     "category": "cube",
+     "color": "red"
+    },
+    "relation": "in",
+    "target": {
+     "category": "box",
+     "color": "red"
+    }
+   },
+   {
+    "select": {
+     "category": "cube",
+     "color": "blue"
+    },
+    "relation": "in",
+    "target": {
+     "category": "box",
+     "color": "blue"
+    }
+   }
+  ],
+  "others": "stay"
+ },
+ "read_seconds": 7.2,
+ "programs": {
+  "G1d": {
+   "program": "red_box = find(category=\"box\", color=\"red\")\nblue_box = find(category=\"box\", color=\"blue\")\nwhile True:\n  todo = [(o, red_box) for o in find_all(category=\"cube\", color=\"red\") if not inside(o, red_box)] + [(o, blue_box) for o in find_all(category=\"cube\", color=\"blue\") if not inside(o, blue_box)]\n  if not todo:\n    break\n  todo_objects = [p[0] for p in todo]\n  cx = sum([o.x for o in todo_objects]) / len(todo_objects)\n  cy = sum([o.y for o in todo_objects]) / len(todo_objects)\n  p = max(todo, key=lambda p: (p[0].x - cx) * (p[0].x - cx) + (p[0].y - cy) * (p[0].y - cy))\n  held_now = [q for q in todo if q[0].attached]\n  if held_now:\n    p = held_now[0]\n  if not p[0].attached:\n    pick(p[0])\n  place(p[0], p[1])\nverify(lambda: all(inside(o, red_box) for o in find_all(category=\"cube\", color=\"red\")) and all(inside(o, blue_box) for o in find_all(category=\"cube\", color=\"blue\")), \"a red cube is not in the red box or a blue cube is not in the blue box\")\n",
+   "attempts": 1,
+   "seconds": 16.3
+  },
+  "G0": {
+   "program": "red_box = find(category=\"box\", color=\"red\")\nblue_box = find(category=\"box\", color=\"blue\")\n\nfor cube in find_all(category=\"cube\", color=\"red\"):\n    pick(cube)\n    place(cube, red_box)\n\nfor cube in find_all(category=\"cube\", color=\"blue\"):\n    pick(cube)\n    place(cube, blue_box)\n\nreport(\"red and blue cubes placed in matching boxes\")\n\nverify(lambda: all(inside(c, red_box) for c in find_all(category=\"cube\", color=\"red\")), \"a red cube is not in the red box\")\nverify(lambda: all(inside(c, blue_box) for c in find_all(category=\"cube\", color=\"blue\")), \"a blue cube is not in the blue box\")\n",
+   "attempts": 1,
+   "seconds": 12.4
+  }
+ }
+}

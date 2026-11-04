@@ -20,7 +20,8 @@ from program_runtime.agent import ChatClient, ProgramWriter  # noqa: E402
 from program_runtime.reader import IntentReader  # noqa: E402
 
 OUT = ROOT / "logs/demo_programs"
-SCENES = ("cubes_in_box:0", "sort_by_color:0", "yellow_on_red:0", "stacking:100007", "mixed:100002", "cluster:100001")
+SCENES = ("cubes_in_box:0", "sort_by_color:0", "yellow_on_red:0", "heart_box:0", "stacking:100007", "mixed:100002",
+          "cluster:100001")
 COMPARE = {"stacking:100007", "mixed:100002"}  # the untrained model's program too (side-by-side shots)
 READER, WRITER, UNTRAINED = "G0", "G1d", "G0"
 

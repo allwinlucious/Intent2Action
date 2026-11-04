@@ -1,0 +1,34 @@
+{
+ "scene": "stacking:100007",
+ "request": "every cube goes into the red box",
+ "seen": "The instruction is to place all cubes into the red box.",
+ "intent": {
+  "description": "every cube goes into the red box",
+  "rules": [
+   {
+    "select": {
+     "category": "cube"
+    },
+    "relation": "in",
+    "target": {
+     "category": "box",
+     "color": "red"
+    }
+   }
+  ],
+  "others": "stay"
+ },
+ "read_seconds": 4.4,
+ "programs": {
+  "G1d": {
+   "program": "box = find(category=\"box\", color=\"red\")\nwhile True:\n  todo = [(o, box) for o in find_all(category=\"cube\") if not inside(o, box)]\n  if not todo:\n    break\n  p = max(todo, key=lambda p: p[0].z)\n  held_now = [q for q in todo if q[0].attached]\n  if held_now:\n    p = held_now[0]\n  if not p[0].attached:\n    pick(p[0])\n  place(p[0], p[1])\nverify(lambda: all(inside(o, box) for o in find_all(category=\"cube\")), \"a cube is not in the red box\")\n",
+   "attempts": 1,
+   "seconds": 7.9
+  },
+  "G0": {
+   "program": "box = find(category=\"box\", color=\"red\")\nfor cube in find_all(category=\"cube\"):\n    pick(cube)\n    place(cube, box)\nreport(f\"{len(find_all(category='cube'))} cubes placed in the red box\")\nverify(lambda: all(inside(c, box) for c in find_all(category=\"cube\")), \"a cube is not in the red box\")\n",
+   "attempts": 1,
+   "seconds": 7.0
+  }
+ }
+}
