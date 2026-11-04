@@ -33,7 +33,7 @@ The model never steers the robot on its own.
 | Learning from experience | Experience beats size |
 |---|---|
 | <img src="docs/media/tower_untrained_vs_finetuned.gif" width="400" alt="The base model pulls the bottom cube and fails; the fine-tuned model unstacks top first"> | <img src="docs/media/experience_wonder_vs_ours.gif" width="400" alt="Muse Wonder finds no feasible grasp; the fine-tuned model takes the outermost cube first"> |
-| Unloading a tower. The base model grabs the bottom cube and fails (left); after training on the robot's experience, it unstacks top first (right). 3× speed. | Cubes packed close together. Muse Wonder, a much larger hosted model, writes a correct-looking loop, but the fingers fit around none of its first choices (left). Ours takes the outermost cube first (right). 3.5× speed. |
+| Unloading a tower. The base model grabs the bottom cube and fails (left); after training on the robot's experience, it unstacks top first (right). 3× speed. | Cubes packed close together. Muse Wonder, a much larger hosted model, writes a correct-looking loop, but the fingers fit around none of its first choices (left). The fine-tuned model takes the outermost cube first (right). 3.5× speed. |
 | **A new skill, also learned from experience** | **Held-out tasks it solves in physics** |
 | <img src="docs/media/push_finale.gif" width="400" alt="The carton is too wide to grasp; the model asks, then pushes it onto the green zone"> | <img src="docs/media/success_grid.gif" width="400" alt="Sixteen successful tasks"> |
 | The carton is wider than the gripper opens. The model says so and asks; told "can you get it done somehow?", it pushes the carton onto the zone with the robot's force-limited moves, each move approved. It learned pushing on other objects and had never seen this carton. 10× speed. | Sixteen takes at once: fourteen tasks the models' programs solved in Isaac Sim physics, and two scripted capability takes (peg in hole, gift tower). 6× speed. |
@@ -61,14 +61,26 @@ make ui-replay    # then open http://127.0.0.1:8765
 Every reply comes from `demo_runs/transcript.jsonl`, replayed exactly, so only recorded requests work. The robot here
 is a simple stand-in without physics.
 
-**2. With the real models**, on a GPU pod with about 40 GB of memory, CUDA ≥ 13 and a writable `/workspace` (for
-example a RunPod PyTorch pod):
+**2. With the real models, on [Modal](https://modal.com)** (one A100 80GB, scales to zero when idle):
 
 ```bash
-bash runpod/serve_from_hf.sh                          # on the pod: Muse Glimmer 30B + the adapters from Hugging Face
-ssh -N -L 8000:127.0.0.1:8000 -p <port> root@<pod>    # on your machine: the server listens on the pod's localhost
-make ui-models                                        # the panel (simulated robot), asking the real models
+pip install modal && modal setup                      # once: a Modal account and token
+export I2A_API_KEY=$(openssl rand -hex 16)            # the endpoint is public, so callers need this key
+modal deploy learn/modal_serve.py                     # Muse Glimmer 30B + the adapters from Hugging Face; prints a URL
+LLM_BASE_URL=<printed URL>/v1 LLM_API_KEY=$I2A_API_KEY make ui-models    # the panel (simulated robot), real models
+modal app stop intent2action                          # when done
 ```
+
+The first start downloads the base model (about 56 GB) into a Modal volume and loads it, which takes 10–20 minutes;
+later starts reuse the volume. Wake it and wait until it lists the models before opening the panel:
+
+```bash
+until curl -sfL -m 120 -H "Authorization: Bearer $I2A_API_KEY" <printed URL>/v1/models; do sleep 30; done
+```
+
+*Or on any GPU pod* with about 40 GB, CUDA ≥ 13 and a writable `/workspace` (for example RunPod):
+`bash runpod/serve_from_hf.sh` on the pod, `ssh -N -L 8000:127.0.0.1:8000 -p <port> root@<pod>` on your machine, then
+`make ui-models`.
 
 **3. Check the numbers:** `make test` (346 unit tests, about a minute) and `make tables` (rebuilds the main results
 tables, the planner and physics success rates, from the published data in [`results/`](results); the rest are in
@@ -78,7 +90,7 @@ tables, the planner and physics success rates, from the published data in [`resu
 
 ## Results
 
-The base model is **Muse Glimmer 30B**, an open-weights model. We fine-tuned it with QLoRA on what the robot actually
+The base model is **Muse Glimmer 30B**, an open-weights model, fine-tuned here with QLoRA on what the robot actually
 achieved in simulation: for 750 generated training tasks (150 per task type), every strategy was tried on a real motion planner, and the
 model learned from the ones that worked. All tasks below are held out: never seen in training, and one whole task
 type never trained at all.
@@ -104,7 +116,7 @@ type never trained at all.
 *   **Upper bounds:** the best fixed strategy per task type reaches 84%; an oracle choosing the best strategy for each
     scene reaches 91%.
 
-**A new skill, pushing:** we added experience of objects the gripper cannot hold (crates, trays and totes, pushed onto
+**A new skill, pushing:** one more set of experience was added, objects the gripper cannot hold (crates, trays and totes, pushed onto
 a mat or a pad).
 *   **Results:** on a carton and a goal zone it had never seen, the model said it could not grasp the carton and asked,
     in 15 of 15 scenes. After a yes, it pushed the carton onto the zone in 11 of 15. Without that experience: 0 of 10.

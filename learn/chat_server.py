@@ -14,6 +14,7 @@ import base64
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 import json
+import os
 from pathlib import Path
 import re
 import threading
@@ -161,7 +162,7 @@ class Model:
             "choices": [{"index": 0, "message": parse(raw), "finish_reason": "stop"}]}
 
 
-def serve(model, names: list[str], port: int, api_key: str = "", tag: str = "chat_server") -> None:
+def serve(model, names: list[str], port: int, api_key: str = "", tag: str = "chat_server", host: str = "127.0.0.1") -> None:
   """OpenAI-compatible HTTP front for any `model` with chat(request) -> completion; local only."""
 
   class Handler(BaseHTTPRequestHandler):
@@ -196,7 +197,7 @@ def serve(model, names: list[str], port: int, api_key: str = "", tag: str = "cha
       print(f"[{tag}] {self.address_string()} {fmt % a}", flush=True)
 
   print(f"serving {names} on :{port}", flush=True)
-  ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
+  ThreadingHTTPServer((host, port), Handler).serve_forever()
 
 
 def main() -> None:
@@ -204,10 +205,12 @@ def main() -> None:
   parser.add_argument("--root", default="/workspace/train")
   parser.add_argument("--adapters", nargs="+", required=True)
   parser.add_argument("--port", type=int, default=8000)
-  parser.add_argument("--api-key", default="")
+  parser.add_argument("--api-key", default=os.environ.get("I2A_API_KEY", ""),
+                      help="callers must send it as a Bearer token (default: $I2A_API_KEY)")
+  parser.add_argument("--host", default="127.0.0.1", help="0.0.0.0 behind a proxy that needs it (Modal); then set --api-key")
   args = parser.parse_args()
   model = Model(args.root, args.adapters)
-  serve(model, ["G0", *sorted(model.adapters)], args.port, args.api_key)
+  serve(model, ["G0", *sorted(model.adapters)], args.port, args.api_key, host=args.host)
 
 
 if __name__ == "__main__":
