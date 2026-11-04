@@ -1,5 +1,5 @@
 category: box
-collision: none
+collision: convexHull
 color:
 - 0.93
 - 0.93
@@ -12,5 +12,5 @@ dims:
 - 0.056
 - 0.0547
 - 0.0547
-mass: null
-static: true
+mass: 0.05
+static: false

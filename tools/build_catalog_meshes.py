@@ -152,10 +152,11 @@ OBJECTS = {
     "green_gift": (_lidded_box((0.0795, 0.0541, 0.0382),
                                (0.0827, 0.0573, 0.0127), OUT_DIR / "green_gift"),
                    False, 0.15, (0.12, 0.2, 0.17)),
-    # The owner's heart box at the same scale: an open base 8.8 x 8.6 x 8.6 cm (2 mm walls; static, a container),
+    # The owner's heart box at the same scale: an open base 8.8 x 8.6 x 8.6 cm (2 mm walls; a container that can be
+    # picked up and stacked),
     # its removable lid 9 x 9 x 2.5 cm, and the small heart box (the same design, 6 cm closed) that goes inside.
     "heart_box": (_textured_open_box(0.056, 0.0547, 0.0547, 0.0013, 0.0013,
-                                     OUT_DIR / "heart_box"), True, None, (0.93, 0.93, 0.94)),
+                                     OUT_DIR / "heart_box"), False, 0.05, (0.93, 0.93, 0.94)),
     "heart_lid": (_textured_box(0.0573, 0.0573, 0.0159, OUT_DIR / "heart_lid"),
                   False, 0.03, (0.68, 0.62, 0.59)),
     "small_heart_gift": (_lidded_box((0.0374, 0.0365, 0.0276),
@@ -209,6 +210,8 @@ NO_COLLISION = {"target_zone", "pallet_mat", "marker_pad"}
 # Built from overlapping closed slabs (static: Isaac collides with the exact triangles, the planner with
 # collision_parts), so the merged surface is not one closed shell.
 SLAB_BUILT = {"heart_box"}
+# A moving open box keeps its cavity: Isaac collides with its slabs (collision_parts), one convex hull each.
+COLLISION = {"heart_box": "convexHull"}  # Isaac uses one hull per collision part (sim/tools/build_catalog.py)
 # name: (wall, floor) thickness (m) of the open boxes.
 CONTAINERS = {"red_box": (0.01, 0.01), "blue_box": (0.01, 0.01), "heart_box": (0.0013, 0.0013)}
 
@@ -246,7 +249,7 @@ def main() -> int:
         "static": static,
         "mass": mass,
         "color": list(color),
-        "collision": "none" if static else "convexHull",
+        "collision": "none" if static else COLLISION.get(name, "convexHull"),
         # Bounding box (m); robot_service's PlanGrasp reads it (phase_5c.md decision 5).
         "dims": [round(float(v), 6) for v in mesh.extents],
         "category": ATTRIBUTES[name][0],

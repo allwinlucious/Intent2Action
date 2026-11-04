@@ -539,3 +539,22 @@ def test_heart_box_pack_program_dry_runs():
   program = (Path(__file__).parents[1] / "program_runtime/examples/heart_box_pack.py").read_text()
   result = run(program, RobotAPI(FakeBackend(objects)))
   assert result.ok, result.error
+
+
+def test_dry_run_moves_a_box_with_its_contents_and_lid():
+  from program_runtime.api import FakeBackend, Obj, RobotAPI
+  from program_runtime.runtime import run
+
+  def obj(id, category, color, x, y, z, sx, sy, sz):
+    return Obj(id=id, category=category, color=color, size="small", x=x, y=y, z=z, yaw=0.0, sx=sx, sy=sy, sz=sz,
+               attached=False)
+  objects = [obj("box", "box", "grey", 0.4, -0.2, 0.0, 0.056, 0.0547, 0.0547),
+             obj("gift", "gift", "mauve", 0.58, -0.2, 0.0, 0.0382, 0.0382, 0.0382),
+             obj("lid", "lid", "mauve", 0.66, 0.0, 0.0, 0.0573, 0.0573, 0.0159),
+             obj("green", "gift", "green", 0.5, -0.04, 0.0, 0.0827, 0.0573, 0.0509)]
+  program = ('box = find(category="box")\ngift = find(category="gift", color="mauve")\nlid = find(category="lid")\n'
+             'green = find(category="gift", color="green")\npick(gift)\nplace(gift, box)\npick(lid)\nplace(lid, box)\n'
+             'pick(box)\nplace(box, green)\n'
+             'verify(lambda: on_top(box, green) and inside(gift, box) and on_top(lid, box), "not packed")\n')
+  result = run(program, RobotAPI(FakeBackend(objects)))
+  assert result.ok, result.error

@@ -276,7 +276,7 @@ class World:
     # collisions (MoveIt's touch links). Switched back on by detach.
     others = ["franka", "franka_hand", *supports]
     for other in others:
-      self._toggle(name, other, enable=False)
+      self._toggle_bodies(name, other, enable=False)
     self.untouched[name] = others
 
   def lifted(self, name: str) -> None:
@@ -285,7 +285,7 @@ class World:
     keep = ["franka", "franka_hand"]
     for other in self.untouched.get(name, []):
       if other not in keep:
-        self._toggle(name, other, enable=True)
+        self._toggle_bodies(name, other, enable=True)
     if name in self.untouched:
       self.untouched[name] = [o for o in self.untouched[name] if o in keep]
 
@@ -304,7 +304,7 @@ class World:
     )
     self._set_pose(name, before)
     for other in self.untouched.pop(name, []):
-      self._toggle(name, other, enable=True)
+      self._toggle_bodies(name, other, enable=True)
 
   def _set_pose(self, name: str, pose: api.Pose) -> None:
     node = refs_pb.TransformNodeReference(by_name=refs_pb.TransformNodeReferenceByName(
@@ -315,9 +315,21 @@ class World:
                                           node_b=node, node_to_update=node, a_t_b=to_pose_proto(pose)),
     )
 
-  def _toggle(self, a: str, b: str, enable: bool) -> None:
+  def _toggle_bodies(self, name: str, other: str, enable: bool) -> None:
+    """_toggle for an object and its collision parts (an open container collides as child slabs
+    `<name>_part_<k>`, separate objects that a toggle of the parent does not cover)."""
+    listed = self._call("ListObjects", world_pb.ListObjectsRequest(world_id=WORLD, view=updates_pb.BASIC)).objects
+    # Parts have no world-unique name alias: they are referenced by id.
+    ids = {o.name: o.id for o in listed}
+    ref = lambda n: refs_pb.ObjectReference(id=ids[n]) if "_part_" in n and n in ids else _by_name(n)  # noqa: E731
+    for body in (name, *(n for n in ids if n.startswith(f"{name}_part_"))):
+      self._toggle(ref(body), ref(other), enable)
+
+  def _toggle(self, a, b, enable: bool) -> None:
+    """a, b: object names or ObjectReferences."""
     ref = lambda n: refs_pb.ObjectReferenceWithEntityFilter(  # noqa: E731
-        reference=_by_name(n), entity_filter=refs_pb.ObjectEntityFilter(include_all_entities=True))
+        reference=_by_name(n) if isinstance(n, str) else n,
+        entity_filter=refs_pb.ObjectEntityFilter(include_all_entities=True))
     self._call("ToggleCollisions", updates_pb.ToggleCollisionsRequest(
         world_id=WORLD, object_a=ref(a), object_b=ref(b),
         toggle_mode=updates_pb.TOGGLE_MODE_ENABLE if enable else updates_pb.TOGGLE_MODE_DISABLE))

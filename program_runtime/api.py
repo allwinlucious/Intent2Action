@@ -215,6 +215,9 @@ class FakeBackend:
     obj, target = self.objects[object_id], self.objects[target_id]
     if not obj.attached:
       raise RobotFailure("precondition", f"not holding {object_id}")
+    # What is in or on the held object (a box's contents, its lid) travels with it.
+    riders = [other for other in self.objects.values() if other.id not in {object_id, target_id}
+              and (_inside_values(other, obj) or _on_top_values(other, obj))]
     x, y = target.x, target.y
     if target.category == "box":
       nx = math.floor((target.sx - 0.02) / 0.06)
@@ -244,6 +247,8 @@ class FakeBackend:
       x, y = slot
     else:
       z = target.z + target.sz
+    for other in riders:
+      self.objects[other.id] = replace(other, x=other.x + x - obj.x, y=other.y + y - obj.y, z=other.z + z - obj.z)
     self.objects[object_id] = replace(obj, x=x, y=y, z=z, attached=False)
 
   def state(self) -> dict:

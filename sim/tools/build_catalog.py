@@ -79,14 +79,27 @@ def write_model(directory: Path) -> None:
     stage.GetRootLayer().Save()
     print(f"CATALOG {directory.name}: {len(mesh.faces)} faces, visual only", flush=True)
     return
-  UsdPhysics.CollisionAPI.Apply(geom.GetPrim())
-  UsdPhysics.MeshCollisionAPI.Apply(geom.GetPrim()).CreateApproximationAttr(
-      description["collision"]
-  )
-  # Contacts start 1 mm out and rest at the surface: the peg-in-hole clearance is 1 mm per side.
-  physx = PhysxSchema.PhysxCollisionAPI.Apply(geom.GetPrim())
-  physx.CreateContactOffsetAttr(0.001)
-  physx.CreateRestOffsetAttr(0.0)
+  colliders = [(geom, description["collision"])]
+  parts = sorted((directory / "collision_parts").glob("part_*.glb"))
+  if not description["static"] and parts:
+    # A moving open box: one convex hull per floor/wall slab (the planner's collision parts), so the cavity stays
+    # open and thin walls stay solid; the visual mesh does not collide.
+    colliders = []
+    for k, path in enumerate(parts):
+      part = trimesh.load(path, force="mesh")
+      slab = UsdGeom.Mesh.Define(stage, f"/Object/collision_{k}")
+      slab.CreatePointsAttr(Vt.Vec3fArray.FromNumpy(part.vertices.astype("f4")))
+      slab.CreateFaceVertexCountsAttr([3] * len(part.faces))
+      slab.CreateFaceVertexIndicesAttr(part.faces.reshape(-1).tolist())
+      UsdGeom.Imageable(slab.GetPrim()).CreatePurposeAttr(UsdGeom.Tokens.guide)
+      colliders.append((slab, "convexHull"))
+  for collider, approximation in colliders:
+    UsdPhysics.CollisionAPI.Apply(collider.GetPrim())
+    UsdPhysics.MeshCollisionAPI.Apply(collider.GetPrim()).CreateApproximationAttr(approximation)
+    # Contacts start 1 mm out and rest at the surface: the peg-in-hole clearance is 1 mm per side.
+    physx = PhysxSchema.PhysxCollisionAPI.Apply(collider.GetPrim())
+    physx.CreateContactOffsetAttr(0.001)
+    physx.CreateRestOffsetAttr(0.0)
   # Compliant contact at MakeContact's MEDIUM environment stiffness (60 kN/m): rigid PhysX contact spikes past 85 N.
   material = UsdShade.Material.Define(stage, "/Object/physics_material")
   UsdPhysics.MaterialAPI.Apply(material.GetPrim()).CreateStaticFrictionAttr(
@@ -98,9 +111,10 @@ def write_model(directory: Path) -> None:
   physx_material = PhysxSchema.PhysxMaterialAPI.Apply(material.GetPrim())
   physx_material.CreateCompliantContactStiffnessAttr(60000.0)
   physx_material.CreateCompliantContactDampingAttr(COMPLIANT_DAMPING)
-  UsdShade.MaterialBindingAPI.Apply(geom.GetPrim()).Bind(
-      material, UsdShade.Tokens.weakerThanDescendants, "physics"
-  )
+  for collider, _ in colliders:
+    UsdShade.MaterialBindingAPI.Apply(collider.GetPrim()).Bind(
+        material, UsdShade.Tokens.weakerThanDescendants, "physics"
+    )
 
   if not description["static"]:
     UsdPhysics.RigidBodyAPI.Apply(root)
