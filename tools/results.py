@@ -20,7 +20,7 @@ PATTERNS = (
     "expert/heldout_all.jsonl", "expert/train_all_sorting.jsonl", "expert/recovery_best.jsonl",
     "eval/requests.jsonl", "eval/*_replies.jsonl", "eval/*_programs*.jsonl", "eval/*_episodes*.jsonl", "eval/*.rewards.jsonl",
     "eval/PHYS_labels.jsonl",
-    "sft/G1b/*.json*", "sft/G1d/*.json*",
+    "sft/G1b/*.json*", "sft/G1d/*.json*", "sft/G1e/*.json*", "expert/push_rows.jsonl", "eval/push_*.jsonl",
 )
 
 

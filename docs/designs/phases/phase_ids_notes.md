@@ -19,7 +19,7 @@ or Isaac process is left running. Nothing was committed.
 | `phase5c_check.py` | PASS 6/6: cube 10/10, peg 10/10 | `logs/ids_run_phase5c_check.out` |
 | `phase5b_check.py` | Run 1: 5/6, `insert` FAIL 7/10. Run 2: PASS 6/6, `insert` 9/10 | `logs/ids_run_phase5b_check.out`, `…_check_2.out` |
 | `phase6_check.py` | PASS 2/2 (`tools`, `calls`; `calls` now includes `list_objects`) | `logs/ids_run_phase6_check.out` |
-| `phase6_cuj1.py` | PASS **5/5** (need 4), prompt unchanged, 14–15 tool calls, cube 0.2–0.7 mm from the plate centre | `logs/ids_run_phase6_cuj1.out` |
+| the phase-6 CUJ 1 check (since removed) | PASS **5/5** (need 4), prompt unchanged, 14–15 tool calls, cube 0.2–0.7 mm from the plate centre | `logs/ids_run_phase6_cuj1.out` |
 | `pytest tests/` | 92 passed (89 before, plus 3 in `tests/test_scene_ids.py`) | — |
 
 The image was rebuilt with `docker build` (`logs/phase_ids_build.log`). No

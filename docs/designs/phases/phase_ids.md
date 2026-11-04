@@ -19,7 +19,7 @@ There is no `find_objects`; grounding is the model's job.
 *   All existing checks pass with IDs: `phase3_hwm_check.py`,
     `phase3_scene_check.py`, `phase3_cuj_check.py`, `phase4_check.py`,
     `phase5c_check.py`, `phase5b_check.py`, `phase6_check.py`,
-    `phase6_cuj1.py` (≥ 4/5, prompt unchanged: "Put the red cube on the
+    the phase-6 CUJ 1 check (since removed) (≥ 4/5, prompt unchanged: "Put the red cube on the
     plate."); `pytest tests/` passes.
 *   New check `tests/e2e/ids_check.py` (Create) covers the first three
     bullets.
@@ -190,7 +190,7 @@ Observability applies. If a decision is impossible, stop and record it.
     `/tf` through `user_data["prim"]`; the spawned second cube is found
     by the ID `Spawn` returns), `phase4_check.py`, `phase5b_check.py`,
     `phase5c_check.py` (incl. its `GRASP_PLANNER=off` restart),
-    `phase6_check.py`, `phase6_cuj1.py`. `tests/e2e/ids_check.py`
+    `phase6_check.py`, the phase-6 CUJ 1 check (since removed). `tests/e2e/ids_check.py`
     (Create) calls `PlanGrasp`, `AttachObject`, `DetachObject`,
     `RemoveObject` and `GetTruePose` with `obj_00` (never drawn: k ≥ 10)
     and expects the `NOT_FOUND` message; runs 5 resets for criterion 2;

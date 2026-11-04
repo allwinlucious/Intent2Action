@@ -68,8 +68,19 @@ python learn/glimmer_job.py train --data G1d --run G1d
 *   **DPO:** `learn/dpo_data.py` then `learn/dpo_train.py`.
 *   **GRPO:** `learn/grpo_data.py` then `learn/grpo_train.py`.
 *   **The trained adapters:**
-    [G1b](https://huggingface.co/mewbot97/Intent2Action-glimmer-programs) and
-    [G1d](https://huggingface.co/mewbot97/Intent2Action-glimmer-recovery).
+    [G1b](https://huggingface.co/mewbot97/Intent2Action-glimmer-programs),
+    [G1d](https://huggingface.co/mewbot97/Intent2Action-glimmer-recovery) and
+    [G1e](https://huggingface.co/mewbot97/Intent2Action-glimmer-push).
+*   **G1e (G1d + push experience):**
+
+    ```bash
+    .venv/bin/python learn/fleet.py --workers 4 --prefix push --base-port 18600 -- learn/push_experience.py rows \
+        --split train --n 200 --out logs/expert/push_rows.jsonl
+    # logs/sft/G1e = G1d's rows + these rows (manifest in results/sft/G1e); render with --max-tokens 10240, then
+    python learn/glimmer_job.py train --data G1e --run G1e --sequence-len 10240        # on the pod
+    .venv/bin/python learn/fleet.py --workers 1 --prefix pe --base-port 18700 -- learn/push_experience.py evaluate \
+        --version G1e --n 15 --out logs/eval/push_G1e.jsonl                            # the held-out carton
+    ```
 
 ## 4. Held-out evaluation (planning simulator, 3 runs)
 

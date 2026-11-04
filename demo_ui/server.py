@@ -421,7 +421,7 @@ class Handler(BaseHTTPRequestHandler):
     directory = ROOT / "logs" / "demo_ui" / "clips"
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{secrets.token_hex(3)}.webm"
-    path.write_bytes(self.rfile.read(length))
+    path.write_bytes(self._read_exact(length))
     try:
       text = transcribe(path)
     finally:

@@ -36,6 +36,34 @@ against ground truth. A person signs off at three gates:
 Every take is recorded at 30 fps in real time (`tools/record_take.py`); the model calls behind them are logged in
 [`demo_runs/`](demo_runs).
 
+## Try it
+
+**1. In two minutes, no GPU: the panel with the real recorded model replies.**
+
+```bash
+git clone https://github.com/allwinlucious/Intent2Action && cd Intent2Action
+make setup        # .venv (Python 3.12)
+make ui-replay    # open http://127.0.0.1:8765
+```
+
+Choose the scene **Heart box · pack and close** and type `put the small heart box into the open box and close the
+lid`. Glimmer's logged reading appears (it misses the lid). Correct it with `the small heart box is a gift, not a box:
+the mauve gift goes into the box, then the lid goes on the box`, then confirm, and the fine-tuned model's logged
+program appears; press ▶. Every reply comes from `demo_runs/transcript.jsonl`, replayed exactly; only logged requests
+can be replayed. The robot is simulated (no physics).
+
+**2. The fine-tuned models themselves**, on any GPU host with about 40 GB and CUDA ≥ 13 (RunPod, Modal, a workstation):
+
+```bash
+bash runpod/serve_from_hf.sh                     # base Glimmer + the three adapters from Hugging Face, port 8000
+LLM_BASE_URL=http://<gpu-host>:8000/v1 LLM_API_KEY=unused make ui-fake    # the panel, now asking the real models
+```
+
+**3. Check the numbers:** `make test` (346 unit tests, about a minute) and `make tables` (rebuilds every results
+table from the published data in `results/`).
+
+**4. The full stack** (Intrinsic Core container, Isaac Sim physics): [docs/REPRODUCE.md](docs/REPRODUCE.md).
+
 ## Results
 
 The model is Muse Glimmer 30B, fine-tuned with QLoRA on what the robot actually achieved in simulation ("learning
@@ -81,6 +109,8 @@ cluster.
 **Trained adapters on Hugging Face**, Apache-2.0, for `meta-models/Muse-Glimmer-30B`:
 *   [mewbot97/Intent2Action-glimmer-recovery](https://huggingface.co/mewbot97/Intent2Action-glimmer-recovery) (G1d): writes
     programs and handles recovery. This is the model the demo uses.
+*   [mewbot97/Intent2Action-glimmer-push](https://huggingface.co/mewbot97/Intent2Action-glimmer-push) (G1e): G1d +
+    push experience, the carton finale.
 *   [mewbot97/Intent2Action-glimmer-programs](https://huggingface.co/mewbot97/Intent2Action-glimmer-programs) (G1b): the best
     program writer.
 
@@ -109,16 +139,6 @@ demo clip / sentence ──► reader (Glimmer, images + text; speech via Muse V
 | Demo panel (human gates, live view, approvals) | [`demo_ui/`](demo_ui) |
 | Learning: task families, expert, training, evaluation | [`learn/`](learn), [`runpod/`](runpod) |
 | Designs, plans and results | [`docs/designs/`](docs/designs) |
-
-## Quick start (no GPU, no simulator)
-
-```bash
-git clone https://github.com/allwinlucious/Intent2Action && cd Intent2Action
-make setup          # .venv with requirements-dev.txt (Python 3.12)
-make test           # 346 unit tests, about 1 min
-make ui-fake        # demo panel with a fake robot and model: http://127.0.0.1:8765
-make tables         # rebuild the results tables from the published data in results/
-```
 
 ## Full setup
 
@@ -149,6 +169,25 @@ results/          published experiment data (restore: make tables) docs/        
 *   Physics evaluations cover 50 tasks.
 *   This is not certified functional safety. A real cell still needs its own safety layer: guarding, safety-rated
     stops and speed monitoring, and a risk assessment.
+
+## Prior work and what was built
+
+*   **Before 27 October 2026** (the first commit, `d2000c5`, "Snapshot before … implementation"): a build of Intrinsic
+    Core packaged in one Docker container (build scripts, Dockerfile, generated protobuf stubs, a motion planner
+    config), one early Isaac Sim pick-and-place script, and a plan document. No robot service, models, learning or
+    demo.
+*   **Built from 27 October to 4 November 2026** (every later commit):
+    *   the robot service (gRPC API over Intrinsic Core: pick, place, force moves, calibration) and the ROS 2 bridge
+        to Isaac Sim;
+    *   the MCP server;
+    *   the program runtime (check, dry run, budgeted recovery, rule checker) and the intent reader;
+    *   the task families, the search expert and the push experience;
+    *   the learning pipeline (SFT, DPO, GRPO, the evaluation fleet, the physics evaluation) and the trained
+        adapters;
+    *   the hosted-model benchmark;
+    *   the demo panel, the textured props and the video renders;
+    *   CI.
+*   **Third-party work** is credited in [NOTICE](NOTICE).
 
 ## License
 

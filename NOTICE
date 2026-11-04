@@ -11,6 +11,13 @@ This project builds on the following third-party work. Each part keeps its own l
 * NVIDIA Isaac Sim 5.1: the physics simulator. It is not redistributed; install it separately under NVIDIA's terms.
 * Franka Panda robot model (franka_description by Franka Emika GmbH, via Isaac Sim), Apache-2.0: see
   assets/robots/franka/LICENSE.md.
+* ROS 2 Humble and MoveIt 2: the bridge between Isaac Sim and the robot service, and the grasp planner. Installed
+  in the container from the ROS apt repositories under their own licences (Apache-2.0 / BSD-3-Clause).
+* intrinsic-moveit (https://github.com/intrinsic-ai/intrinsic-moveit), tag v0.0.4, Apache-2.0: the grasp planning
+  sources vendored in ros_ws/src/ (moveit_planning_interfaces, grasp_planner), with the changes listed in
+  ros_ws/src/VENDORED.md.
+* moveit_resources Panda MoveIt config (ros-humble-moveit-resources-panda-moveit-config), BSD-3-Clause: the
+  collision exemptions and OMPL settings in ros_ws/src/franka_grasp_config/.
 * tinygltf (third_party/tinygltf), MIT.
 * Muse Glimmer 30B (meta-models/Muse-Glimmer-30B), Apache-2.0: the base model of the published adapters. The
   fine-tuning recipe and evaluation path follow the Meta model cookbook (Apache-2.0).
