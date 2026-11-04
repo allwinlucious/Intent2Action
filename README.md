@@ -49,6 +49,15 @@ cluster.
 *   Every number, the ablations (rejection sampling, DPO, GRPO, bf16 LoRA, seeds), what did not work, and the
     limitations: [docs/designs/learning_results.md](docs/designs/learning_results.md).
 
+**A new skill from experience (G1e = G1d + push experience):**
+*   **Training:** pushing objects the gripper cannot hold (crates, trays, totes) onto a goal, with the robot's
+    force-limited moves.
+*   **Held-out carton and zone, never in training:**
+    *   it says it cannot grasp the carton and asks, in 15/15 scenes;
+    *   after a yes, it pushes the carton onto the zone in 11/15 (G1d: 0/10).
+*   **The cost:** stacking 89 → 58 % (250 tasks: 77 %). Balancing the mix is the next step.
+*   Details: [learning_results.md](docs/designs/learning_results.md).
+
 **Trained adapters on Hugging Face**, Apache-2.0, for `meta-models/Muse-Glimmer-30B`:
 *   [mewbot97/Intent2Action-glimmer-recovery](https://huggingface.co/mewbot97/Intent2Action-glimmer-recovery) (G1d): writes
     programs and handles recovery. This is the model the demo uses.

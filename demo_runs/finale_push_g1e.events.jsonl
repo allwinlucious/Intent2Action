@@ -1,0 +1,47 @@
+{"t":1793815195.3252614,"kind":"check","problems":[]}
+{"t":1793815195.3323278,"kind":"dry_run","ok":true,"error":null}
+{"t":1793815195.3325393,"kind":"line","line":1}
+{"t":1793815195.332622,"kind":"call","fn":"find","args":["category=zone","color=green"]}
+{"t":1793815195.3381622,"kind":"result","fn":"find","ok":true,"message":""}
+{"t":1793815195.3381908,"kind":"line","line":2}
+{"t":1793815195.3381996,"kind":"line","line":3}
+{"t":1793815195.3382108,"kind":"call","fn":"find_all","args":["category=carton"]}
+{"t":1793815195.343489,"kind":"result","fn":"find_all","ok":true,"message":""}
+{"t":1793815195.343519,"kind":"call","fn":"on_top","args":["obj_45","obj_50"]}
+{"t":1793815195.3487709,"kind":"result","fn":"on_top","ok":true,"message":""}
+{"t":1793815195.3487957,"kind":"line","line":4}
+{"t":1793815195.3488038,"kind":"line","line":6}
+{"t":1793815195.3488095,"kind":"line","line":7}
+{"t":1793815195.3488154,"kind":"line","line":8}
+{"t":1793815195.3488197,"kind":"line","line":10}
+{"t":1793815195.348824,"kind":"line","line":11}
+{"t":1793815195.3488328,"kind":"call","fn":"pick","args":["obj_45"]}
+{"t":1793815195.3540947,"kind":"result","fn":"pick","ok":false,"message":"operations/Pick-18: object wider than the gripper opening (0.075 m) in every horizontal direction"}
+{"t":1793815195.3541327,"kind":"failure","failure_kind":"grasp","message":"operations/Pick-18: object wider than the gripper opening (0.075 m) in every horizontal direction","call":"pick(obj_45)","line":11}
+{"t":1793815195.3541422,"kind":"handoff","n":1}
+{"t":1793815211.054135,"kind":"decision","rung":"ask_user","reason":"pick(obj_45) failed: the carton is 0.12 x 0.12 m, narrowest side 0.12 m, and the gripper opens 0.075 m, so there is no grasp; retrying or another order cannot help","patch":null,"question":"I can't pick up the carton: it is wider than the gripper opens. I could push it onto the green zone with force-limited moves instead. Should I try?"}
+{"type":"operator","question":"I can't pick up the carton: it is wider than the gripper opens. I could push it onto the green zone with force-limited moves instead. Should I try?","answer":"can you get it done somehow?"}
+{"type":"operator","approved_tool":"release","arguments":{}}
+{"type":"operator","approved_tool":"move_to_pose","arguments":{"pose":{"x":0.4964,"y":0.333,"z":0.15,"qx":0.6873,"qy":0.7265,"qz":-0.0,"qw":-0.0},"motion":"ANY","tool":"TCP"}}
+{"type":"operator","approved_tool":"move_to_pose","arguments":{"pose":{"x":0.4964,"y":0.333,"z":0.035,"qx":0.6873,"qy":0.7265,"qz":-0.0,"qw":-0.0},"motion":"LINEAR","tool":"TCP"}}
+{"type":"operator","approved_tool":"move_to_contact","arguments":{"dx":0.0094,"dy":-1.0,"dz":0.0,"max_force":10.0,"speed":0.01}}
+{"type":"operator","approved_tool":"move_to_contact","arguments":{"dx":0.0094,"dy":-1.0,"dz":0.0,"max_force":10.0,"speed":0.01}}
+{"type":"operator","approved_tool":"move_to_contact","arguments":{"dx":0.0094,"dy":-1.0,"dz":0.0,"max_force":10.0,"speed":0.01}}
+{"t":1793815549.7759507,"kind":"decision","rung":"patch","reason":"the carton was pushed onto the green zone (y=-0.196 vs zone centre -0.150) with force-limited moves; the rest of the program only has to check it","patch":"zone = find(category=\"zone\", color=\"green\")\nthing = find(category=\"carton\")\nverify(lambda: on_top(thing, zone), \"the carton is not on the green zone\")\n","question":null}
+{"t":1793815549.7762733,"kind":"approval","patch":"zone = find(category=\"zone\", color=\"green\")\nthing = find(category=\"carton\")\nverify(lambda: on_top(thing, zone), \"the carton is not on the green zone\")\n","reason":"the carton was pushed onto the green zone (y=-0.196 vs zone centre -0.150) with force-limited moves; the rest of the program only has to check it"}
+{"type":"operator","approved_patch":"zone = find(category=\"zone\", color=\"green\")\nthing = find(category=\"carton\")\nverify(lambda: on_top(thing, zone), \"the carton is not on the green zone\")\n","reason":"the carton was pushed onto the green zone (y=-0.196 vs zone centre -0.150) with force-limited moves; the rest of the program only has to check it"}
+{"t":1793815549.7763147,"kind":"patch","accepted":true,"problems":[]}
+{"t":1793815549.7764895,"kind":"check","problems":[]}
+{"t":1793815549.7824674,"kind":"dry_run","ok":true,"error":null}
+{"t":1793815549.7825406,"kind":"line","line":1}
+{"t":1793815549.782557,"kind":"call","fn":"find","args":["category=zone","color=green"]}
+{"t":1793815549.7871678,"kind":"result","fn":"find","ok":true,"message":""}
+{"t":1793815549.7871916,"kind":"line","line":2}
+{"t":1793815549.7872036,"kind":"call","fn":"find","args":["category=carton"]}
+{"t":1793815549.7916608,"kind":"result","fn":"find","ok":true,"message":""}
+{"t":1793815549.7916877,"kind":"line","line":3}
+{"t":1793815549.7917037,"kind":"call","fn":"verify","args":["<function <lambda> at 0x7750d08a2200>","the carton is not on the green zone"]}
+{"t":1793815549.7917197,"kind":"call","fn":"on_top","args":["obj_45","obj_50"]}
+{"t":1793815549.796504,"kind":"result","fn":"on_top","ok":true,"message":""}
+{"t":1793815549.7965357,"kind":"result","fn":"verify","ok":true,"message":""}
+{"t":1793815549.796575,"kind":"done","ok":true,"error":null,"handoffs":1,"patches":1}
