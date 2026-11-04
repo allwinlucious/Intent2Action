@@ -352,7 +352,12 @@ async function loadScenes() {
   try {
     const scenes = await request("/api/scenes");
     $("#scene-select").innerHTML = scenes.map((scene) => `<option value="${escapeHtml(scene.id)}" data-request="${escapeHtml(scene.request)}">${escapeHtml(scene.label)}</option>`).join("");
-    $("#task-text").value = scenes[0].request;
+    const wanted = new URLSearchParams(location.search).get("scene");  // ?scene=<id>: that scene, no scene row
+    if (wanted && scenes.some((scene) => scene.id === wanted)) {
+      $("#scene-select").value = wanted;
+      $(".scene-controls").style.display = "none";
+      $("#task-text").value = "";
+    } else $("#task-text").value = scenes[0].request;
     await loadScene();
   } catch (error) { errorAt("#task-error", error); }
 }
@@ -464,6 +469,57 @@ $("#clip-file").addEventListener("change", () => {
   state.uploadUrl = file ? URL.createObjectURL(file) : null;
   $("#upload-preview").hidden = !file;
   $("#upload-preview").src = state.uploadUrl || "";
+});
+// Recorder-style level bars while speaking; returns a function that stops them.
+function speakMeter(stream) {
+  const meter = $("#speak-meter");
+  const bars = [...meter.children];
+  const audio = new AudioContext();
+  const analyser = audio.createAnalyser();
+  analyser.fftSize = 256;
+  audio.createMediaStreamSource(stream).connect(analyser);
+  const data = new Uint8Array(analyser.frequencyBinCount);
+  let frame = 0;
+  const draw = () => {
+    analyser.getByteFrequencyData(data);
+    bars.forEach((bar, index) => {
+      const value = data[2 + index * 4] / 255;  // voice sits in the low bins
+      bar.style.transform = `scaleY(${Math.max(0.15, value).toFixed(2)})`;
+    });
+    frame = requestAnimationFrame(draw);
+  };
+  meter.hidden = false;
+  draw();
+  return () => { cancelAnimationFrame(frame); audio.close(); meter.hidden = true; };
+}
+
+$("#speak-btn").addEventListener("click", async () => {
+  const button = $("#speak-btn");
+  if (state.speaker) { state.speaker.stop(); return; }
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({audio: true}); } catch (error) { errorAt("#task-error", error); return; }
+  const chunks = [];
+  state.speaker = new MediaRecorder(stream);
+  state.speaker.addEventListener("dataavailable", (event) => { if (event.data.size) chunks.push(event.data); });
+  state.speaker.addEventListener("stop", async () => {
+    stream.getTracks().forEach((track) => track.stop());
+    state.speaker = null;
+    button.classList.remove("active");
+    button.disabled = true;
+    button.textContent = "Transcribing…";
+    try {
+      const data = await request("/api/transcribe", {method: "POST", headers: {"Content-Type": "audio/webm"}, body: new Blob(chunks, {type: "audio/webm"})});
+      // Spoken requests read like typed ones: no capital, no closing full stop.
+      $("#task-text").value = data.text.trim().replace(/[.!?]+$/, "").toLowerCase();
+      errorAt("#task-error");
+    } catch (error) { errorAt("#task-error", error); }
+    finally { button.disabled = false; button.textContent = "Speak"; }
+  });
+  const meter = speakMeter(stream);
+  state.speaker.addEventListener("stop", meter);
+  state.speaker.start();
+  button.classList.add("active");
+  button.textContent = "Stop speaking";
 });
 $("#send-upload-btn").addEventListener("click", () => readClip($("#clip-file").files[0], $("#upload-note").value, $("#send-upload-btn")));
 

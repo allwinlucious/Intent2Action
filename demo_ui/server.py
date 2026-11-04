@@ -26,6 +26,7 @@ from program_runtime.reader import IntentReader
 from program_runtime.rules import validate_intent
 
 from .pipeline import Pipeline, PipelineError
+from .replay import ReplayModel
 from .scenes import PRESETS, fake_objects
 
 
@@ -351,6 +352,8 @@ class Handler(BaseHTTPRequestHandler):
     path = parsed.path
     if path == "/api/read_clip":
       return self._clip(parsed.query)
+    if path == "/api/transcribe":
+      return self._transcribe()
     body = self._json_body()
     pipeline = self.server.pipeline
     if path == "/api/scene":
@@ -410,6 +413,21 @@ class Handler(BaseHTTPRequestHandler):
       raise
     return self._json(200, result)
 
+  def _transcribe(self) -> int:
+    """Speech for the request box (Muse Voice Transcribe); the text is read like a typed request."""
+    if self.headers.get_content_type() not in ("audio/webm", "audio/ogg", "audio/mp4"):
+      raise PipelineError(415, "unsupported audio Content-Type")
+    length = self._length(CLIP_LIMIT)
+    directory = ROOT / "logs" / "demo_ui" / "clips"
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{secrets.token_hex(3)}.webm"
+    path.write_bytes(self.rfile.read(length))
+    try:
+      text = transcribe(path)
+    finally:
+      path.unlink(missing_ok=True)
+    return self._json(200, {"text": text})
+
   def _events(self) -> int:
     state = self.server.pipeline.event_run()
     self.send_response(200)
@@ -465,10 +483,11 @@ def build_server(
     *, port: int = 0, fake: bool = True, frames: Path | str | None = None,
     address: str = "127.0.0.1:18100", sim_address: str | None = None,
     reader_model: str = "G0", writer_model: str = "G1d", recovery_model: str = "G1d",
+    replay: Path | str | None = None, replay_default: str | None = None, staged_program: Path | str | None = None,
 ) -> DemoHTTPServer:
   frames = Path(frames or "/mnt/c/isaac-sim-work/viewer_frames")
   if fake:
-    model = FakeModel()
+    model = ReplayModel(replay, replay_default, Path(staged_program).read_text() if staged_program else None) if replay else FakeModel()
     backend = FakeBackend(fake_objects(PRESETS[0]))
     reader = IntentReader(model, model=reader_model)
     writer = ProgramWriter(model, model=writer_model)
@@ -504,6 +523,9 @@ def _parser() -> argparse.ArgumentParser:
   parser.add_argument("--writer-model", default="G1d")
   parser.add_argument("--recovery-model", default="G1d")
   parser.add_argument("--fake", action="store_true")
+  parser.add_argument("--replay", type=Path, help="with --fake: answer model calls with the replies logged in this transcript")
+  parser.add_argument("--staged-program", type=Path, help="with --replay: every program-writer call returns this hand-written program")
+  parser.add_argument("--replay-default", help="with --replay: any unlogged reading returns the logged reading of this request")
   return parser
 
 
@@ -514,7 +536,7 @@ def main(argv: list[str] | None = None) -> int:
     server = build_server(
       port=args.port, fake=args.fake, frames=args.frames, address=args.address,
       sim_address=args.sim_address, reader_model=args.reader_model,
-      writer_model=args.writer_model, recovery_model=args.recovery_model,
+      writer_model=args.writer_model, recovery_model=args.recovery_model, replay=args.replay, replay_default=args.replay_default, staged_program=args.staged_program,
     )
   except Exception as error:
     print(f"FAILED: {error}", file=sys.stderr)

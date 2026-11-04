@@ -346,6 +346,10 @@ body.sidebar-closed .sidebar-toggle {
 .request-actions { justify-content: space-between; margin-top: 8px; }
 .clip-actions { display: flex; gap: 16px; }
 .clip-toggle.active { color: var(--text); }
+.speak-meter { display: inline-flex; align-items: center; gap: 3px; height: 18px; }
+.speak-meter[hidden] { display: none; }
+.speak-meter i { width: 3px; height: 100%; border-radius: 2px; background: var(--text); transform: scaleY(0.15); transition: transform 60ms linear; }
+@media (prefers-reduced-motion: reduce) { .speak-meter i { transition: none; } }
 
 .clip-input { margin-top: 12px; }
 .clip-input video {

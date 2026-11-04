@@ -63,6 +63,8 @@
             <div class="clip-actions">
               <button class="text-button clip-toggle" type="button" data-input="record">Record clip</button>
               <button class="text-button clip-toggle" type="button" data-input="upload">Attach clip</button>
+              <button class="text-button" id="speak-btn" type="button">Speak</button>
+              <span class="speak-meter" id="speak-meter" aria-hidden="true" hidden><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
             </div>
             <button class="outline-button" id="send-text-btn" type="button">Read</button>
           </div>
@@ -111,13 +113,13 @@
           <div class="history" id="intent-history"></div>
           <div class="confirm-actions">
             <button class="primary-button" id="confirm-btn" type="button">Confirm</button>
-            <label class="writer-choice">Writer
+            <label class="writer-choice" style="display:none">Writer
               <select id="writer-select" name="writer" autocomplete="off">
                 <option value="fine_tuned" selected>Fine-tuned</option>
                 <option value="untrained">Untrained</option>
               </select>
             </label>
-            <button class="text-button" id="edit-intent-btn" type="button">Edit JSON</button>
+            <button class="text-button" id="edit-intent-btn" type="button" style="display:none">Edit JSON</button>
             <span class="round" id="round-label"></span>
           </div>
           <p class="error" id="intent-error" role="status" aria-live="polite"></p>
