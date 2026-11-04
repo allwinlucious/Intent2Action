@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Serves base Muse Glimmer 30B with the three published adapters, straight from Hugging Face, on any GPU host with
-# about 40 GB of GPU memory and CUDA >= 13 (RunPod, Modal, a workstation):
-#   bash runpod/serve_from_hf.sh            # then: OpenAI-compatible API on http://127.0.0.1:8000/v1
+# Serves base Muse Glimmer 30B with the three published adapters, straight from Hugging Face, on a GPU pod with about
+# 40 GB of GPU memory, CUDA >= 13 and a writable /workspace (runpod/setup.sh installs there; e.g. a RunPod PyTorch pod):
+#   bash runpod/serve_from_hf.sh            # then: OpenAI-compatible API on the pod's http://127.0.0.1:8000/v1
 # Model names: G0 (base), G1d (program writer and recovery), G1e (+ push experience), G1b (program writer).
-# Point the panel at it from the robot host:  LLM_BASE_URL=http://<host>:8000/v1 LLM_API_KEY=unused make ui-fake
+# The server listens on the pod's localhost only. From your machine: ssh -N -L 8000:127.0.0.1:8000 -p <port> root@<pod>,
+# then: make ui-models (the demo panel with a simulated robot, asking these models).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT=${ROOT:-/workspace/train}

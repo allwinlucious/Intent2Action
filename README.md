@@ -70,8 +70,9 @@ ssh -N -L 8000:127.0.0.1:8000 -p <port> root@<pod>    # on your machine: the ser
 make ui-models                                        # the panel (simulated robot), asking the real models
 ```
 
-**3. Check the numbers:** `make test` (346 unit tests, about a minute) and `make tables` (rebuilds every result table
-from the published data in [`results/`](results)).
+**3. Check the numbers:** `make test` (346 unit tests, about a minute) and `make tables` (rebuilds the main results
+tables, the planner and physics success rates, from the published data in [`results/`](results); the rest are in
+[learning_results.md](docs/designs/learning_results.md), with their source files).
 
 **4. The full stack**, with the robot software in Docker and Isaac Sim physics: [docs/REPRODUCE.md](docs/REPRODUCE.md).
 
