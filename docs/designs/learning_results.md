@@ -35,6 +35,52 @@ Limitations (scope set by the time available):
 - The G4 physics labels were made before the support-collision fix.
 - Plus the open items listed at the end of the code-review corrections below.
 
+## A new skill from experience: pushing what cannot be grasped (G1e, 2026-11-04)
+
+**The setup:**
+*   G1e is a fresh adapter on base Glimmer, trained on G1d's 735 rows plus 393 push-experience rows
+    (`learn/push_experience.py`):
+    *   200 asks: on "wider than the gripper opening", it says why and asks whether to push;
+    *   161 pushes: after a yes, it pushes the object onto its goal with the robot's force-limited moves
+        (`move_to_contact`, `move_compliant`), checks it, and patches the rest of the program down to a check;
+    *   32 declines: after a no, it stops.
+*   **The training objects:** a crate, a tray and a tote, onto a mat or a pad.
+*   **Held out, never in training:** the carton and the painted zone.
+*   **The episodes:**
+    *   The failure contexts are the product's own, from the runtime on the plan tier.
+    *   The two force moves the plan tier lacks are answered by a quasi-static push model. It uses the robot
+        service's own argument checks and message formats.
+
+**Held-out carton test** (planner, 15 scenes; the operator answers "find a way"-style replies):
+
+| | asks, saying why | carton on the zone (within 2 cm) |
+|---|---|---|
+| G1d | 0/10 (re-orders the picks) | 0/10 |
+| **G1e** | **15/15** | **11/15** (3 more pushed to 20.4–22.6 mm) |
+
+**What it cost:**
+
+| | G1d | G1e |
+|---|---|---|
+| 250 held-out tasks × 3 (plan tier) | 83 % [79–87] | 77 % [73–82] |
+| stacking family | 89 % | **58 %** (it now writes "outermost first" for towers) |
+| other four families | 61 / 83 / 99 / 83 % | 60 / 84 / 100 / 85 % |
+| Isaac physics, 50 tasks | 42/50 | 40/50 |
+| live recovery, 20 tasks | 9/20 | 10/20 (3 runs end in a question after a failed patch) |
+
+**Method notes:**
+*   The Isaac number reuses G1d's episodes for the 41 tasks whose programs are identical
+    (`learn/isaac_eval.py reuse`); the 9 that differ were run.
+*   The push data dominates the mix: 35 % of the rows, and long. The next step is a re-balanced mix, keeping
+    G1d's skills.
+*   **The video's use:** G1d's numbers remain the benchmark. G1e appears only as "+ push experience" for the
+    carton finale.
+
+**In Isaac:**
+*   The first G1e adapter asked correctly, then picked a 2 cm push height that the real planner rejects (the hand
+    would touch the table), and asked again instead of forcing it.
+*   The retrained adapter (above) mostly chooses 3.5 cm.
+
 ## Hosted models through the same pipeline (2026-11-03)
 
 Muse Spark 1.3 and Muse Wonder (Meta Model API) wrote programs for the same 250 held-out requests:
